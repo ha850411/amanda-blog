@@ -58,3 +58,19 @@ test-coverage:
 .PHONY: composer-update
 composer-update:
 	$(COMPOSE_CMD) exec $(APP_SERVICE) composer update
+
+# Run php artisan migrate
+.PHONY: migrate
+migrate:
+	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan migrate
+
+# Run php artisan migrate:refresh
+.PHONY: migrate-refresh
+migrate-refresh:
+	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan migrate:refresh
+
+# Run php artisan migrate:refresh --seed
+.PHONY: migrate-refresh-seed
+migrate-refresh-seed:
+	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan migrate:refresh --seed
+
