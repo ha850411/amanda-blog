@@ -1,0 +1,75 @@
+services:
+  service:
+    image: "${APP_IMAGE}:${PHP_VERSION}-fpm"
+    build:
+      context: ../.
+      dockerfile: Dockerfile
+      args:
+        PHP_VERSION: ${PHP_VERSION}
+        COMPOSER_VERSION: ${COMPOSER_VERSION}
+    environment:
+      XDEBUG_MODE: ${XDEBUG_MODE:-off}
+      TZ: Asia/Taipei
+    volumes:
+      # 專案原始碼（與 Nginx 共用）
+      - ../../.:/var/www/html:delegated
+      # 將本地 PHP 設定掛到 FPM 的 conf.d
+      - ../php/local.ini:/usr/local/etc/php/conf.d/99-local.ini:ro
+      # 將 Xdebug 設定掛到 FPM 的 conf.d（非 CLI 路徑）
+      - ../php/docker-php-ext-xdebug.ini:/usr/local/etc/php/conf.d/20-xdebug.ini:ro
+    # PHP-FPM 不對外開埠，由 Nginx 代理
+    working_dir: /var/www/html
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - web-network
+
+  nginx:
+    image: nginx:1.25
+    ports:
+      - "${APP_PORT}:80"
+    volumes:
+      - ../../.:/var/www/html:ro
+      - ../nginx/conf.d/laravel.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - service
+    networks:
+      - web-network
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: Asia/Taipei
+    ports:
+      - "${MYSQL_PORT}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: --sql-mode="STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+    networks:
+      - web-network
+
+  redis:
+    image: redis:7.0
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - web-network
+
+volumes:
+  mysql-data:
+  redis-data:
+
+networks:
+  web-network:
+    name: ${NETWORK_NAME}
+    ipam:
+      config:
+        - subnet: ${NETWORK_SUBNET}
+          gateway: ${NETWORK_GATEWAY}
