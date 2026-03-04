@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="{{ asset('css/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ asset('css/fontawesome.min.css') }}">
     <link rel="stylesheet" href="{{ asset('css/admin.css') }}">
+    @yield('style')
 </head>
 <body class="{{ $bodyClass ?? '' }}">
     <div id="app">
