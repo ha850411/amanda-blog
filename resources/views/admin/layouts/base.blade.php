@@ -18,6 +18,7 @@
     <script src="{{ asset('js/vue/vue.global.min.js') }}"></script>
     <script src="{{ asset('js/bootstrap.bundle.min.js') }}"></script>
     <script src="{{ asset('js/axios/axios.min.js') }}"></script>
+    <script src="{{ asset('js/sweetalert2/sweetalert2.min.js') }}"></script>
     <script>
         axios.defaults.headers.common['X-CSRF-TOKEN'] = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
