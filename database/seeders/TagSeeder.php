@@ -19,42 +19,49 @@ class TagSeeder extends Seeder
             'id' => 1,
             'name' => '台中美食',
             'parent_id' => 0,
+            'sort' => 1,
         ]);
 
         Tag::create([
             'id' => 2,
             'name' => '牛排館',
             'parent_id' => 1,
+            'sort' => 1,
         ]);
 
         Tag::create([
             'id' => 3,
             'name' => '火鍋店',
             'parent_id' => 1,
+            'sort' => 2,
         ]);
 
         Tag::create([
             'id' => 4,
             'name' => '咖啡店',
             'parent_id' => 1,
+            'sort' => 3,
         ]);
 
         Tag::create([
             'id' => 5,
             'name' => '早午餐',
             'parent_id' => 1,
+            'sort' => 4,
         ]);
 
         Tag::create([
             'id' => 6,
             'name' => '宅配商品',
             'parent_id' => 0,
+            'sort' => 2,
         ]);
 
         Tag::create([
             'id' => 7,
             'name' => '采耳體驗',
             'parent_id' => 0,
+            'sort' => 3,
         ]);
     }
 }

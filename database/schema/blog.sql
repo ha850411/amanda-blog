@@ -17,6 +17,7 @@ CREATE TABLE `tag` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(300) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '標籤名稱',
   `parent_id` int unsigned NOT NULL DEFAULT '0',
+  `sort` int unsigned NOT NULL DEFAULT '0' COMMENT '排序, 由小到大',
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`)

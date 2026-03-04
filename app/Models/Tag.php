@@ -16,5 +16,11 @@ class Tag extends Model
     protected $fillable = [
         'name',
         'parent_id',
+        'sort',
     ];
+
+    public function children()
+    {
+        return $this->hasMany(Tag::class, 'parent_id', 'id')->orderBy('sort', 'asc');
+    }
 }

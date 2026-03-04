@@ -114,9 +114,6 @@
     height: 100%;
     object-fit: cover;
 }    
-.table .btn-sm:nth-child(2){
-    margin-left: 6px;
-}
 td{
     vertical-align: middle;
 }
@@ -153,6 +150,42 @@ td{
     background-color: #fff;
     margin: 50px auto;
 }
+/* ===== Tag Drag & Drop ===== */
+.tag-row-dragging {
+    opacity: 0.4;
+    background-color: #f8f9fa;
+}
+.tag-row-dragover {
+    border-top: 3px solid #0d6efd;
+}
+.drag-handle {
+    cursor: grab;
+}
+.drag-handle:active {
+    cursor: grabbing;
+}
+.tag-badge {
+    cursor: grab;
+    transition: opacity 0.15s, transform 0.15s;
+    user-select: none;
+}
+.tag-badge:active {
+    cursor: grabbing;
+    opacity: 0.5;
+}
+.tag-badge .drag-handle-icon {
+    opacity: 0.5;
+    font-size: 0.75em;
+}
+.tag-badge .remove-icon {
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+.tag-badge .remove-icon:hover {
+    opacity: 1;
+}
+
 @media screen and (max-width: 767px) {
     .table .btn-sm:nth-child(2){
         margin-left: 0;

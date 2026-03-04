@@ -73,7 +73,7 @@
                     {{-- 檢視模式 --}}
                     <div v-if="!editing.about" class="d-flex align-items-center">
                         <div class="me-4 flex-shrink-0">
-                            <img :src="avatarPreview || 'https://picsum.photos/80/80?random=2'"
+                            <img :src="avatarPreview"
                                  class="rounded-circle border"
                                  alt="頭像"
                                  style="width: 80px; height: 80px; object-fit: cover;">
@@ -185,7 +185,9 @@ const app = Vue.createApp({
                         showConfirmButton: false,
                         timer: 1500
                     });
-                    this.$refs.headerAvatar.src = this.avatarPreview;
+                    if (section === 'about') {
+                        this.$refs.headerAvatar.src = this.avatarPreview;
+                    }
                 })
                 .catch(error => {
                     this.showError(error.response.data.message);
