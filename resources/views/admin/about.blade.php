@@ -126,8 +126,7 @@ const app = Vue.createApp({
                 title: false,
                 about: false,
             },
-            amazonUrl: '{{ $amazonUrl }}',
-            avatarPreview: '{{ $amazonUrl . '/' . $about->picture }}',
+            avatarPreview: '{{ $about->picture }}',
             form: {
                 title: @json($about->title ?? ''),
                 subtitle: @json($about->sub_title ?? ''),

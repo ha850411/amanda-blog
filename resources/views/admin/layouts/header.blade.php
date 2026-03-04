@@ -3,6 +3,6 @@
         <i class="fa-solid fa-bars"></i>
     </div>
     <div class="user">
-        <img ref="headerAvatar" src="{{ $amazonUrl }}/{{ $about->picture }}">
+        <img ref="headerAvatar" src="{{ $about->picture }}">
     </div>
 </div>
