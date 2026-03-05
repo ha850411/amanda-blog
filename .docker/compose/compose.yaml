@@ -24,6 +24,7 @@ services:
 
   nginx:
     image: nginx:alpine
+    container_name: ${COMPOSE_PROJECT_NAME}-nginx
     ports:
       - "${APP_PORT:-8091}:80"
     volumes:
