@@ -3,84 +3,57 @@
 set -euo pipefail # 啟用更嚴格的錯誤檢查
 
 # workspace
-WORKSPACE="/workspace"
-ENV_PATH="$WORKSPACE/chaohan-env"
-CONFIG_FILE="$WORKSPACE/chaohan-nginx/nginx/conf.d/default.conf"
+WORKSPACE="/Volumes/workspace/"
+SYSTEM_FOLDER="$WORKSPACE/amanda-blog-system"
+ENV_PATH="$SYSTEM_FOLDER/app-env"
+CONFIG_FILE="$SYSTEM_FOLDER/system/nginx/upstream/active-upstream.conf"
+GITHUB_REPO="https://github.com/ha850411/amanda-blog.git"
 
 # 移動到工作目錄
 cd $WORKSPACE
 
 # 使用兼容 macOS 的 grep 方式提取端口
-PORT=$(grep -o "proxy_pass http://[^:]*:[0-9]*" "$CONFIG_FILE" | grep -o "[0-9]*$" | head -1)
+CURRENT_SERVICE=$(awk '/server / {print $2}' "$CONFIG_FILE" | tr -d ';' | head -1)
 
-echo "當前配置的 port 為: $PORT"
+echo "當前配置的 service 為: $CURRENT_SERVICE"
 
-# 若 port 為 8080, 則將其改為 8081, 反之
-if [ "$PORT" -eq 8000 ]; then
-    NEW_PORT=8001
-else
-    NEW_PORT=8000
+NEW_APP_ENV="green"
+NEW_PORT=8801
+# 若 CURRENT_SERVICE 中找不到 blue 的字串，本次就以 blue 為 nginx 名稱部署應用程式
+if [[ $CURRENT_SERVICE != *"blue"* ]]; then
+    NEW_APP_ENV="blue"
+    NEW_PORT=8802
 fi
 
-echo "NEW_PORT: $NEW_PORT"
-
-OLD_FLODER="$WORKSPACE/chaohan-$PORT"
-NEW_FLODER="$WORKSPACE/chaohan-$NEW_PORT"
-ENTRYPOINT_FILE="$NEW_FLODER/docker/entrypoint.sh"
-DOCKER_COMPOSE_FILE="$NEW_FLODER/docker/docker-compose.yml"
+echo "NEW_APP_ENV: $NEW_APP_ENV"
+NEW_FLODER="amanda-blog-$NEW_APP_ENV"
+NEW_IMAGE_NAME="amanda-blog-$NEW_APP_ENV"
+NEW_NGINX_NAME="amanda-blog-nginx-$NEW_APP_ENV"
 
 # 若存在 chaohan-temp 目錄，則刪除它
 [ -d $NEW_FLODER ] && sudo rm -rf $NEW_FLODER
 
 # 下載專案
-git clone https://${GITHUB_TOKEN}@github.com/ha850411/eason-project-chaohan.git -b master $NEW_FLODER
+git clone $GITHUB_REPO -b master $NEW_FLODER
 
-# 替換 .env.example 為 .env
-cp $NEW_FLODER/.env.example $NEW_FLODER/.env
+# copy env
+cp $ENV_PATH/.env $NEW_FLODER/.env 
+cp $ENV_PATH/.env.docker $NEW_FLODER/.docker/compose/.env
 
-# 從 laravel.env 檔案讀取每一行並直接替換到 .env 中
-while IFS= read -r line; do
-    # 跳過空行和註解行
-    if [[ ! -z "$line" && ! "$line" =~ ^# ]]; then
-        # 提取 key (= 之前的部分)
-        key=$(echo "$line" | cut -d'=' -f1)
-        
-        # 轉義特殊字符用於 sed (特別處理 / 和 &)
-        escaped_line=$(printf '%s\n' "$line" | sed 's/[\/&]/\\&/g')
-        
-        # 如果 .env 中存在這個 key，就替換整行 (包括空值的情況)
-        if grep -q "^$key=" $NEW_FLODER/.env; then
-            # 使用不同的分隔符來避免 URL 中的斜線問題
-            sed -i "s|^$key=.*|$escaped_line|" $NEW_FLODER/.env
-        else
-            # 如果不存在，就在檔案末尾新增
-            echo "$line" >> $NEW_FLODER/.env
-        fi
-    fi
-done < $ENV_PATH/.env
-
-echo ".env 檔案已更新完成"
-
-# 複製 .env 檔案
-cp $ENV_PATH/docker.env $NEW_FLODER/docker/.env
-
-# 更改容器名稱避免重啟容器而不是新建
-echo "修改容器名稱: 'sed -i \"s/chaohan-web/chaohan-web-$NEW_PORT/g\" $NEW_FLODER/docker/.env'"
-sed -i "s/chaohan-web/chaohan-web-$NEW_PORT/g" $NEW_FLODER/docker/.env
-
-# 修改 /chaohan-temp/docker/entrypoint.sh 中的 port 改為 $NEW_PORT
-sed -i "s/$PORT/$NEW_PORT/g" $ENTRYPOINT_FILE
-sed -i "s/$PORT:$PORT/$NEW_PORT:$NEW_PORT/g" $DOCKER_COMPOSE_FILE
+# 替換並修改 docker env 的 nginx name
+sed -i.bak "s/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=$NEW_IMAGE_NAME/" $NEW_FLODER/.docker/compose/.env
+sed -i.bak "s/^APP_IMAGE=.*/APP_IMAGE=$NEW_IMAGE_NAME/" $NEW_FLODER/.docker/compose/.env
+sed -i.bak "s/^NGINX_NAME=.*/NGINX_NAME=$NEW_NGINX_NAME/" $NEW_FLODER/.docker/compose/.env
+# 替換並修改 docker env 的 port
+sed -i.bak "s/^APP_PORT=.*/APP_PORT=$NEW_PORT/" $NEW_FLODER/.docker/compose/.env
+# 刪除 sed 產生的備份檔
+rm -f $NEW_FLODER/.docker/compose/.env.bak
 
 # 啟動容器
-echo "build docker image: 'cd $NEW_FLODER/docker && sudo docker compose build'"
-cd $NEW_FLODER/docker && sudo docker compose build
+echo "啟動新容器: 'cd $NEW_FLODER && make up'"
+cd $NEW_FLODER && make build && make up && make composer-install
 
-# 啟動新容器
-echo "啟動新容器: 'cd $NEW_FLODER/docker && sudo docker compose up -d'"
-cd $NEW_FLODER/docker && sudo docker compose up -d
-
-echo "進入 chaohan-nginx 檢查是否啟動"
+# 檢查容器是否啟動成功(回應200)
 HEALTH_STATUS=""
 RETRY_COUNT=1
 
@@ -89,7 +62,7 @@ while [ "$HEALTH_STATUS" != "ok" ] && [ $RETRY_COUNT -lt 11 ]; do
     echo "嘗試第 $RETRY_COUNT 次檢測 $NEW_PORT port 的健康狀態..."
     
     # 呼叫健康檢查 API 並取得回應內容
-    HEALTH_STATUS=$(cd $WORKSPACE/chaohan-nginx && sudo docker compose exec nginx curl -s app:$NEW_PORT/api/health 2>/dev/null || echo "error")
+    HEALTH_STATUS=$(cd $SYSTEM_FOLDER/system && sudo docker compose exec nginx curl -s http://$NEW_NGINX_NAME/api/health 2>/dev/null || echo "error")
     
     # 移除可能的空白字符
     HEALTH_STATUS=$(echo "$HEALTH_STATUS" | tr -d '[:space:]')
@@ -112,28 +85,36 @@ fi
 
 echo "健康檢查通過，API 回應: '$HEALTH_STATUS'"
 
-# 切換 nginx 配置
-echo "切換 nginx port: 'sed -i \"s/$PORT/$NEW_PORT/g\" $CONFIG_FILE'"
-sed -i "s/$PORT/$NEW_PORT/g" $CONFIG_FILE
 
-# 進入 chaohan-nginx 容器內 reload
-echo "重啟 nginx 配置: 'cd $WORKSPACE/chaohan-nginx && sudo docker compose exec nginx nginx -s reload'"
-cd $WORKSPACE/chaohan-nginx && sudo docker compose exec nginx nginx -s reload
+# 切換 nginx 配置
+sed -i.bak "s/server .*/server $NEW_NGINX_NAME;/" $CONFIG_FILE
+rm -f "$CONFIG_FILE.bak"
+
+# 重啟 nginx
+cd $SYSTEM_FOLDER/system && sudo docker compose exec nginx nginx -s reload
 
 # 停止舊容器
-echo "停止舊容器: 'cd $OLD_FLODER/docker && sudo docker compose down'"
-cd $OLD_FLODER/docker && sudo docker compose down
+if [ "$NEW_APP_ENV" == "green" ]; then
+    OLD_FOLDER="$WORKSPACE/amanda-blog-blue"
+else
+    OLD_FOLDER="$WORKSPACE/amanda-blog-green"
+fi
 
-# 刪除舊 image
-echo "刪除舊 image: 'sudo docker rmi chaohan-web-$PORT-app'"
-sudo docker rmi chaohan-web-$PORT-app || true
+if [ -d "$OLD_FOLDER" ]; then
+    echo "停止舊容器: cd $OLD_FOLDER && make down"
+    cd $OLD_FOLDER && make down
+    # 刪除舊目錄
+    sudo rm -rf $OLD_FOLDER
+else
+    echo "舊目錄 $OLD_FOLDER 不存在，跳過停止舊容器"
+fi
 
-cd $WORKSPACE
+# 若 $WORKSPACE/amanda-blog 存在（首次部署前的原始目錄），則停止並刪除
+if [ -d "$WORKSPACE/amanda-blog" ]; then
+    echo "偵測到原始 amanda-blog 目錄，停止容器並刪除..."
+    cd $WORKSPACE/amanda-blog && make down || true
+    sudo rm -rf $WORKSPACE/amanda-blog
+    echo "原始 amanda-blog 目錄已刪除"
+fi
 
-# 刪除舊版本備份
-[ -d $OLD_FLODER ] && sudo rm -rf $OLD_FLODER
-
-echo "部署完成，新的 chaohan 專案已經啟動在 port: $NEW_PORT"
-
-# 將當前 active 的端口建立軟連結
-ln -sfn $NEW_FLODER /workspace/chaohan-active
+echo "部署完成，新的專案已經啟動"
