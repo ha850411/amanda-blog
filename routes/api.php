@@ -3,6 +3,10 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api;
 
+Route::get('health', function () {
+    return "ok";
+})->name('health');
+
 Route::post('/admin/login', [Api\LoginController::class, 'handleLogin'])
     ->name('admin.handleLogin');
 
