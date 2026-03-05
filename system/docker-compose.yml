@@ -1,0 +1,43 @@
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+    restart: always
+    environment:
+      TZ: Asia/Taipei
+    networks:
+      - system-network
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chaohan-jenkins
+    ports:
+      - "${JENKINS_PORT}:8080"
+      - "${JENKINS_AGENT_PORT}:50000"
+    volumes:
+      - jenkins-data:/var/jenkins_home
+      - /workspace:/workspace # 掛載工作目錄
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      TZ: Asia/Taipei
+    networks:
+      - system-network
+    restart: always
+
+volumes: # 在頂層定義 Volume
+  jenkins-data:
+    driver: local
+
+networks:
+  system-network:
+    name: ${NETWORK_NAME}
+    ipam:
+      config:
+        - subnet: ${NETWORK_SUBNET}
+          gateway: ${NETWORK_GATEWAY}
