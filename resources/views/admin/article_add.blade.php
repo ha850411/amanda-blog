@@ -20,11 +20,15 @@
             <h4>文章管理-新增/編輯</h4>
             <div class="p-3">
                 <div class="mt-2">
-                    <label for="exampleFormControlInput1" class="form-label">標題內容</label>
+                    <label for="exampleFormControlInput1" class="form-label">
+                        <span class="text-danger">*</span>標題內容
+                    </label>
                     <input type="text" class="form-control" placeholder="請輸入您的標題內容" v-model="form.title">
                 </div>
                 <div class="mt-2">
-                    <label class="form-label">文章標籤</label>
+                    <label class="form-label">
+                        <span class="text-danger">*</span>文章標籤
+                    </label>
                     <template v-if="form.selectedTags.length > 0">
                         <div class="mb-2">
                             <button type="button" class="btn btn-success btn-md me-2 mb-2" v-for="(tag, index) in form.selectedTags" :key="tag.id" @click="removeTag(index)">
@@ -50,7 +54,9 @@
                     </div>
                 </div>
                 <div class="mt-2">
-                    <label class="form-label">文章狀態</label>
+                    <label class="form-label">
+                        <span class="text-danger">*</span>文章狀態
+                    </label>
                     <select class="form-select mb-3" v-model="form.status">
                         <option selected>請選擇文章狀態</option>
                         <option value="1">公開</option>
@@ -60,12 +66,16 @@
                 </div>
                 <template v-if="form.status === '2'">
                     <div class="mt-2">
-                        <label class="form-label">密碼設定</label>
+                        <label class="form-label">
+                            <span class="text-danger">*</span>密碼設定
+                        </label>
                         <input type="text" class="form-control" placeholder="請輸入您的密碼" v-model="form.password">
                     </div>
                 </template>
                 <div class="mt-2">
-                    <label class="form-label">文章內容</label>
+                    <label class="form-label">
+                        <span class="text-danger">*</span>文章內容
+                    </label>
                     <div class="position-relative" style="min-height: 50px;">
                         {{-- ckeditor loading 效果 --}}
                         <div v-if="!initEditor" class="position-absolute top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center bg-light" style="z-index: 10; border: 1px solid #ccced1; border-radius: 4px;">
@@ -76,13 +86,13 @@
                         </div>
                         {{-- ckeditor content --}}
                         <div class="main-container w-100" :style="{ opacity: initEditor ? 1 : 0, transition: 'opacity 0.3s ease' }">
-                            <div id="editor" v-html="form.content"></div>
+                            <div id="editor">@{{ form.content }}</div>
                         </div>
                     </div>
                 </div>
                 <div class="mt-3 text-center">
-                    <button type="button" class="btn btn-secondary" onclick="cancel()">取消</button>
-                    <button type="button" class="btn btn-primary" onclick="confirm()">確認</button>
+                    <button type="button" class="btn btn-secondary me-1" @click="cancel()">取消</button>
+                    <button type="button" class="btn btn-primary" @click="confirm()">確認</button>
                 </div>
             </div>
         </div>
@@ -91,79 +101,36 @@
 
 @section('scripts')
 <link rel="stylesheet" href="{{ asset('js/ckeditor5/ckeditor5.css') }}">
+<script src="{{ asset('js/ckeditor5/translations/zh.umd.js') }}"></script>
 <script src="{{ asset('js/ckeditor5/ckeditor5.umd.js') }}"></script>
+<script src="{{ asset('js/ckeditor5/main.js') }}"></script>
 <script>
-const { 
-    ClassicEditor, 
-    Essentials, 
-    Heading,
-    Bold, Italic, Underline, Strikethrough,
-    FontColor, FontBackgroundColor,
-    Link,
-    List, TodoList,
-    Alignment,
-    BlockQuote,
-    Image, ImageUpload, ImageInsert, ImageToolbar, ImageCaption, ImageStyle, ImageResize, LinkImage, SimpleUploadAdapter,
-    Table, TableToolbar,
-    SourceEditing
-} = CKEDITOR;
-
 const app = Vue.createApp({
     mixins: [baseMixin],
     data() {
         return {
             tags: @json($tags),
+            article: @json($article),
             allTags: [],
             form: {
                 title: '',
                 selectedTags: [],
                 status: 1,
                 password: '',
-                content: 'test',
+                content: '',
             },
             searchTag: '',
             showTagDropdown: false,
             availableTags: [],
             initEditor: false,
+            route: {
+                article: '{{ route('admin.article') }}',
+                submit: '{{ route('api.admin.article.store') }}',
+            }
         }
     },
     mounted() {
         this.init();
-        ClassicEditor
-            .create( document.querySelector( '#editor' ), {
-                licenseKey: 'GPL', 
-                plugins: [ 
-                    Essentials, Heading, Bold, Italic, Underline, Strikethrough,
-                    FontColor, FontBackgroundColor, Link, List, TodoList,
-                    Alignment, BlockQuote, 
-                    Image, ImageUpload, ImageInsert, ImageToolbar, ImageCaption, ImageStyle, ImageResize, LinkImage, SimpleUploadAdapter,
-                    Table, TableToolbar, SourceEditing
-                ],
-                toolbar: [
-                    'undo', 'redo', '|',
-                    'heading', '|',
-                    'bold', 'italic', 'underline', 'strikethrough', '|',
-                    'fontColor', 'fontBackgroundColor', '|',
-                    'alignment', 'bulletedList', 'numberedList', 'todoList', '|',
-                    'link', 'uploadImage', 'insertTable', 'blockQuote', '|',
-                    'sourceEditing'
-                ],
-                simpleUpload: {
-                    uploadUrl: '/api/image/upload',
-                    headers: {
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-                    }
-                }
-            } )
-            .then( editor => {
-                console.log( '編輯器初始化成功！', editor );
-                // 您可以將 editor 實體儲存起來，方便後續取值
-                window.myEditor = editor;
-                this.initEditor = true;
-            } )
-            .catch( error => {
-                console.error( '編輯器初始化發生錯誤：', error );
-            } );
     },
     watch: {
     },
@@ -195,6 +162,23 @@ const app = Vue.createApp({
                     });
                 }
             });
+            // init form
+            if (this.article) {
+                this.form.title = this.article.title;
+                this.form.selectedTags = this.article.tags;
+                this.form.status = this.article.status;
+                this.form.password = this.article.password;
+                this.form.content = this.article.content;
+            }
+            // init ckeditor
+            this.$nextTick(() => {
+                InitCKEditor.init('#editor').then(() => {
+                    this.initEditor = true;
+                    if (this.form.content) {
+                        window.myEditor.setData(this.form.content);
+                    }
+                });
+            });
         },
         hideTagDropdown() {
             setTimeout(() => {
@@ -209,6 +193,60 @@ const app = Vue.createApp({
         },
         removeTag(index) {
             this.form.selectedTags.splice(index, 1);
+        },
+        cancel() {
+            window.location.href = this.route.article;
+        },
+        async confirm() {
+            if (!this.checkForm()) return;
+            axios.post(this.route.submit, {
+                id: this.article?.id ?? null,
+                title: this.form.title,
+                selectedTags: this.form.selectedTags,
+                status: this.form.status,
+                password: this.form.password,
+                content: window.myEditor.getData(),
+            })
+                .then(response => {
+                    Swal.fire({
+                        icon: 'success',
+                        title: this.article ? '更新成功' : '新增成功',
+                        showConfirmButton: false,
+                        timer: 1500
+                    });
+                    this.cancel();
+                })
+                .catch(error => {
+                    this.showError(error.response.data.message);
+                });
+        },
+        checkForm() {
+            if (this.form.title === '') {
+                this.showError('請輸入文章標題');
+                return false;
+            }
+            if (this.form.status === '') {
+                this.showError('請選擇文章狀態');
+                return false;
+            }
+            if (this.form.status === '2' && this.form.password === '') {
+                this.showError('請輸入文章密碼');
+                return false;
+            }
+            if (window.myEditor.getData() === '') {
+                this.showError('請輸入文章內容');
+                return false;
+            }
+            return true;
+        },
+        showError(message) {
+            Swal.fire({
+                icon: 'error',
+                title: '錯誤',
+                text: message,
+                showConfirmButton: false,
+                timer: 1500
+            });
         }
     },
 });

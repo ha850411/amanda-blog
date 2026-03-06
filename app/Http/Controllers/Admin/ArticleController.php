@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Models\Tag;
+use App\Models\Article;
 
 class ArticleController extends Controller
 {
@@ -31,14 +32,17 @@ class ArticleController extends Controller
     {
         return view('admin.article_add')->with([
             'active' => 'article',
+            'article' => null
         ]);
     }
 
     public function editArticle($id)
     {
+        $article = Article::with('tags')->find($id);
+
         return view('admin.article_add')->with([
             'active' => 'article',
-            'id' => $id
+            'article' => $article
         ]);
     }
 }
