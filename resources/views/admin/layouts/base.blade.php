@@ -22,6 +22,8 @@
     <script src="{{ asset('js/sweetalert2/sweetalert2.min.js') }}"></script>
     <script>
         axios.defaults.headers.common['X-CSRF-TOKEN'] = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
+        axios.defaults.withCredentials = true;
 
         const baseMixin = {
             data() {

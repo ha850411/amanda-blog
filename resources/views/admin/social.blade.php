@@ -84,8 +84,8 @@ const app = Vue.createApp({
     data() {
         return {
             route: {
-                list: '{{ route("api.admin.social.index") }}',
-                update: '{{ route("api.admin.social.update", ["id" => ":id"]) }}',
+                list: '{{ route("api.social.index") }}',
+                update: '{{ route("api.social.update", ["id" => ":id"]) }}',
             },
             list: [],
             loading: false,

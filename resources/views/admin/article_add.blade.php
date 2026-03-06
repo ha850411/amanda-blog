@@ -137,7 +137,7 @@
                     initEditor: false,
                     route: {
                         article: '{{ route('admin.article') }}',
-                        submit: '{{ route('api.admin.article.store') }}',
+                        submit: '{{ route('api.article.store') }}',
                     },
                     title: ''
                 }

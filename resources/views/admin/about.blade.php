@@ -136,7 +136,7 @@ const app = Vue.createApp({
             // 暫存原始值，取消時可還原
             formBackup: {},
             api: {
-                update: '{{ route('api.admin.updateAbout') }}',
+                update: '{{ route('api.updateAbout') }}',
             }
         }
     },

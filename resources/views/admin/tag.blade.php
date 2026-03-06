@@ -288,12 +288,12 @@ const app = Vue.createApp({
             try {
                 let res;
                 if (this.isEditMode) {
-                    res = await axios.put(`/api/admin/tag/${this.editingTagId}`, {
+                    res = await axios.put(`/api/tag/${this.editingTagId}`, {
                         name: this.form.name.trim(),
                         children: this.form.children,
                     });
                 } else {
-                    res = await axios.post('/api/admin/tag', {
+                    res = await axios.post('/api/tag', {
                         name: this.form.name.trim(),
                         children: this.form.children,
                     });
@@ -345,7 +345,7 @@ const app = Vue.createApp({
             this.submitting = true;
 
             try {
-                const res = await axios.delete(`/api/admin/tag/${this.deleteTarget.id}`);
+                const res = await axios.delete(`/api/tag/${this.deleteTarget.id}`);
 
                 if (res.data.success) {
                     this.tags = res.data.tags;
@@ -389,7 +389,7 @@ const app = Vue.createApp({
             this.sorting = true;
 
             try {
-                const res = await axios.post('/api/admin/tag/sort', {
+                const res = await axios.post('/api/tag/sort', {
                     id: id,
                     direction: direction,
                 });

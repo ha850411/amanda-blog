@@ -156,9 +156,9 @@
             data() {
                 return {
                     route: {
-                        list: '{{ route('api.admin.article.index') }}',
+                        list: '{{ route('api.article.index') }}',
                         edit: '{{ route('admin.article.edit', ':id') }}',
-                        delete: '{{ route('api.admin.article.destroy', ':id') }}',
+                        delete: '{{ route('api.article.destroy', ':id') }}',
                     },
                     condition: {
                         start: '',

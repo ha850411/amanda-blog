@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->get('router')
                 ->prefix('api')
                 ->name('api.')
+                ->middleware('api')
                 ->group(__DIR__ . '/../routes/api.php');
         },
     )

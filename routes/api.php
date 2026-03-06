@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api;
+use App\Http\Middleware\AdminMiddleware;
 
 Route::get('health', function () {
     return "ok";
@@ -10,29 +11,42 @@ Route::get('health', function () {
 Route::prefix('admin')->group(function () {
     Route::post('/login', [Api\LoginController::class, 'handleLogin'])
         ->name('admin.handleLogin');
-    Route::post('/about', [Api\AboutController::class, 'updateAbout'])
-        ->name('admin.updateAbout');
-    Route::post('/tag/sort', [Api\TagController::class, 'updateSort'])
-        ->name('admin.tag.updateSort');
-    Route::post('/tag', [Api\TagController::class, 'store'])
-        ->name('admin.tag.store');
-    Route::put('/tag/{id}', [Api\TagController::class, 'update'])
-        ->name('admin.tag.update');
-    Route::delete('/tag/{id}', [Api\TagController::class, 'destroy'])
-        ->name('admin.tag.destroy');
-    // 文章
-    Route::get('/article', [Api\ArticleController::class, 'index'])
-        ->name('admin.article.index');
-    Route::post('/article', [Api\ArticleController::class, 'store'])
-        ->name('admin.article.store');
-    Route::delete('/article/{id}', [Api\ArticleController::class, 'destroy'])
-        ->name('admin.article.destroy');
-    // 社群 icon
-    Route::get('/social', [Api\SocialController::class, 'index'])
-        ->name('admin.social.index');
-    Route::patch('/social/{id}', [Api\SocialController::class, 'update'])
-        ->name('admin.social.update');
 });
 
-Route::post('/image/upload', [Api\ImageController::class, 'upload'])
-    ->name('image.upload');
+Route::middleware(AdminMiddleware::class)->group(function () {
+    // 更新關於我
+    Route::post('/about', [Api\AboutController::class, 'updateAbout'])
+        ->name('updateAbout');
+    // 更新標籤排序
+    Route::post('/tag/sort', [Api\TagController::class, 'updateSort'])
+        ->name('tag.updateSort');
+    // 新增標籤
+    Route::post('/tag', [Api\TagController::class, 'store'])
+        ->name('tag.store');
+    // 更新標籤
+    Route::put('/tag/{id}', [Api\TagController::class, 'update'])
+        ->name('tag.update');
+    // 刪除標籤
+    Route::delete('/tag/{id}', [Api\TagController::class, 'destroy'])
+        ->name('tag.destroy');
+    // 新增文章
+    Route::post('/article', [Api\ArticleController::class, 'store'])
+        ->name('article.store');
+    // 刪除文章
+    Route::delete('/article/{id}', [Api\ArticleController::class, 'destroy'])
+        ->name('article.destroy');
+    // 更新社群 icon
+    Route::patch('/social/{id}', [Api\SocialController::class, 'update'])
+        ->name('social.update');
+    // 上傳圖片
+    Route::post('/image/upload', [Api\ImageController::class, 'upload'])
+        ->name('image.upload');
+});
+
+// 取得文章
+Route::get('/article', [Api\ArticleController::class, 'index'])
+    ->name('article.index');
+
+// 取得社群 icon
+Route::get('/social', [Api\SocialController::class, 'index'])
+    ->name('social.index');
