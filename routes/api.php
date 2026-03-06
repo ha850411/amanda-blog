@@ -24,3 +24,6 @@ Route::put('/admin/tag/{id}', [Api\TagController::class, 'update'])
 
 Route::delete('/admin/tag/{id}', [Api\TagController::class, 'destroy'])
     ->name('admin.tag.destroy');
+
+Route::post('/image/upload', [Api\ImageController::class, 'upload'])
+    ->name('admin.image.upload');

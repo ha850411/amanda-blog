@@ -58,15 +58,25 @@
                         <option value="3">隱藏</option>
                     </select>
                 </div>
-                <div class="mt-2" v-if="form.status === '2'">
-                    <label class="form-label">密碼設定</label>
-                    <input type="text" class="form-control" placeholder="請輸入您的密碼" v-model="form.password">
-                </div>
+                <template v-if="form.status === '2'">
+                    <div class="mt-2">
+                        <label class="form-label">密碼設定</label>
+                        <input type="text" class="form-control" placeholder="請輸入您的密碼" v-model="form.password">
+                    </div>
+                </template>
                 <div class="mt-2">
                     <label class="form-label">文章內容</label>
-                    <div class="main-container w-100">
-                        <div id="editor">
-                            <p>請輸入文字</p>
+                    <div class="position-relative" style="min-height: 50px;">
+                        {{-- ckeditor loading 效果 --}}
+                        <div v-if="!initEditor" class="position-absolute top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center bg-light" style="z-index: 10; border: 1px solid #ccced1; border-radius: 4px;">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">載入中...</span>
+                            </div>
+                            <span class="ms-2 text-secondary">編輯器載入中...</span>
+                        </div>
+                        {{-- ckeditor content --}}
+                        <div class="main-container w-100" :style="{ opacity: initEditor ? 1 : 0, transition: 'opacity 0.3s ease' }">
+                            <div id="editor" v-html="form.content"></div>
                         </div>
                     </div>
                 </div>
@@ -93,7 +103,7 @@ const {
     List, TodoList,
     Alignment,
     BlockQuote,
-    ImageUpload, ImageInsert,
+    Image, ImageUpload, ImageInsert, ImageToolbar, ImageCaption, ImageStyle, ImageResize, LinkImage, SimpleUploadAdapter,
     Table, TableToolbar,
     SourceEditing
 } = CKEDITOR;
@@ -107,13 +117,14 @@ const app = Vue.createApp({
             form: {
                 title: '',
                 selectedTags: [],
-                status: '',
+                status: 1,
                 password: '',
-                content: '',
+                content: 'test',
             },
             searchTag: '',
             showTagDropdown: false,
-            availableTags: []
+            availableTags: [],
+            initEditor: false,
         }
     },
     mounted() {
@@ -124,7 +135,8 @@ const app = Vue.createApp({
                 plugins: [ 
                     Essentials, Heading, Bold, Italic, Underline, Strikethrough,
                     FontColor, FontBackgroundColor, Link, List, TodoList,
-                    Alignment, BlockQuote, ImageUpload, ImageInsert,
+                    Alignment, BlockQuote, 
+                    Image, ImageUpload, ImageInsert, ImageToolbar, ImageCaption, ImageStyle, ImageResize, LinkImage, SimpleUploadAdapter,
                     Table, TableToolbar, SourceEditing
                 ],
                 toolbar: [
@@ -135,12 +147,19 @@ const app = Vue.createApp({
                     'alignment', 'bulletedList', 'numberedList', 'todoList', '|',
                     'link', 'uploadImage', 'insertTable', 'blockQuote', '|',
                     'sourceEditing'
-                ]
+                ],
+                simpleUpload: {
+                    uploadUrl: '/api/image/upload',
+                    headers: {
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    }
+                }
             } )
             .then( editor => {
                 console.log( '編輯器初始化成功！', editor );
                 // 您可以將 editor 實體儲存起來，方便後續取值
                 window.myEditor = editor;
+                this.initEditor = true;
             } )
             .catch( error => {
                 console.error( '編輯器初始化發生錯誤：', error );
