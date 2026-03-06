@@ -74,6 +74,9 @@
                                 </div>
                             </td>
                         </tr>
+                        <tr v-else-if="list.length === 0">
+                            <td colspan="5" class="text-center">無資料</td>
+                        </tr>
                         <tr v-else v-for="item in list" :key="item.id">
                             <td>@{{ formatDate(item.created_at) }}</td>
                             <td>@{{ item.title }}</td>
@@ -130,7 +133,7 @@
         </div>
     </div>
     {{-- modal --}}
-    <div class="model delete_model">
+    <div class="model" ref="delete_model">
         <div class="deletebox rounded shadow-lg bg-white text-center">
             <div class="rounded-top bg-light text-center p-2">
                 <div class="text-secondary fw-bolder">刪除</div>
@@ -138,8 +141,8 @@
             <div class="p-3">
                 <div>確認刪除此筆內容?</div>
                 <div class="mt-3">
-                    <button type="button" class="btn btn-secondary" onclick="cancel()">取消</button>
-                    <button type="button" class="btn btn-primary mt-2 mt-md-0" onclick="confirm()">確認</button>
+                    <button type="button" class="btn btn-secondary me-1" @click="modal('delete_model', 'hide')">取消</button>
+                    <button type="button" class="btn btn-primary mt-2 mt-md-0" @click="deleteArticle()">確認</button>
                 </div>
             </div>
         </div>
@@ -155,6 +158,7 @@
                     route: {
                         list: '{{ route('api.admin.article.index') }}',
                         edit: '{{ route('admin.article.edit', ':id') }}',
+                        delete: '{{ route('api.admin.article.destroy', ':id') }}',
                     },
                     condition: {
                         start: '',
@@ -168,6 +172,7 @@
                     perpage: 10,
                     totalPage: 1,
                     totalRows: 0,
+                    deleteId: null,
                 }
             },
             mounted() {
@@ -206,7 +211,8 @@
                     this.getList();
                 },
                 deletebox(id) {
-                    console.log("Delete article ID:", id);
+                    this.modal('delete_model');
+                    this.deleteId = id;
                 },
                 // 轉換成 Y/m/d H:i:s 格式
                 formatDate(date) {
@@ -223,6 +229,17 @@
                 edit(id) {
                     window.location.href = this.route.edit.replace(':id', id);
                 },
+                async deleteArticle() {
+                    try {
+                        const response = await axios.delete(this.route.delete.replace(':id', this.deleteId));
+                        this.getList();
+                        this.modal('delete_model', 'hide');
+                    } catch (error) {
+                        console.log(error);
+                    } finally {
+                        this.loading = false;
+                    }
+                }
             },
         });
         const vm = app.mount('#app');

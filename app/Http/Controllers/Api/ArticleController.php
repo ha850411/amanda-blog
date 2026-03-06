@@ -19,7 +19,7 @@ class ArticleController extends Controller
 
             $query = Article::query()->with('tags');
 
-            $articles = $query->orderBy('created_at', 'desc')
+            $articles = $query->orderBy('id', 'desc')
                 ->when($request->input('start'), function ($query) use ($request) {
                     $query->where('created_at', '>=', Carbon::parse($request->input('start'))->startOfDay());
                 })
@@ -93,5 +93,27 @@ class ArticleController extends Controller
                 'message' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * 刪除文章
+     */
+    public function destroy($id)
+    {
+        try {
+            DB::transaction(function () use ($id) {
+                $article = Article::findOrFail($id);
+                // 刪除文章與標籤的關聯
+                $article->tags()->detach();
+                // 刪除文章
+                $article->delete();
+            });
+        } catch (Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ]);
+        }
+        return response()->noContent();
     }
 }

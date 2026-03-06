@@ -26,8 +26,26 @@
         const baseMixin = {
             data() {
                 return {
-                    // isMenuOpen: false
+                    isNavActive: false,
                 }
+            },
+            mounted() {
+                this.isNavActive = window.innerWidth < 767;
+                this._resizeHandler = () => {
+                    this.isNavActive = window.innerWidth < 767;
+                };
+                window.addEventListener('resize', this._resizeHandler);
+            },
+            beforeUnmount() {
+                window.removeEventListener('resize', this._resizeHandler);
+            },
+            watch: {
+                isNavActive(val) {
+                    const navigation = document.querySelector('.navigation');
+                    const main = document.querySelector('.main');
+                    if (navigation) navigation.classList.toggle('active', val);
+                    if (main) main.classList.toggle('active', val);
+                },
             },
             methods: {
                 modal(modalRef, action = 'toggle') {
@@ -41,9 +59,9 @@
                         el.style.display = 'none';
                     }
                 },
-                // toggleMenu() {
-                //     this.isMenuOpen = !this.isMenuOpen;
-                // }
+                toggleMenu() {
+                    this.isNavActive = !this.isNavActive;
+                },
             }
         };
     </script>

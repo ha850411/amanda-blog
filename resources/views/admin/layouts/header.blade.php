@@ -1,5 +1,5 @@
 <div class="topbar">
-    <div class="toggle">
+    <div class="toggle" @click="toggleMenu">
         <i class="fa-solid fa-bars"></i>
     </div>
     <div class="user">

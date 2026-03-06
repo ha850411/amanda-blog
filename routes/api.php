@@ -20,10 +20,18 @@ Route::prefix('admin')->group(function () {
         ->name('admin.tag.update');
     Route::delete('/tag/{id}', [Api\TagController::class, 'destroy'])
         ->name('admin.tag.destroy');
+    // 文章
     Route::get('/article', [Api\ArticleController::class, 'index'])
         ->name('admin.article.index');
     Route::post('/article', [Api\ArticleController::class, 'store'])
         ->name('admin.article.store');
+    Route::delete('/article/{id}', [Api\ArticleController::class, 'destroy'])
+        ->name('admin.article.destroy');
+    // 社群 icon
+    Route::get('/social', [Api\SocialController::class, 'index'])
+        ->name('admin.social.index');
+    Route::patch('/social/{id}', [Api\SocialController::class, 'update'])
+        ->name('admin.social.update');
 });
 
 Route::post('/image/upload', [Api\ImageController::class, 'upload'])
