@@ -10,6 +10,16 @@ use Illuminate\Support\Facades\DB;
 class TagController extends Controller
 {
     /**
+    * 取得標籤樹（主選單 + 子選單）
+    */
+    public function index()
+    {
+        return response()->json([
+            'data' => $this->getTagTree(),
+        ]);
+    }
+
+    /**
      * 取得完整標籤樹
      */
     private function getTagTree()

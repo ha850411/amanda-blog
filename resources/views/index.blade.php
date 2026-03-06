@@ -94,15 +94,34 @@ const app = Vue.createApp({
     mixins: [baseMixin],
     data() {
         return {
+            api: {
+                articles: {
+                    route: '{{ route('api.article.index') }}',
+                    loading: false,
+                    data: [],
+                },
+            }
         }
     },
     mounted() {
+        this.getArticles()
     },
     watch: {
     },
     computed: {
     },
     methods: {
+        async getArticles() {
+            try {
+                this.api.articles.loading = true;
+                const res = await axios.get(this.api.articles.route);
+                this.api.articles.data = res.data.data;
+            } catch (error) {
+                console.error(error);
+            } finally {
+                this.api.articles.loading = false;
+            }
+        }
     },
 });
 const vm = app.mount('#app');

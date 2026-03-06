@@ -9,6 +9,15 @@ use Illuminate\Support\Facades\Storage;
 
 class AboutController extends Controller
 {
+    public function index()
+    {
+        $about = About::first();
+
+        return response()->json([
+            'data' => $about,
+        ]);
+    }
+
     public function updateAbout(Request $request)
     {
         $about = About::first();

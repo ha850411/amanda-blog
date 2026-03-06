@@ -43,6 +43,21 @@ Route::middleware(AdminMiddleware::class)->group(function () {
         ->name('image.upload');
 });
 
+// 取得瀏覽數
+Route::get('/visit', [Api\VisitController::class, 'index'])
+    ->name('visit.index');
+// 寫入瀏覽記錄
+Route::post('/visit', [Api\VisitController::class, 'store'])
+    ->name('visit.store');
+
+// 取得文章標籤
+Route::get('/tag', [Api\TagController::class, 'index'])
+    ->name('tag.index');
+
+// 取得關於我
+Route::get('/about', [Api\AboutController::class, 'index'])
+    ->name('about.index');
+
 // 取得文章
 Route::get('/article', [Api\ArticleController::class, 'index'])
     ->name('article.index');

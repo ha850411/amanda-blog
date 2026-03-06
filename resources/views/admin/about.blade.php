@@ -34,7 +34,7 @@
                         </div>
                         <div class="col-md-6">
                             <div class="text-muted small mb-1">副標內容</div>
-                            <div class="fs-5">@{{ form.subtitle || '—' }}</div>
+                            <div class="fs-5" style="white-space: pre-line">@{{ form.subtitle || '—' }}</div>
                         </div>
                     </div>
                     {{-- 編輯模式 --}}
@@ -46,7 +46,7 @@
                             </div>
                             <div class="col-md-6 mb-3">
                                 <label class="form-label fw-semibold">副標內容</label>
-                                <input type="text" class="form-control" v-model="form.subtitle" placeholder="請輸入您的副標內容">
+                                <textarea class="form-control" rows="3" v-model="form.subtitle" placeholder="請輸入您的副標內容"></textarea>
                             </div>
                         </div>
                         <div class="d-flex justify-content-end gap-2">

@@ -16,8 +16,8 @@ class AboutSeeder extends Seeder
     public function run(): void
     {
         About::create([
-            'title' => '我是Amanda',
-            'sub_title' => '美食｜開箱｜生活',
+            'title' => 'Amanda | 探店 | 美食 | 生活 | 開箱',
+            'sub_title' => "🏠探店🍜美食🕊️生活📦開箱 台中生活圈跑跳🌇\n💌合作邀約歡迎 summer.hung222@gmail.com",
             'description' => '土身土長的台中人，熱愛美食，也喜歡開箱',
             'picture' => '/images/about.jpg',
         ]);

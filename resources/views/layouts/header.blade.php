@@ -1,33 +1,41 @@
 <div class="top_header bg-dark bg-gradient sticky-top">
     <div class="container d-flex justify-content-between align-items-center">
-        <div class="nav_toggle text-white d-md-none d-block" @click="toggleMenu" :class="{ show_icon: isMenuOpen }">
+        <div class="nav_toggle text-white d-md-none d-block" @click="toggleMenu" :class="{ show_icon: base.isMenuOpen }">
             <i class="fa-solid fa-bars nav_burger"></i>
             <i class="fa-solid fa-x nav_close"></i>
         </div>
-        <ul class="nav_menu" :class="{ show_menu: isMenuOpen }">
-            <li>
-                <a href="#" class="text-white text-center me-1">台中美食<i class="fa-solid fa-caret-down"></i></a>
-                <ul class="dropdown">
-                    <li><a href="#" class="text-center">牛排館</a></li>
-                    <li><a href="#" class="text-center">火鍋店</a></li>
-                    <li><a href="#" class="text-center">咖啡店</a></li>
-                    <li><a href="#" class="text-center">早午餐</a></li>
-                </ul>
+        <ul class="nav_menu" :class="{ show_menu: base.isMenuOpen }">
+            <li v-for="item in base.tags.data" :key="item.id">
+                <template v-if="item.children && item.children.length > 0">
+                    <a :href="getTagUrl(item.id)" class="text-white text-center me-1">
+                        <span>@{{ item.name }}</span>
+                        <i class="fa-solid fa-caret-down"></i>
+                    </a>
+                    <ul class="dropdown">
+                        <li v-for="child in item.children" :key="child.id">
+                            <a :href="getTagUrl(child.id)" class="text-center">@{{ child.name }}</a>
+                        </li>
+                    </ul>
+                </template>
+                <template v-else>
+                    <a :href="getTagUrl(item.id)" class="text-white text-center me-1">@{{ item.name }}</a>
+                </template>
             </li>
-            <li><a href="#" class="text-white text-center me-1">宅配商品</a></li>
-            <li><a href="#" class="text-white text-center me-1">采耳體驗</a></li>
-            <li><a href="#" class="text-white text-center me-1">按摩體驗</a></li>
         </ul>
         <div class="social fs-4">
-            <a href="#" class="text-white me-1"><i class="fa-brands fa-youtube"></i></a>
-            <a href="#" class="text-white me-1"><i class="fa-brands fa-facebook"></i></a>
-            <a href="#" class="text-white me-1"><i class="fa-brands fa-instagram"></i></a>
+            <template v-for="social in base.socials.data" :key="social.id">
+                <template v-if="social.status === 1">
+                    <a :href="social.url" class="text-white me-1" target="_blank">
+                        <img :src="social.picture">
+                    </a>
+                </template>
+            </template>
         </div>
     </div>
 </div>
 <div class="header text-center py-5 px-2">
     <a href="{{ route('index') }}" class="title text-dark">
-        <h2>Amanda | 探店 | 美食 | 生活 | 開箱</h2>
+        <h2>@{{ base.about.data?.title || '' }}</h2>
     </a>
-    <p>🏠探店🍜美食🕊️生活📦開箱 台中生活圈跑跳🌇 </br>💌合作邀約歡迎 summer.hung222@gmail.com</p>
+    <p style="white-space: pre-line" v-html="base.about.data?.sub_title || ''"></p>
 </div>

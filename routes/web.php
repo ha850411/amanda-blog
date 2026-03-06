@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin;
 
 Route::get('/', [IndexController::class, 'index'])
     ->name('index');
+
 Route::get('/article/{id}', [IndexController::class, 'article'])
     ->name('article');
 

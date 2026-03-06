@@ -2,10 +2,10 @@
 DROP TABLE IF EXISTS `about`;
 CREATE TABLE `about` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `title` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '標題',
+  `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '標題',
   `sub_title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '副標題',
   `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '內容',
-  `picture` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '大頭貼路徑',
+  `picture` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '大頭貼路徑',
   `created_at` timestamp NULL DEFAULT NULL COMMENT '建立時間',
   `updated_at` timestamp NULL DEFAULT NULL COMMENT '更新時間',
   PRIMARY KEY (`id`)
@@ -70,4 +70,15 @@ CREATE TABLE `admins` (
   `updated_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `admins_username_unique` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- blog.visit definition
+DROP TABLE IF EXISTS `visit`;
+CREATE TABLE `visit` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ip` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'ip',
+  `date` date NOT NULL COMMENT '日期',
+  `created_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `visit_date_IDX` (`date`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
