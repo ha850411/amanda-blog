@@ -38,3 +38,39 @@
 # 訪問專案 url
 - 前台: http://localhost:8091
 - 後台: http://localhost:8091/admin
+
+# 程式架構說明
+
+本專案為 Laravel + Vue.js 部落格系統，分為**前台**（文章閱讀）與**後台**（管理員 CMS）兩大區塊。
+
+---
+
+## 目錄結構概覽
+
+```
+app/
+├── Http/
+│   ├── Controllers/
+│   │   ├── IndexController.php       # 前台頁面控制器
+│   │   ├── Admin/                    # 後台頁面控制器
+│   │   └── Api/                      # API 控制器（回傳 JSON）
+│   └── Middleware/
+│       └── AdminMiddleware.php        # 後台登入驗證中介層
+├── Models/                            # Eloquent 模型
+│   ├── Article.php                    # 文章（含 tags 多對多）
+│   ├── ArticleTag.php                 # 文章標籤 pivot 模型
+│   ├── Tag.php                        # 標籤（樹狀結構）
+│   ├── About.php                      # 關於我資訊
+│   ├── Social.php                     # 社群連結
+│   ├── Visit.php                      # 訪客瀏覽紀錄
+│   └── Admin.php                      # 管理員帳號
+resources/
+└── views/
+    ├── index.blade.php                # 前台首頁
+    ├── article.blade.php              # 前台文章閱讀頁
+    ├── layouts/                       # 前台版型元件
+    └── admin/                         # 後台所有頁面
+routes/
+├── web.php                            # 頁面路由
+└── api.php                            # API 路由
+```

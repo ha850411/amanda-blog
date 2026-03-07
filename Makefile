@@ -47,7 +47,7 @@ recreate-testing-db:
 # Run php artisan test
 .PHONY: test
 test:
-	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan test
+	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan test --env=testing --parallel
 
 # 測試覆蓋率
 .PHONY: test-coverage
@@ -63,6 +63,11 @@ composer-update:
 .PHONY: migrate
 migrate:
 	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan migrate
+
+.PHONY: migrate-test
+migrate-test:
+	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan migrate --env=testing
+
 
 # Run php artisan migrate:refresh
 .PHONY: migrate-refresh
