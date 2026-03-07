@@ -12,8 +12,8 @@ GITHUB_REPO="https://github.com/ha850411/amanda-blog.git"
 # 移動到工作目錄
 cd $WORKSPACE
 
-# 使用兼容 macOS 的 grep 方式提取端口
-CURRENT_SERVICE=$(awk '/server / {print $2}' "$CONFIG_FILE" | tr -d ';' | head -1)
+# 從 active-upstream.conf 提取當前的後端容器名稱
+CURRENT_SERVICE=$(awk '/set \$active_backend/ {print $3}' "$CONFIG_FILE" | tr -d ';' | head -1)
 
 echo "當前配置的 service 為: $CURRENT_SERVICE"
 
@@ -76,8 +76,8 @@ RETRY_COUNT=1
 while [ "$HEALTH_STATUS" != "ok" ] && [ $RETRY_COUNT -lt 11 ]; do
     echo "嘗試第 $RETRY_COUNT 次檢測 $NEW_PORT port 的健康狀態..."
     
-    # 呼叫健康檢查 API 並取得回應內容
-    HEALTH_STATUS=$(cd $SYSTEM_FOLDER/system && sudo docker compose exec nginx curl -s http://$NEW_NGINX_NAME/api/health 2>/dev/null || echo "error")
+    # 從 Jenkins 容器直接呼叫健康檢查 API（與應用容器在同一 Docker 網路）
+    HEALTH_STATUS=$(curl -s http://$NEW_NGINX_NAME/api/health 2>/dev/null || echo "error")
     
     # 移除可能的空白字符
     HEALTH_STATUS=$(echo "$HEALTH_STATUS" | tr -d '[:space:]')
@@ -102,10 +102,15 @@ echo "健康檢查通過，API 回應: '$HEALTH_STATUS'"
 
 
 # 切換 nginx 配置
-sed -i.bak "s/server .*/server $NEW_NGINX_NAME;/" $CONFIG_FILE
+sed -i.bak "s/set \\\$active_backend .*/set \\\$active_backend $NEW_NGINX_NAME;/" $CONFIG_FILE
 rm -f "$CONFIG_FILE.bak"
 
-# 重啟 nginx
+# 重啟 nginx（等待容器就緒）
+echo "等待系統 nginx 容器就緒..."
+until cd $SYSTEM_FOLDER/system && sudo docker compose exec nginx true 2>/dev/null; do
+    echo "nginx 容器尚未就緒，等待 2 秒..."
+    sleep 2
+done
 cd $SYSTEM_FOLDER/system && sudo docker compose exec nginx nginx -s reload
 
 # 停止舊容器
