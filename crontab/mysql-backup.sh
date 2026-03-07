@@ -108,6 +108,8 @@ for DB in ${DATABASES}; do
         --set-gtid-purged=OFF \
         --compact \
         --skip-comments \
+        --skip-set-charset \
+        --skip-extended-insert \
         "${DB}" 2>/dev/null \
         | gzip -9 > "${FILEPATH}" \
         || error_exit "備份 ${DB} 失敗"
