@@ -2,7 +2,7 @@
 # ============================================================
 # MySQL 每日備份並上傳至 S3，自動清除 3 天前的舊備份
 # 排程：每天 00:00 執行
-# Crontab 設定：0 0 * * * /path/to/crontab/mysql-backup.sh >> /var/log/mysql-backup.log 2>&1
+# Crontab 設定：0 0 * * * /workspace/amanda-blog-system/crontab/mysql-backup.sh >> /workspace/amanda-blog-system/logs/mysql-backup.log 2>&1
 # 相容：sh / bash / dash
 # ============================================================
 

@@ -10,13 +10,24 @@ sudo dnf install -y git docker make
 sudo dnf install -y https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
 sudo dnf install -y mysql-community-client
 
+# 安裝 crontab（Amazon Linux 2023 預設已安裝 cronie）
+if ! command -v crontab >/dev/null 2>&1; then
+	sudo dnf install -y cronie
+fi
+
 # Amazon Linux 2023 常見為 curl-minimal，避免與 curl 套件衝突
 if ! command -v curl >/dev/null 2>&1; then
 	sudo dnf install -y curl-minimal
 fi
 
+# 啟動 crond 服務
+sudo systemctl enable --now crond
+
 # 啟動 Docker 服務
 sudo systemctl enable --now docker
+
+# 為 crontab 底下的所有程式增加執行權限
+sudo chmod +x /workspace/amanda-blog-system/crontab/*.sh
 
 # 讀取宿主機 docker socket 的 GID，供 Jenkins 容器 group_add 使用
 DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
