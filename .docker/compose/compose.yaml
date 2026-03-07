@@ -7,8 +7,6 @@ services:
       args:
         PHP_VERSION: ${PHP_VERSION}
         COMPOSER_VERSION: ${COMPOSER_VERSION}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       XDEBUG_MODE: ${XDEBUG_MODE:-off}
       TZ: Asia/Taipei
@@ -23,6 +21,7 @@ services:
     working_dir: /var/www/html
     networks:
       - web-network
+      - db-network
 
   nginx:
     image: nginx:alpine
@@ -40,4 +39,7 @@ services:
 networks:
   web-network:
     name: ${NETWORK_NAME}
+    external: true
+  db-network:
+    name: amanda-blog-db-network
     external: true
