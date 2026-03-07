@@ -2,7 +2,8 @@
 # ============================================================
 # MySQL 每日備份並上傳至 S3，自動清除 3 天前的舊備份
 # 排程：每天 00:00 執行
-# Crontab 設定：0 0 * * * /workspace/amanda-blog-system/crontab/mysql-backup.sh >> /workspace/amanda-blog-system/logs/mysql-backup.log 2>&1
+# Crontab 設定：0 0 * * * /workspace/amanda-blog-system/crontab/mysql-backup.sh
+# Log 路徑由腳本自動管理，目錄不存在時會自動建立
 # 相容：sh / bash / dash
 # ============================================================
 
@@ -36,6 +37,7 @@ S3_REGION="${S3_REGION:-ap-northeast-1}"
 AWS_PROFILE="${AWS_PROFILE:-}"                # 留空則使用 IAM Role / default credential
 
 BACKUP_DIR="${BACKUP_DIR:-/tmp/mysql-backups}"
+LOG_FILE="${LOG_FILE:-/workspace/amanda-blog-system/logs/mysql-backup.log}"
 RETAIN_DAYS=3
 
 # ────────────────────────────────────────
@@ -54,16 +56,17 @@ aws_cmd() {
 # 初始化
 # ────────────────────────────────────────
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
 }
 
 error_exit() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >&2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" | tee -a "${LOG_FILE}" >&2
     exit 1
 }
 
 DATE=$(date +"%Y-%m-%d_%H-%M-%S")
 mkdir -p "${BACKUP_DIR}"
+mkdir -p "$(dirname "${LOG_FILE}")"
 
 # ────────────────────────────────────────
 # 取得所有資料庫（排除系統庫）
