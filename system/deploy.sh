@@ -102,6 +102,8 @@ echo "健康檢查通過，API 回應: '$HEALTH_STATUS'"
 
 # 執行單元測試
 echo "執行單元測試..."
+# 先移除測試用 MySQL 容器, 避免測試失敗後殘留容器影響後續部署
+cd "$DEPLOY_DIR" && make test-db-down
 # 啟動測試用 MySQL 容器
 cd "$DEPLOY_DIR" && make test-db-up
 # 建立測試 database 並執行遷移
