@@ -9,7 +9,9 @@ class IndexController extends Controller
 {
     public function index(Request $request)
     {
-        return view('index')->with([]);
+        return view('index')->with([
+            'tagId' => $request->input('tag', ''),
+        ]);
     }
 
     public function article(int $id)

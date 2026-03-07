@@ -10,14 +10,14 @@
         <div class="row">
             <div class="col-md-8 col-12">
                 
-                <template v-if="!base.articles.loading && base.articles.data.length === 0">
+                <template v-if="!articles.loading && articles.data.length === 0">
                     <div class="d-flex justify-content-center my-5">
                         <p class="text-secondary">目前沒有文章喔！</p>
                     </div>
                 </template>
 
-                <template v-if="base.articles.data.length > 0">
-                    <div class="post my-4" v-for="(item, index) in base.articles.data" :key="index">
+                <template v-if="articles.data.length > 0">
+                    <div class="post my-4" v-for="(item, index) in articles.data" :key="index">
                         <div class="title_area">
                             <div class="title d-flex justify-content-between align-items-center">
                                 <h4 class="m-0 py-3">@{{ item.title }}</h4>
@@ -51,13 +51,13 @@
                         </div>
                     </div>
                     {{-- show more --}}
-                    <div class="d-flex justify-content-center my-5" v-if="base.articles.current_page < Math.ceil(base.articles.total / base.articles.params.perpage)">
-                        <button class="btn btn-primary" @click="base.articles.params.page++">載入更多</button>
+                    <div class="d-flex justify-content-center my-5" v-if="articles.current_page < Math.ceil(articles.total / articles.params.perpage)">
+                        <button class="btn btn-primary" @click="articles.params.page++">載入更多</button>
                     </div>
                 </template>
 
                 {{-- loading --}}
-                <template v-if="base.articles.loading">
+                <template v-if="articles.loading">
                     <div class="d-flex justify-content-center my-5">
                         <div class="spinner-border" role="status">
                             <span class="visually-hidden">Loading...</span>
@@ -108,17 +108,49 @@ const app = Vue.createApp({
     mixins: [baseMixin],
     data() {
         return {
-            
+            articles: {
+                route: '{{ route('api.article.index') }}',
+                loading: false,
+                data: [],
+                params: {
+                    page: 1,
+                    perpage: 5,
+                    show_first_image: 1,
+                    tagId: '{{ $tagId }}',
+                },
+                current_page: 1,
+                total: 0,
+            },
         }
     },
     mounted() {
+        this.getArticles();
     },
     watch: {
-        
+        'articles.params.page': {
+            handler(newPage) {
+                this.getArticles();
+            },
+        },
     },
     computed: {
     },
     methods: {
+        async getArticles() {
+            try {
+                this.articles.loading = true;
+                const res = await axios.get(this.articles.route, {
+                    params: this.articles.params
+                });
+                this.articles.data = [...this.articles.data, ...res.data.data];
+                this.articles.current_page = res.data.current_page;
+                this.articles.total = res.data.total;
+            } catch (error) {
+                console.error(error);
+            } finally {
+                this.articles.loading = false;
+            }
+        },
         verify(item, ref) {
             if (item.password == item.temp_pwd) {
                 item.confirm_password = item.password;

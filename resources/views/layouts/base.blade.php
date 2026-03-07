@@ -63,28 +63,16 @@
                         web: {
                             tag: '{{ route("index") }}',
                         },
-                        articles: {
+                        newArticles: {
                             route: '{{ route('api.article.index') }}',
                             loading: false,
                             data: [],
-                            params: {
-                                page: 1,
-                                perpage: 5,
-                                show_first_image: 1,    
-                            },
-                            current_page: 1,
-                            total: 0,
                         },
                         detail_route: '{{ route("article", ["id" => "__ARTICLE_ID__"]) }}',
                     }
                 }
             },
             watch: {
-                'base.articles.params.page': {
-                    handler(newPage) {
-                        this.getArticles();
-                    },
-                },
             },
             mounted() {
                 Promise.all([
@@ -92,7 +80,7 @@
                     this.getTags(),
                     this.getSocials(),
                     this.getVisit(),
-                    this.getArticles(),
+                    this.getNewArticles(),
                 ]).then(() => {     
                     this.base.inital = true;
                 });
@@ -141,21 +129,20 @@
                         console.error(error);
                     }
                 },
-                async getArticles() {
+                async getNewArticles() {
                     try {
-                        this.base.articles.loading = true;
-                        const res = await axios.get(this.base.articles.route, {
-                            params: this.base.articles.params
+                        const res = await axios.get(this.base.newArticles.route, {
+                            params: {
+                                page: 1,
+                                perpage: 3,
+                            }
                         });
-                        this.base.articles.data = [...this.base.articles.data, ...res.data.data];
-                        this.base.articles.current_page = res.data.current_page;
-                        this.base.articles.total = res.data.total;
+                        this.base.newArticles.data = res.data.data;
                     } catch (error) {
                         console.error(error);
-                    } finally {
-                        this.base.articles.loading = false;
                     }
                 },
+                
                 getTagUrl(tagId) {
                     return `${this.base.web.tag}?tag=${tagId}`;
                 },

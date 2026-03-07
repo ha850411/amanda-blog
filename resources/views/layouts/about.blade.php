@@ -13,7 +13,7 @@
             最新文章
         </h5>
         {{-- 只取前五篇 --}}
-        <template v-for="article in base.articles.data.slice(0, 3)" :key="article.id">
+        <template v-for="article in base.newArticles.data" :key="article.id">
             <a :href="getArticleUrl(article.id)" class="text-dark">
                 <h6 class="py-1 px-4 m-0">
                     <i class="fa-solid fa-key" v-if="article.status == 2"></i>

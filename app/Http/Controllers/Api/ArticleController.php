@@ -34,6 +34,11 @@ class ArticleController extends Controller
                         $query->where('name', 'like', '%' . $request->input('tag') . '%');
                     });
                 })
+                ->when($request->input("tagId"), function ($query) use ($request) {
+                    $query->whereHas('tags', function ($query) use ($request) {
+                        $query->where('tag.id', $request->input('tagId'));
+                    });
+                })
                 ->paginate($perpage, ['*'], 'page', $page);
 
             $data = $articles->items();
