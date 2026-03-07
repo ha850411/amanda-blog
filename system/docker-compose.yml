@@ -17,6 +17,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    group_add:
+      - "${DOCKER_GID:-998}"
     container_name: chaohan-jenkins
     ports:
       - "${JENKINS_PORT}:8080"

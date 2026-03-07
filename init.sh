@@ -13,6 +13,9 @@ fi
 # 啟動 Docker 服務
 sudo systemctl enable --now docker
 
+# 讀取宿主機 docker socket 的 GID，供 Jenkins 容器 group_add 使用
+DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+
 # 建立 workspace 資料夾
 sudo mkdir -p /workspace
 sudo chown -R "$USER":"$USER" /workspace
@@ -90,8 +93,20 @@ fi
 docker buildx version
 
 # 加入 docker 群組（已在前面執行過一次，但確保生效）
-sudo usermod -aG docker $USER
-newgrp docker
+sudo usermod -aG docker "$USER"
+
+# 同步 DOCKER_GID 到 system/.env，讓 docker compose 能只開給 Jenkins
+SYSTEM_ENV_FILE="/workspace/amanda-blog-system/system/.env"
+if [ -f "$SYSTEM_ENV_FILE" ]; then
+	if grep -q '^DOCKER_GID=' "$SYSTEM_ENV_FILE"; then
+		sudo sed -i "s/^DOCKER_GID=.*/DOCKER_GID=${DOCKER_GID}/" "$SYSTEM_ENV_FILE"
+	else
+		echo "DOCKER_GID=${DOCKER_GID}" | sudo tee -a "$SYSTEM_ENV_FILE" >/dev/null
+	fi
+	echo "Updated $SYSTEM_ENV_FILE with DOCKER_GID=${DOCKER_GID}"
+else
+	echo "Warning: $SYSTEM_ENV_FILE not found, skipped DOCKER_GID sync."
+fi
 
 # 設定 ll 指令為 ls -alF（避免重複寫入）
 if ! grep -q "alias ll='ls -alF'" ~/.bashrc; then
@@ -101,3 +116,4 @@ fi
 source ~/.bashrc
 
 echo "Done. Please log out and log back in to apply docker group changes."
+echo "Then recreate Jenkins container so group_add picks up DOCKER_GID=${DOCKER_GID}."
