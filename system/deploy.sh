@@ -29,6 +29,7 @@ echo "NEW_APP_ENV: $NEW_APP_ENV"
 NEW_FLODER="amanda-blog-$NEW_APP_ENV"
 NEW_IMAGE_NAME="amanda-blog-$NEW_APP_ENV"
 NEW_NGINX_NAME="amanda-blog-nginx-$NEW_APP_ENV"
+DEPLOY_DIR="$WORKSPACE/$NEW_FLODER"
 
 # 若存在 chaohan-temp 目錄，則刪除它
 [ -d $NEW_FLODER ] && sudo rm -rf $NEW_FLODER
@@ -51,12 +52,12 @@ rm -f $NEW_FLODER/.docker/compose/.env.bak
 
 # 啟動容器
 echo "啟動新容器: 'cd $NEW_FLODER && make up'"
-cd $NEW_FLODER && make build && make up && make composer-install
+cd "$DEPLOY_DIR" && make build && make up && make composer-install
 
 # 修正 Laravel 執行時目錄與權限，避免 tempnam()/cache/session 寫入問題
 echo "調整 Laravel storage/bootstrap/cache 權限..."
-cd "$NEW_FLODER/.docker/compose" && docker compose -f compose.yaml exec -T service sh -lc 'mkdir -p /var/www/html/storage/framework/{cache,sessions,views} /var/www/html/bootstrap/cache /tmp && chown -R www-data:www-data /var/www/html/{storage,bootstrap/cache} && chmod -R ug+rwX /var/www/html/{storage,bootstrap/cache}'
-cd "$NEW_FLODER"
+cd "$DEPLOY_DIR/.docker/compose" && docker compose -f compose.yaml exec -T service sh -lc 'mkdir -p /var/www/html/storage/framework/{cache,sessions,views} /var/www/html/bootstrap/cache /tmp && chown -R www-data:www-data /var/www/html/{storage,bootstrap/cache} && chmod -R ug+rwX /var/www/html/{storage,bootstrap/cache}'
+cd "$DEPLOY_DIR"
 
 # 檢查容器是否啟動成功(回應200)
 HEALTH_STATUS=""
