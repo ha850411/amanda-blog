@@ -35,8 +35,13 @@ DEPLOY_DIR="$WORKSPACE/$NEW_FLODER"
 DEPLOY_USER="${SUDO_USER:-${USER:-$(id -un)}}"
 DEPLOY_GROUP="${SUDO_GROUP:-${GROUP:-$(id -gn "$DEPLOY_USER")}}"
 
-# 若存在 chaohan-temp 目錄，則刪除它
-[ -d $NEW_FLODER ] && sudo rm -rf $NEW_FLODER
+# 若目錄已存在，先停止殘留容器再刪除目錄
+if [ -d "$NEW_FLODER" ]; then
+    echo "偵測到殘留目錄 $NEW_FLODER，先停止容器..."
+    cd "$WORKSPACE/$NEW_FLODER" && make down || true
+    cd "$WORKSPACE"
+    sudo rm -rf "$NEW_FLODER"
+fi
 
 # 下載專案
 git clone $GITHUB_REPO -b master $NEW_FLODER

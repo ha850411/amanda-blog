@@ -25,7 +25,7 @@ RUN groupadd -f docker
 # 將 jenkins 使用者加入 docker 群組
 RUN usermod -aG docker jenkins
 
-# 允許 jenkins 使用者無密碼使用 sudo 執行 docker 相關指令以及 rm 指令
-RUN echo "jenkins ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker-compose, /usr/local/bin/docker, /usr/local/bin/docker-compose, /bin/rm, /usr/bin/rm" >> /etc/sudoers
+# 允許 jenkins 使用者無密碼使用 sudo 執行 docker、rm、chown、chmod 指令
+RUN echo "jenkins ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker-compose, /usr/local/bin/docker, /usr/local/bin/docker-compose, /bin/rm, /usr/bin/rm, /bin/chown, /usr/bin/chown, /bin/chmod, /usr/bin/chmod" >> /etc/sudoers
 
 USER jenkins
