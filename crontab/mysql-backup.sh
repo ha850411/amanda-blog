@@ -45,7 +45,8 @@ aws_cmd() {
     if [ -n "${AWS_PROFILE}" ]; then
         aws --region "${S3_REGION}" --profile "${AWS_PROFILE}" "$@"
     else
-        aws --region "${S3_REGION}" "$@"
+        # 用 env -u 移除 AWS_PROFILE 環境變數，避免空值被 AWS CLI 誤讀
+        env -u AWS_PROFILE aws --region "${S3_REGION}" "$@"
     fi
 }
 
