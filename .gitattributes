@@ -1,0 +1,5 @@
+# 強制所有文字檔使用 LF 換行符
+* text=auto eol=lf
+
+# Shell 腳本一律 LF
+*.sh text eol=lf
