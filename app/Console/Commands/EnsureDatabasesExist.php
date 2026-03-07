@@ -48,7 +48,8 @@ class EnsureDatabasesExist extends Command
             $password = $config['password'] ?? '';
             $database = $config['database'] ?? null;
 
-            if (!in_array($host, ['127.0.0.1', 'localhost', 'mysql', 'mariadb', 'host.docker.internal'])) {
+            $allowedHosts = array_filter(array_map('trim', explode(',', env('DB_ENSURE_ALLOWED_HOSTS', '127.0.0.1,localhost,mysql,mariadb,host.docker.internal,amanda-blog-mysql'))));
+            if (!in_array($host, $allowedHosts)) {
                 $this->error("❌ Invalid host for connection {$name}: {$host}");
                 return CommandAlias::FAILURE;
             }
