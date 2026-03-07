@@ -31,6 +31,10 @@ NEW_IMAGE_NAME="amanda-blog-$NEW_APP_ENV"
 NEW_NGINX_NAME="amanda-blog-nginx-$NEW_APP_ENV"
 DEPLOY_DIR="$WORKSPACE/$NEW_FLODER"
 
+# Jenkins 可能未提供 USER/GROUP，避免 set -u 造成 unbound variable。
+DEPLOY_USER="${SUDO_USER:-${USER:-$(id -un)}}"
+DEPLOY_GROUP="${SUDO_GROUP:-${GROUP:-$(id -gn "$DEPLOY_USER")}}"
+
 # 若存在 chaohan-temp 目錄，則刪除它
 [ -d $NEW_FLODER ] && sudo rm -rf $NEW_FLODER
 
@@ -56,7 +60,7 @@ cd "$DEPLOY_DIR" && make build && make up && make composer-install
 
 # 調整整個新部署目錄權限
 echo "調整新部署目錄整體權限..."
-sudo chown -R "$USER":"$USER" "$DEPLOY_DIR"
+sudo chown -R "$DEPLOY_USER":"$DEPLOY_GROUP" "$DEPLOY_DIR"
 sudo chmod -R a+rwX "$DEPLOY_DIR"
 
 # 檢查容器是否啟動成功(回應200)
