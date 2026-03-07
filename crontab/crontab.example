@@ -1,0 +1,2 @@
+# 每日00:00 備份mysql
+0 0 * * * /workspace/amanda-blog-system/crontab/mysql-backup.sh
