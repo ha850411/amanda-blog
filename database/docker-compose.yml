@@ -5,6 +5,7 @@ services:
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD}"
+      MYSQL_ROOT_HOST: "%"
       TZ: Asia/Taipei
     ports:
       - "${MYSQL_PORT}:3306"
