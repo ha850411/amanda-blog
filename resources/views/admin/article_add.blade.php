@@ -71,7 +71,7 @@
                             <option value="3">隱藏</option>
                         </select>
                     </div>
-                    <template v-if="form.status === '2'">
+                    <template v-if="form.status == 2">
                         <div class="mt-2">
                             <label class="form-label">
                                 <span class="text-danger">*</span>密碼設定
@@ -245,7 +245,7 @@
                         this.showError('請選擇文章狀態');
                         return false;
                     }
-                    if (this.form.status === '2' && this.form.password === '') {
+                    if (this.form.status == 2 && !this.form.password) {
                         this.showError('請輸入文章密碼');
                         return false;
                     }

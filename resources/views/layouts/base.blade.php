@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="{{ asset('css/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ asset('css/fontawesome.min.css') }}">
     <link rel="stylesheet" href="{{ asset('css/style.css') }}">
+    @yield('styles')
 </head>
 <body>
     {{-- header --}}
@@ -62,8 +63,28 @@
                         web: {
                             tag: '{{ route("index") }}',
                         },
+                        articles: {
+                            route: '{{ route('api.article.index') }}',
+                            loading: false,
+                            data: [],
+                            params: {
+                                page: 1,
+                                perpage: 5,
+                                show_first_image: 1,    
+                            },
+                            current_page: 1,
+                            total: 0,
+                        },
+                        detail_route: '{{ route("article", ["id" => "__ARTICLE_ID__"]) }}',
                     }
                 }
+            },
+            watch: {
+                'base.articles.params.page': {
+                    handler(newPage) {
+                        this.getArticles();
+                    },
+                },
             },
             mounted() {
                 Promise.all([
@@ -71,6 +92,7 @@
                     this.getTags(),
                     this.getSocials(),
                     this.getVisit(),
+                    this.getArticles(),
                 ]).then(() => {     
                     this.base.inital = true;
                 });
@@ -119,9 +141,34 @@
                         console.error(error);
                     }
                 },
+                async getArticles() {
+                    try {
+                        this.base.articles.loading = true;
+                        const res = await axios.get(this.base.articles.route, {
+                            params: this.base.articles.params
+                        });
+                        this.base.articles.data = [...this.base.articles.data, ...res.data.data];
+                        this.base.articles.current_page = res.data.current_page;
+                        this.base.articles.total = res.data.total;
+                    } catch (error) {
+                        console.error(error);
+                    } finally {
+                        this.base.articles.loading = false;
+                    }
+                },
                 getTagUrl(tagId) {
                     return `${this.base.web.tag}?tag=${tagId}`;
-                }
+                },
+                getArticleUrl(id) {
+                    return this.base.detail_route.replace('__ARTICLE_ID__', encodeURIComponent(String(id)));
+                },
+                formatDate(dateString) {
+                    return new Date(dateString).toLocaleDateString('zh-TW', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: '2-digit',
+                    });
+                },
             }
         };
     </script>

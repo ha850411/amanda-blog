@@ -9,49 +9,62 @@
     <div class="col-12">
         <div class="row">
             <div class="col-md-8 col-12">
-                <div class="post my-4">
-                    <div class="title_area">
-                        <div class="title d-flex justify-content-between align-items-center">
-                            <h4 class="m-0 py-3">LS樂食糖 | 百變多種口味的牛軋糖</h4>
-                            <div class="time py-2 text-secondary">Jan 19 2026</div>
-                        </div>
-                        <div class="tag py-2 mb-4">
-                            <a href="#" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1"><i class="fa-solid fa-tag"></i>宅配美食</a>
-                            <a href="#" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1"><i class="fa-solid fa-tag"></i>糖果甜點</a>
-                        </div>
+                
+                <template v-if="!base.articles.loading && base.articles.data.length === 0">
+                    <div class="d-flex justify-content-center my-5">
+                        <p class="text-secondary">目前沒有文章喔！</p>
                     </div>
-                    <div class="article_area">
-                        <img class="w-100" src="https://picsum.photos/500/400?random=1">
-                    </div>
-                    <div class="more d-flex justify-content-end mt-4">
-                        <a href="{{ route('article', 1) }}"><span class="text-white bg-dark bg-gradient rounded-1 py-2 px-4">閱讀更多<i class="fa-solid fa-angles-right"></i></span></a>
-                    </div>
-                </div>
-                <div class="post my-4">
-                    <div class="title_area">
-                        <div class="title d-flex justify-content-between align-items-center">
-                            <h4 class="m-0 py-3">                                
-                                貴族世家Mini | CP值超高的平價牛排吃到飽
-                            </h4>
-                            <div>
-                                <span class="time py-2 text-secondary">Feb 02 2026</span>
-                                <span class="badge bg-danger">隱藏</span>
+                </template>
+
+                <template v-if="base.articles.data.length > 0">
+                    <div class="post my-4" v-for="(item, index) in base.articles.data" :key="index">
+                        <div class="title_area">
+                            <div class="title d-flex justify-content-between align-items-center">
+                                <h4 class="m-0 py-3">@{{ item.title }}</h4>
+                                <div class="time py-2 text-secondary">@{{ formatDate(item.created_at) }}</div>
+                            </div>
+                            <div class="tag py-2 mb-4" v-if="item.tags && item.tags.length > 0">
+                                <template v-for="(tag, tagIndex) in item.tags" :key="tagIndex">
+                                    <a :href="getTagUrl(tag.id)" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1">
+                                        <i class="fa-solid fa-tag"></i>@{{ tag.name }}
+                                    </a>
+                                </template>
                             </div>
                         </div>
-                        <div class="tag py-2 mb-4">
-                            <a href="#" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1"><i class="fa-solid fa-tag"></i>台中美食</a>
-                            <a href="#" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1"><i class="fa-solid fa-tag"></i>大里區</a>
-                            <a href="#" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1"><i class="fa-solid fa-tag"></i>牛排館</a>
+                        <div class="article_area">
+                            <form class="row g-3" v-if="item.status == 2 && item.password != item.confirm_password">
+                                <div class="col-auto">
+                                    <label for="inputPassword2" class="visually-hidden">密碼</label>
+                                    <input type="password" class="form-control" placeholder="請輸入您的密碼" v-model="item.temp_pwd" :ref="'pwd_idx_' + index">
+                                </div>
+                                <div class="col-auto">
+                                    <button type="button" class="btn btn-primary mb-3" @click="verify(item, 'pwd_idx_' + index)">確認</button>
+                                </div>
+                            </form>
+                            <template v-else>
+                                <img class="w-50" v-if="item.first_image" :src="item.first_image">
+                            </template>
                         </div>
-                        
+                        <div class="more d-flex justify-content-end mt-4">
+                            <a :href="getArticleUrl(item.id)">
+                                <span class="text-white bg-dark bg-gradient rounded-1 py-2 px-4">閱讀更多<i class="fa-solid fa-angles-right"></i></span></a>
+                        </div>
                     </div>
-                    <div class="article_area">
-                        <img class="w-100" src="https://picsum.photos/500/400?random=2">
+                    {{-- show more --}}
+                    <div class="d-flex justify-content-center my-5" v-if="base.articles.current_page < Math.ceil(base.articles.total / base.articles.params.perpage)">
+                        <button class="btn btn-primary" @click="base.articles.params.page++">載入更多</button>
                     </div>
-                    <a href="{{ route('article', 2) }}" class="more d-flex justify-content-end mt-4">
-                        <span class="text-white bg-dark bg-gradient rounded-1 py-2 px-4">閱讀更多<i class="fa-solid fa-angles-right"></i></span>
-                    </a>
-                </div>
+                </template>
+
+                {{-- loading --}}
+                <template v-if="base.articles.loading">
+                    <div class="d-flex justify-content-center my-5">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </template>
+                {{--                 
                 <div class="post my-4">
                     <div class="title_area">
                         <div class="title d-flex justify-content-between align-items-center">
@@ -79,7 +92,8 @@
                     <a href="{{ route('article', 3) }}" class="more d-flex justify-content-end mt-4">
                         <span class="text-white bg-dark bg-gradient rounded-1 py-2 px-4">閱讀更多<i class="fa-solid fa-angles-right"></i></span>
                     </a>
-                </div>
+                </div> 
+                --}}
             </div>
             {{-- 關於我、最新文章、文章分類、網站瀏覽 --}}
             @include('layouts/about')
@@ -94,32 +108,30 @@ const app = Vue.createApp({
     mixins: [baseMixin],
     data() {
         return {
-            api: {
-                articles: {
-                    route: '{{ route('api.article.index') }}',
-                    loading: false,
-                    data: [],
-                },
-            }
+            
         }
     },
     mounted() {
-        this.getArticles()
     },
     watch: {
+        
     },
     computed: {
     },
     methods: {
-        async getArticles() {
-            try {
-                this.api.articles.loading = true;
-                const res = await axios.get(this.api.articles.route);
-                this.api.articles.data = res.data.data;
-            } catch (error) {
-                console.error(error);
-            } finally {
-                this.api.articles.loading = false;
+        verify(item, ref) {
+            if (item.password == item.temp_pwd) {
+                item.confirm_password = item.password;
+            } else {
+                Swal.fire({
+                    icon: 'error',
+                    title: '密碼錯誤',
+                    text: '請重新輸入密碼',
+                    timer: 1000,
+                    showConfirmButton: false,
+                }).then(() => {
+                    item.temp_pwd = '';
+                });
             }
         }
     },

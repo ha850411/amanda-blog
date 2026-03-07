@@ -57,6 +57,23 @@ ul li:hover .fa-caret-down{
 .header, .copyright{
     background-color: rgb(230, 230, 230);
 }
+
+/* Keep CKEditor HTML content visually stable on frontend pages. */
+.article-content img {
+    max-width: 100%;
+    height: auto !important;
+}
+
+.article-content .image,
+.article-content .image_resized,
+.article-content figure {
+    max-width: 100%;
+}
+
+.article-content p {
+    overflow-wrap: anywhere;
+}
+
 @media screen and (max-width: 767px) {
     .more, .tag a,  .time, p{
         font-size: .8em;

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Article;
 
 class IndexController extends Controller
 {
@@ -11,8 +12,14 @@ class IndexController extends Controller
         return view('index')->with([]);
     }
 
-    public function article()
+    public function article(int $id)
     {
-        return view('article');
+        $article = Article::where('id', $id)
+            ->with('tags')
+            ->firstOrFail();
+
+        return view('article')->with([
+            'article' => $article,
+        ]);
     }
 }

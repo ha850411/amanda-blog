@@ -36,9 +36,20 @@ class ArticleController extends Controller
                 })
                 ->paginate($perpage, ['*'], 'page', $page);
 
+            $data = $articles->items();
+
+            if ($request->has("show_first_image")) {
+                $data = array_map(function ($item) {
+                    // 從 data->content 中找出第一個 <img> 標籤的 src 屬性值
+                    preg_match('/<img.*?src=["\'](.*?)["\']/', $item->content, $matches);
+                    $item->first_image = $matches[1] ?? null;
+                    return $item;
+                }, $data);
+            }
+
             return response()->json([
                 'status' => 'success',
-                'data' => $articles->items(),
+                'data' => $data,
                 'total' => $articles->total(),
                 'current_page' => $articles->currentPage(),
                 'per_page' => $articles->perPage(),

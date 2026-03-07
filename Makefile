@@ -74,3 +74,7 @@ migrate-refresh:
 migrate-refresh-seed:
 	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan migrate:refresh --seed
 
+# generate env key
+.PHONY: key-generate
+key-generate:
+	$(COMPOSE_CMD) exec $(APP_SERVICE) php artisan key:generate

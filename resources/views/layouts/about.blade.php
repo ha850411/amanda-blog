@@ -12,12 +12,15 @@
         <h5 class="text-white bg-dark bg-gradient rounded-1 title text-center p-2 my-4">
             最新文章
         </h5>
-        <a href="#" class="text-dark">
-            <h6 class="py-1 px-4 m-0">LS樂食糖 | 百變多種口味的牛軋糖</h6>
-        </a>
-        <a href="#" class="text-dark">
-            <h6 class="py-1 px-4 m-0"><i class="fa-solid fa-key"></i>東光灶咖 ｜用料實在的巴斯克蛋糕</h6>
-        </a>
+        {{-- 只取前五篇 --}}
+        <template v-for="article in base.articles.data.slice(0, 3)" :key="article.id">
+            <a :href="getArticleUrl(article.id)" class="text-dark">
+                <h6 class="py-1 px-4 m-0">
+                    <i class="fa-solid fa-key" v-if="article.status == 2"></i>
+                    <span>@{{ article.title }}</span>
+                </h6>
+            </a>
+        </template>
     </div>
     <div class="d-md-block d-none category">
         <h5 class="text-white bg-dark bg-gradient rounded-1 title text-center p-2 my-4">
