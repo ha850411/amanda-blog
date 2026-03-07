@@ -7,6 +7,8 @@ services:
       args:
         PHP_VERSION: ${PHP_VERSION}
         COMPOSER_VERSION: ${COMPOSER_VERSION}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       XDEBUG_MODE: ${XDEBUG_MODE:-off}
       TZ: Asia/Taipei
