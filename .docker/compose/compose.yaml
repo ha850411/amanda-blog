@@ -21,7 +21,6 @@ services:
     working_dir: /var/www/html
     networks:
       - web-network
-      - db-network
 
   nginx:
     image: nginx:alpine
@@ -39,7 +38,4 @@ services:
 networks:
   web-network:
     name: ${NETWORK_NAME}
-    external: true
-  db-network:
-    name: amanda-blog-db-network
     external: true

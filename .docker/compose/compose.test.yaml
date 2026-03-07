@@ -1,0 +1,15 @@
+services:
+  test-mysql:
+    image: mysql:8.0
+    container_name: amanda-blog-ci-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: blog_test
+      MYSQL_ROOT_HOST: "%"
+    networks:
+      - web-network
+
+networks:
+  web-network:
+    name: ${NETWORK_NAME}
+    external: true
