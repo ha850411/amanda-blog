@@ -100,6 +100,17 @@ fi
 
 echo "健康檢查通過，API 回應: '$HEALTH_STATUS'"
 
+# 執行單元測試
+echo "執行單元測試..."
+# 建立測試 database
+cd "$DEPLOY_DIR" && make ensure-test-db
+# 執行測試, 若測試失敗，則停止新容器並退出
+cd "$DEPLOY_DIR" && make test || {
+    echo "錯誤: 單元測試失敗，停止新容器並退出..."
+    make down
+    exit 1
+}
+
 
 # 切換 nginx 配置
 sed -i.bak "s/set \\\$active_backend .*/set \\\$active_backend $NEW_NGINX_NAME;/" $CONFIG_FILE
