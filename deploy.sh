@@ -3,7 +3,7 @@
 set -euo pipefail # 啟用更嚴格的錯誤檢查
 
 # workspace
-WORKSPACE="/Volumes/workspace/"
+WORKSPACE="/workspace/"
 SYSTEM_FOLDER="$WORKSPACE/amanda-blog-system"
 ENV_PATH="$SYSTEM_FOLDER/app-env"
 CONFIG_FILE="$SYSTEM_FOLDER/system/nginx/upstream/active-upstream.conf"
