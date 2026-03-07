@@ -4,6 +4,8 @@ set -euo pipefail
 # 安裝基本工具
 sudo dnf update -y
 sudo dnf install -y git docker make
+sudo dnf install -y https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
+sudo dnf install -y mysql-community-client
 
 # Amazon Linux 2023 常見為 curl-minimal，避免與 curl 套件衝突
 if ! command -v curl >/dev/null 2>&1; then

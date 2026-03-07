@@ -36,6 +36,11 @@ S3_BUCKET="${S3_BUCKET:?請設定 S3_BUCKET 環境變數}"   # 例如 s3://my-bu
 S3_REGION="${S3_REGION:-ap-northeast-1}"
 AWS_PROFILE="${AWS_PROFILE:-}"                         # 留空則使用預設 credential
 
+# AWS_PROFILE 為空時必須 unset，否則 AWS CLI 會嘗試尋找空名稱的 profile 而報錯
+if [[ -z "${AWS_PROFILE}" ]]; then
+    unset AWS_PROFILE
+fi
+
 BACKUP_DIR="${BACKUP_DIR:-/tmp/mysql-backups}"
 RETAIN_DAYS=3
 
