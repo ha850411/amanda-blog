@@ -113,7 +113,5 @@ if ! grep -q "alias ll='ls -alF'" ~/.bashrc; then
 	echo "alias ll='ls -alF'" >> ~/.bashrc
 fi
 
-source ~/.bashrc
-
 echo "Done. Please log out and log back in to apply docker group changes."
 echo "Then recreate Jenkins container so group_add picks up DOCKER_GID=${DOCKER_GID}."
