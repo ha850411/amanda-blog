@@ -106,6 +106,8 @@ for DB in ${DATABASES}; do
         --triggers \
         --events \
         --set-gtid-purged=OFF \
+        --compact \
+        --skip-comments \
         "${DB}" 2>/dev/null \
         | gzip -9 > "${FILEPATH}" \
         || error_exit "備份 ${DB} 失敗"
