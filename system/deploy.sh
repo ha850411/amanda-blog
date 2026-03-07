@@ -102,14 +102,19 @@ echo "健康檢查通過，API 回應: '$HEALTH_STATUS'"
 
 # 執行單元測試
 echo "執行單元測試..."
-# 建立測試 database
+# 啟動測試用 MySQL 容器
+cd "$DEPLOY_DIR" && make test-db-up
+# 建立測試 database 並執行遷移
 cd "$DEPLOY_DIR" && make ensure-testing-db
-# 執行測試, 若測試失敗，則停止新容器並退出
+# 執行測試, 若測試失敗，則停止測試 MySQL 與新容器並退出
 cd "$DEPLOY_DIR" && make test || {
     echo "錯誤: 單元測試失敗，停止新容器並退出..."
+    make test-db-down
     make down
     exit 1
 }
+# 測試完畢，移除測試用 MySQL 容器
+cd "$DEPLOY_DIR" && make test-db-down
 
 # 切換 nginx 配置
 sed -i.bak "s/set \\\$active_backend .*/set \\\$active_backend $NEW_NGINX_NAME;/" $CONFIG_FILE
