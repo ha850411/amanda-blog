@@ -27,7 +27,7 @@ sudo systemctl enable --now crond
 sudo systemctl enable --now docker
 
 # 為 crontab 底下的所有程式增加執行權限
-sudo chmod +x /workspace/amanda-blog-system/crontab/*.sh
+sudo chmod +x /workspace/amanda-blog-system
 
 # 讀取宿主機 docker socket 的 GID，供 Jenkins 容器 group_add 使用
 DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
