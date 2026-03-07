@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 設為台灣時區，確保排程和日誌時間正確
+sudo timedatectl set-timezone Asia/Taipei
+
 # 安裝基本工具
 sudo dnf update -y
 sudo dnf install -y git docker make
