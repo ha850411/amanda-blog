@@ -53,6 +53,11 @@ rm -f $NEW_FLODER/.docker/compose/.env.bak
 echo "啟動新容器: 'cd $NEW_FLODER && make up'"
 cd $NEW_FLODER && make build && make up && make composer-install
 
+# 修正 Laravel 執行時目錄與權限，避免 tempnam()/cache/session 寫入問題
+echo "調整 Laravel storage/bootstrap/cache 權限..."
+cd "$NEW_FLODER/.docker/compose" && docker compose -f compose.yaml exec -T service sh -lc 'mkdir -p /var/www/html/storage/framework/{cache,sessions,views} /var/www/html/bootstrap/cache /tmp && chown -R www-data:www-data /var/www/html/{storage,bootstrap/cache} && chmod -R ug+rwX /var/www/html/{storage,bootstrap/cache}'
+cd "$NEW_FLODER"
+
 # 檢查容器是否啟動成功(回應200)
 HEALTH_STATUS=""
 RETRY_COUNT=1
