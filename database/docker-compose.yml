@@ -25,7 +25,7 @@ services:
         max-file: "3"
 
   phpmyadmin:
-    image: arm64v8/phpmyadmin
+    image: ${PMA_IMAGE}
     container_name: amanda-blog-phpmyadmin
     restart: always
     environment:
