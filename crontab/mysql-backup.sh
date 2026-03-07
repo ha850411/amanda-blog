@@ -107,6 +107,7 @@ for DB in ${DATABASES}; do
         --events \
         --set-gtid-purged=OFF \
         --compact \
+        --add-drop-table \
         --skip-comments \
         --skip-set-charset \
         --skip-extended-insert \
