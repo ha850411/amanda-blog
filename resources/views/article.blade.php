@@ -1,7 +1,22 @@
 @extends('layouts/base')
 
 @section('title')
-<title>Amanda | 探店 | 美食 | 生活 | 開箱</title>
+<title>{{ $article->title }} - Amanda | 探店 | 美食 | 生活 | 開箱</title>
+@endsection
+
+@section('meta')
+@php
+    $description = mb_substr(strip_tags((string)$article->content), 0, 150) . '...';
+@endphp
+<meta name="description" content="{{ $description }}">
+<meta property="og:title" content="{{ $article->title }} - Amanda | 探店 | 美食 | 生活 | 開箱">
+<meta property="og:description" content="{{ $description }}">
+<meta property="og:type" content="article">
+<meta property="og:url" content="{{ url()->current() }}">
+@if($article->first_image)
+<meta property="og:image" content="{{ url($article->first_image) }}">
+@endif
+<meta property="og:site_name" content="Amanda">
 @endsection
 
 @section('styles')

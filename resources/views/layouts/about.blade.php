@@ -12,7 +12,6 @@
         <h5 class="text-white bg-dark bg-gradient rounded-1 title text-center p-2 my-4">
             最新文章
         </h5>
-        {{-- 只取前五篇 --}}
         <template v-for="article in base.newArticles.data" :key="article.id">
             <a :href="getArticleUrl(article.id)" class="text-dark">
                 <h6 class="py-1 px-4 m-0">
@@ -27,21 +26,16 @@
             文章分類
         </h5>
         <template v-for="tag in base.tags.data" :key="tag.id">
-            <template v-if="!tag.children || tag.children.length === 0">
+            <div class="menu">
                 <a :href="getTagUrl(tag.id)" class="menu text-dark">
                     <h6 class="py-1 px-4 m-0"><i class="fa-solid fa-arrows-to-dot"></i>@{{ tag.name }}</h6>
                 </a>
-            </template>
-            <template v-else>
-                <div class="menu">
-                    <h6 class="py-1 px-4 m-0"><i class="fa-solid fa-arrows-to-dot"></i>@{{ tag.name }}</h6>
-                    <li class="list-unstyled mt-2">
-                        <template v-for="child in tag.children" :key="child.id">
-                            <a :href="getTagUrl(child.id)" class="d-block text-secondary py-1 px-5">@{{ child.name }}</a>
-                        </template>
-                    </li>
-                </div>
-            </template>
+                <li class="list-unstyled mt-2" v-if="tag.children && tag.children.length > 0">
+                    <template v-for="child in tag.children" :key="child.id">
+                        <a :href="getTagUrl(child.id)" class="d-block text-secondary py-1 px-5">@{{ child.name }}</a>
+                    </template>
+                </li>
+            </div>
         </template>
     </div>
     <div class="number text-center">

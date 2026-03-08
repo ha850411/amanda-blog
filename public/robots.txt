@@ -1,2 +1,6 @@
 User-agent: *
-Disallow:
+Disallow: /admin/
+Disallow: /api/
+
+# 請將下方 domain 換成您實際的網站網址
+Sitemap: https://yourdomain.com/sitemap.xml

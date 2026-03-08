@@ -1,15 +1,24 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    @yield('title')
+    @hasSection('title')
+        @yield('title')
+    @else
+        <title>Amanda | 探店 | 美食 | 生活 | 開箱</title>
+    @endif
+    <link rel="canonical" href="{{ url()->current() }}" />
+    @yield('meta')
+    <link rel="icon" href="{{ asset('images/favicon.png') }}" type="image/png">
     <link rel="stylesheet" href="{{ asset('css/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ asset('css/fontawesome.min.css') }}">
     <link rel="stylesheet" href="{{ asset('css/style.css') }}">
     @yield('styles')
 </head>
+
 <body>
     {{-- header --}}
     <div id="app">
@@ -40,6 +49,7 @@
                     base: {
                         isMenuOpen: false,
                         inital: false,
+                        tagId: '{{ $tagId ?? null }}',
                         about: {
                             route: '{{ route('api.about.index') }}',
                             loading: false,
@@ -61,7 +71,7 @@
                             data: null
                         },
                         web: {
-                            tag: '{{ route("index") }}',
+                            tag: '{{ route("tag", ["tagId" => "__TAG_ID__"]) }}',
                         },
                         newArticles: {
                             route: '{{ route('api.article.index') }}',
@@ -81,7 +91,7 @@
                     this.getSocials(),
                     this.getVisit(),
                     this.getNewArticles(),
-                ]).then(() => {     
+                ]).then(() => {
                     this.base.inital = true;
                 });
                 this.addVisit();
@@ -142,9 +152,9 @@
                         console.error(error);
                     }
                 },
-                
+
                 getTagUrl(tagId) {
-                    return `${this.base.web.tag}?tag=${tagId}`;
+                    return this.base.web.tag.replace('__TAG_ID__', encodeURIComponent(String(tagId)));
                 },
                 getArticleUrl(id) {
                     return this.base.detail_route.replace('__ARTICLE_ID__', encodeURIComponent(String(id)));
@@ -161,4 +171,5 @@
     </script>
     @yield('scripts')
 </body>
+
 </html>

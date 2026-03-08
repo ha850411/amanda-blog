@@ -8,8 +8,14 @@ use App\Http\Controllers\Admin;
 Route::get('/', [IndexController::class, 'index'])
     ->name('index');
 
+Route::get('/tag/{tagId}', [IndexController::class, 'tag'])
+    ->name('tag');
+
 Route::get('/article/{id}', [IndexController::class, 'article'])
     ->name('article');
+
+Route::get('/sitemap.xml', [IndexController::class, 'sitemap'])
+    ->name('sitemap');
 
 
 Route::prefix('admin')->group(function () {

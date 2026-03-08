@@ -1,24 +1,24 @@
 <div class="top_header bg-dark bg-gradient sticky-top">
     <div class="container d-flex justify-content-between align-items-center">
-        <div class="nav_toggle text-white d-md-none d-block" @click="toggleMenu" :class="{ show_icon: base.isMenuOpen }">
+        <div class="nav_toggle text-white d-md-none d-block" @click="toggleMenu"
+            :class="{ show_icon: base.isMenuOpen }">
             <i class="fa-solid fa-bars nav_burger"></i>
             <i class="fa-solid fa-x nav_close"></i>
         </div>
         <ul class="nav_menu" :class="{ show_menu: base.isMenuOpen }">
             <li v-for="item in base.tags.data" :key="item.id">
+                <a :href="getTagUrl(item.id)" class="text-white text-center me-1"
+                    :class="{ active: base.tagId == item.id || item.children.some(child => child.id == base.tagId) }">
+                    <span>@{{ item.name }}</span>
+                    <i v-if="item.children && item.children.length > 0" class="fa-solid fa-caret-down"></i>
+                </a>
                 <template v-if="item.children && item.children.length > 0">
-                    <a :href="getTagUrl(item.id)" class="text-white text-center me-1">
-                        <span>@{{ item.name }}</span>
-                        <i class="fa-solid fa-caret-down"></i>
-                    </a>
                     <ul class="dropdown">
                         <li v-for="child in item.children" :key="child.id">
-                            <a :href="getTagUrl(child.id)" class="text-center">@{{ child.name }}</a>
+                            <a :href="getTagUrl(child.id)" class="text-center"
+                                :class="{ active: base.tagId == child.id }">@{{ child.name }}</a>
                         </li>
                     </ul>
-                </template>
-                <template v-else>
-                    <a :href="getTagUrl(item.id)" class="text-white text-center me-1">@{{ item.name }}</a>
                 </template>
             </li>
         </ul>

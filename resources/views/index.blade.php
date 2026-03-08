@@ -1,7 +1,12 @@
 @extends('layouts/base')
 
-@section('title')
-<title>Amanda | 探店 | 美食 | 生活 | 開箱</title>
+@section('meta')
+<meta name="description" content="Amanda的探店、美食、生活與開箱紀錄">
+<meta property="og:title" content="Amanda | 探店 | 美食 | 生活 | 開箱">
+<meta property="og:description" content="Amanda的探店、美食、生活與開箱紀錄">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{ url()->current() }}">
+<meta property="og:site_name" content="Amanda">
 @endsection
 
 @section('content')
@@ -116,7 +121,7 @@ const app = Vue.createApp({
                     page: 1,
                     perpage: 5,
                     show_first_image: 1,
-                    tagId: '{{ $tagId }}',
+                    tagId: '{{ $tagId ?? null }}',
                 },
                 current_page: 1,
                 total: 0,
