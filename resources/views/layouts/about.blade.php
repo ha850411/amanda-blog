@@ -15,8 +15,10 @@
         <template v-for="article in base.newArticles.data" :key="article.id">
             <a :href="getArticleUrl(article.id)" class="text-dark">
                 <h6 class="py-1 px-4 m-0">
-                    <i class="fa-solid fa-key" v-if="article.status == 2"></i>
-                    <span>@{{ article.title }}</span>
+                    <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        <i class="fa-solid fa-key" v-if="article.status == 2"></i>
+                        <span>@{{ article.title }}</span>
+                    </div>
                 </h6>
             </a>
         </template>
