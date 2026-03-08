@@ -37,7 +37,7 @@ composer-install:
 .PHONY: test-db-up
 test-db-up:
 	$(TEST_COMPOSE_CMD) up -d
-	$(TEST_COMPOSE_CMD) exec test-mysql mysqladmin ping -u root -proot --wait=30 --silent
+	$(TEST_COMPOSE_CMD) exec test-mysql mysqladmin ping -h 127.0.0.1 -u root -proot --wait=60 --silent
 
 # 移除測試用 MySQL 容器與匿名 volume
 .PHONY: test-db-down
