@@ -48,7 +48,7 @@
                         <template v-if="article.status == 2 && lock">
                             {{-- 輸入密碼 --}}
                             <span class="text-secondary">這篇文章受密碼保護，請輸入密碼：</span>
-                            <input type="password" class="form-control w-50" placeholder="請輸入密碼" v-model="password">
+                            <input type="password" class="form-control w-50" placeholder="請輸入密碼" v-model="password" @keyup.enter="verify()">
                             <button class="btn btn-primary mt-2" @click="verify()">確認</button>
                         </template>
                         <div v-else class="article-content ck-content" v-html="article.content"></div>

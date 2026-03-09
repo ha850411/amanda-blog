@@ -37,15 +37,15 @@
                             </div>
                         </div>
                         <div class="article_area">
-                            <form class="row g-3" v-if="item.status == 2 && item.password != item.confirm_password">
+                            <div class="row g-3" v-if="item.status == 2 && item.password != item.confirm_password">
                                 <div class="col-auto">
                                     <label for="inputPassword2" class="visually-hidden">密碼</label>
-                                    <input type="password" class="form-control" placeholder="請輸入您的密碼" v-model="item.temp_pwd" :ref="'pwd_idx_' + index">
+                                    <input type="password" class="form-control" placeholder="請輸入您的密碼" v-model="item.temp_pwd" :ref="'pwd_idx_' + index" @keyup.enter="verify(item, 'pwd_idx_' + index)">
                                 </div>
                                 <div class="col-auto">
                                     <button type="button" class="btn btn-primary mb-3" @click="verify(item, 'pwd_idx_' + index)">確認</button>
                                 </div>
-                            </form>
+                            </div>
                             <template v-else>
                                 <img class="w-50" v-if="item.first_image" :src="item.first_image">
                             </template>
@@ -69,36 +69,6 @@
                         </div>
                     </div>
                 </template>
-                {{--                 
-                <div class="post my-4">
-                    <div class="title_area">
-                        <div class="title d-flex justify-content-between align-items-center">
-                            <h4 class="m-0 py-3"><i class="fa-solid fa-key"></i>東光灶咖 ｜用料實在的巴斯克蛋糕</h4>
-                            <div class="time py-2 text-secondary">Feb 02 2026</div>
-                        </div>
-                        <div class="tag py-2 mb-4">
-                            <a href="#" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1"><i class="fa-solid fa-tag"></i>台中美食</a>
-                            <a href="#" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1"><i class="fa-solid fa-tag"></i>大里區</a>
-                            <a href="#" class="bg-secondary bg-gradient rounded-1 text-white p-2 me-1"><i class="fa-solid fa-tag"></i>牛排館</a>
-                        </div>
-                        
-                    </div>
-                    <div class="article_area">
-                        <form class="row g-3">
-                            <div class="col-auto">
-                                <label for="inputPassword2" class="visually-hidden">密碼</label>
-                                <input type="password" class="form-control" id="inputPassword2" placeholder="請輸入您的密碼">
-                            </div>
-                            <div class="col-auto">
-                                <button type="submit" class="btn btn-primary mb-3">確認</button>
-                            </div>
-                        </form>
-                    </div>
-                    <a href="{{ route('article', 3) }}" class="more d-flex justify-content-end mt-4">
-                        <span class="text-white bg-dark bg-gradient rounded-1 py-2 px-4">閱讀更多<i class="fa-solid fa-angles-right"></i></span>
-                    </a>
-                </div> 
-                --}}
             </div>
             {{-- 關於我、最新文章、文章分類、網站瀏覽 --}}
             @include('layouts/about')
