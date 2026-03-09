@@ -106,6 +106,11 @@ const app = Vue.createApp({
         }
     },
     watch: {
+        'base.inital'(val) {
+            if (val) {
+                this.$nextTick(() => this.initScrollObserver());
+            }
+        },
         'articles.params.page': {
             handler(newPage) {
                 this.getArticles();
@@ -131,9 +136,6 @@ const app = Vue.createApp({
                 console.error(error);
             } finally {
                 this.articles.loading = false;
-                if (!this.scrollObserver) {
-                    this.$nextTick(() => this.initScrollObserver());
-                }
             }
         },
         initScrollObserver() {
