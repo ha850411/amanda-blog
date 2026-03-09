@@ -52,7 +52,7 @@ CREATE TABLE `article_tag` (
 DROP TABLE IF EXISTS `social`;
 CREATE TABLE `social` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `picture` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '圖片路徑',
+  `icon` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'icon圖示class',
   `url` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '連結',
   `status` tinyint DEFAULT '1' COMMENT '開啟狀態 0: 隱藏 1: 開啟',
   `created_at` timestamp NULL DEFAULT NULL,

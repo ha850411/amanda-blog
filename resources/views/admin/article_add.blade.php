@@ -19,8 +19,8 @@
             <template v-else>
                 <nav aria-label="breadcrumb mb-3">
                     <ol class="breadcrumb">
-                        <li class="breadcrumb-item"><a href="index.html">首頁</a></li>
-                        <li class="breadcrumb-item"><a href="article.html">文章管理</a></li>
+                        <li class="breadcrumb-item"><a href="{{ route("admin.index") }}">首頁</a></li>
+                        <li class="breadcrumb-item"><a href="{{ route("admin.article") }}">文章管理</a></li>
                         <li class="breadcrumb-item active" aria-current="page">@{{ title }}</li>
                     </ol>
                 </nav>

@@ -12,7 +12,7 @@ class SocialFactory extends Factory
     public function definition(): array
     {
         return [
-            'picture' => '/images/social.jpg',
+            'icon' => 'fa-brands fa-facebook',
             'url' => fake()->url(),
             'status' => fake()->numberBetween(0, 1),
         ];

@@ -14,7 +14,7 @@ class Social extends Model
     protected $primaryKey = 'id';
 
     protected $fillable = [
-        'picture',
+        'icon',
         'url',
         'status',
     ];

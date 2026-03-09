@@ -28,13 +28,8 @@
         <div class="col-12">
             <div class="row">
                 <div class="col-md-8 col-12">
-                    <template v-if="article.status == 2 && lock">
-                        {{-- 輸入密碼 --}}
-                        <span class="text-secondary">這篇文章受密碼保護，請輸入密碼：</span>
-                        <input type="password" class="form-control w-50" placeholder="請輸入密碼" v-model="password">
-                        <button class="btn btn-primary mt-2" @click="verify()">確認</button>
-                    </template>
-                    <div v-else class="post my-4">
+                    
+                    <div class="post my-4">
                         <div class="title_area">
                             <div class="title d-flex justify-content-between align-items-center">
                                 <h4 class="m-0 py-3">@{{ article.title }}</h4>
@@ -50,7 +45,13 @@
                         </div>
                         
                         {{-- 內容 --}}
-                        <div class="article-content ck-content" v-html="article.content"></div>
+                        <template v-if="article.status == 2 && lock">
+                            {{-- 輸入密碼 --}}
+                            <span class="text-secondary">這篇文章受密碼保護，請輸入密碼：</span>
+                            <input type="password" class="form-control w-50" placeholder="請輸入密碼" v-model="password">
+                            <button class="btn btn-primary mt-2" @click="verify()">確認</button>
+                        </template>
+                        <div v-else class="article-content ck-content" v-html="article.content"></div>
                     </div>
                 </div>
                 {{-- 關於我、最新文章、文章分類、網站瀏覽 --}}

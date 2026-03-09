@@ -12,7 +12,7 @@
         <div class="contain p-4">
             <nav aria-label="breadcrumb mb-3">
                 <ol class="breadcrumb">
-                  <li class="breadcrumb-item"><a href="index.html">首頁</a></li>
+                  <li class="breadcrumb-item"><a href="{{ route("admin.index") }}">首頁</a></li>
                   <li class="breadcrumb-item active" aria-current="page">社群管理</li>
                 </ol>
             </nav>
@@ -34,7 +34,7 @@
                     </tr>
                     <tr v-for="(item, index) in list" :key="index">
                         <td>
-                            <img :src="item.picture"/>
+                            <i class="fa-2x" :class="item.icon"></i>
                         </td>
                         <td>@{{ item.url }}</td>
                         <td>@{{ item.status == 1 ? '公開' : '隱藏' }}</td>
@@ -48,13 +48,13 @@
     <div class="model" ref="edit_add_model">
         <div class="edit_add_box rounded shadow-lg bg-white">
             <div class="rounded-top bg-light text-center p-2">
-                <div class="text-secondary fw-bolder">編輯/新增</div>
+                <div class="text-secondary fw-bolder">編輯</div>
             </div>
             <div class="p-3">
                 <div class="mt-2">
                     <label for="exampleFormControlInput1" class="form-label">社群圖片</label>
                     <div>
-                        <img :src="form.picture" class="mb-2"/>
+                        <i class="fa-2x" :class="form.icon" class="mb-2"></i>
                     </div>
                 </div>
                 <div class="mt-2">
@@ -91,7 +91,7 @@ const app = Vue.createApp({
             loading: false,
             form: {
                 id: null,
-                picture: null,
+                icon: null,
                 url: '',
                 status: 1,
             }
@@ -120,7 +120,7 @@ const app = Vue.createApp({
             this.modal('edit_add_model', 'show');
             this.form = {
                 id: item.id,
-                picture: item.picture,
+                icon: item.icon,
                 url: item.url,
                 status: item.status,
             };

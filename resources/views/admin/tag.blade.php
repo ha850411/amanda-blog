@@ -62,7 +62,7 @@
         <div class="contain p-4">
             <nav aria-label="breadcrumb mb-3">
                 <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="index.html">首頁</a></li>
+                    <li class="breadcrumb-item"><a href="{{ route("admin.index") }}">首頁</a></li>
                     <li class="breadcrumb-item active" aria-current="page">標籤管理</li>
                 </ol>
             </nav>

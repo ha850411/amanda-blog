@@ -13,19 +13,19 @@ class SocialSeeder extends Seeder
     public function run(): void
     {
         Social::create([
-            'picture' => '/images/icon-facebook.png',
+            'icon' => 'fa-brands fa-facebook',
             'url' => 'https://www.facebook.com',
             'status' => 1,
         ]);
 
         Social::create([
-            'picture' => '/images/icon-instagram.png',
+            'icon' => 'fa-brands fa-instagram',
             'url' => 'https://www.instagram.com',
             'status' => 1,
         ]);
 
         Social::create([
-            'picture' => '/images/icon-youtube.png',
+            'icon' => 'fa-brands fa-youtube',
             'url' => 'https://www.youtube.com',
             'status' => 1,
         ]);

@@ -26,7 +26,7 @@
             <template v-for="social in base.socials.data" :key="social.id">
                 <template v-if="social.status === 1">
                     <a :href="social.url" class="text-white me-1" target="_blank">
-                        <img :src="social.picture">
+                        <i :class="social.icon"></i>
                     </a>
                 </template>
             </template>

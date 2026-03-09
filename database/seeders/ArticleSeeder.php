@@ -25,5 +25,11 @@ class ArticleSeeder extends Seeder
                     'status' => 1
                 ]);
         }
+
+        // 文章 20 -> 密碼
+        Article::find(20)->update([
+            'status' => 2,
+            'password' => '123'
+        ]);
     }
 }
