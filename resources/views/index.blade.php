@@ -55,11 +55,10 @@
                                 <span class="text-white bg-dark bg-gradient rounded-1 py-2 px-4">閱讀更多<i class="fa-solid fa-angles-right"></i></span></a>
                         </div>
                     </div>
-                    {{-- show more --}}
-                    <div class="d-flex justify-content-center my-5" v-if="articles.current_page < Math.ceil(articles.total / articles.params.perpage)">
-                        <button class="btn btn-primary" @click="articles.params.page++">載入更多</button>
-                    </div>
                 </template>
+
+                {{-- scroll sentinel for infinite scroll --}}
+                <div ref="scrollSentinel" style="height: 1px;"></div>
 
                 {{-- loading --}}
                 <template v-if="articles.loading">
@@ -101,6 +100,11 @@ const app = Vue.createApp({
     mounted() {
         this.getArticles();
     },
+    beforeUnmount() {
+        if (this.scrollObserver) {
+            this.scrollObserver.disconnect();
+        }
+    },
     watch: {
         'articles.params.page': {
             handler(newPage) {
@@ -109,6 +113,9 @@ const app = Vue.createApp({
         },
     },
     computed: {
+        hasMorePages() {
+            return this.articles.current_page < Math.ceil(this.articles.total / this.articles.params.perpage);
+        },
     },
     methods: {
         async getArticles() {
@@ -124,6 +131,20 @@ const app = Vue.createApp({
                 console.error(error);
             } finally {
                 this.articles.loading = false;
+                if (!this.scrollObserver) {
+                    this.$nextTick(() => this.initScrollObserver());
+                }
+            }
+        },
+        initScrollObserver() {
+            this.scrollObserver = new IntersectionObserver((entries) => {
+                const entry = entries[0];
+                if (entry.isIntersecting && !this.articles.loading && this.hasMorePages) {
+                    this.articles.params.page++;
+                }
+            }, { rootMargin: '200px' });
+            if (this.$refs.scrollSentinel) {
+                this.scrollObserver.observe(this.$refs.scrollSentinel);
             }
         },
         verify(item, ref) {
