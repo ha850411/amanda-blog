@@ -136,6 +136,7 @@ const app = Vue.createApp({
                 console.error(error);
             } finally {
                 this.articles.loading = false;
+                this.$nextTick(() => this.checkSentinelVisible());
             }
         },
         initScrollObserver() {
@@ -147,6 +148,13 @@ const app = Vue.createApp({
             }, { rootMargin: '200px' });
             if (this.$refs.scrollSentinel) {
                 this.scrollObserver.observe(this.$refs.scrollSentinel);
+            }
+        },
+        checkSentinelVisible() {
+            if (!this.$refs.scrollSentinel || !this.hasMorePages || this.articles.loading) return;
+            const rect = this.$refs.scrollSentinel.getBoundingClientRect();
+            if (rect.top <= window.innerHeight + 200) {
+                this.articles.params.page++;
             }
         },
         verify(item, ref) {
