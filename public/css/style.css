@@ -409,19 +409,49 @@ ul li:hover .fa-caret-down {
 }
 
 .loading-badge-title {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.24rem;
     color: rgba(66, 60, 54, 0.92);
-    font-size: 1.02rem;
-    font-weight: 600;
+    line-height: 1;
+    position: relative;
+}
+
+.loading-badge-title-amanda {
+    font-family: "Brush Script MT", "Snell Roundhand", "Apple Chancery", "Segoe Script", cursive;
+    font-size: 1.16rem;
+    font-style: italic;
+    font-weight: 500;
     letter-spacing: 0.01em;
-    line-height: 1.2;
+    color: rgba(82, 73, 65, 0.9);
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.loading-badge-title-separator {
+    width: 4px;
+    height: 4px;
+    margin: 0 0.02rem 0.22rem;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(182, 160, 132, 0.76) 0%, rgba(182, 160, 132, 0.34) 58%, rgba(182, 160, 132, 0) 100%);
+    box-shadow: 0 0 0 3px rgba(182, 160, 132, 0.05);
+}
+
+.loading-badge-title-blog {
+    font-family: "Brush Script MT", "Snell Roundhand", "Apple Chancery", "Segoe Script", cursive;
+    color: rgba(129, 114, 96, 0.68);
+    font-size: 0.82rem;
+    font-weight: 500;
+    letter-spacing: 0.015em;
+    text-transform: none;
+    transform: translateY(-0.01rem);
 }
 
 .loading-badge-text {
-    margin-top: 0.22rem;
-    color: rgba(110, 114, 124, 0.72);
-    font-size: 0.72rem;
+    margin-top: 0.18rem;
+    color: rgba(117, 120, 128, 0.58);
+    font-size: 0.62rem;
     font-weight: 600;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
 }
 
@@ -502,8 +532,23 @@ ul li:hover .fa-caret-down {
         font-size: 0.95rem;
     }
 
+    .loading-badge-title-amanda {
+        font-size: 1.04rem;
+    }
+
+    .loading-badge-title-separator {
+        width: 3px;
+        height: 3px;
+        margin-bottom: 0.16rem;
+    }
+
+    .loading-badge-title-blog {
+        font-size: 0.72rem;
+        letter-spacing: 0.01em;
+    }
+
     .loading-badge-text {
-        font-size: 0.66rem;
+        font-size: 0.58rem;
         letter-spacing: 0.14em;
     }
 

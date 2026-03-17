@@ -5,8 +5,11 @@
             <span class="loading-badge-ring"></span>
         </div>
         <div class="loading-badge-copy">
-            <span class="loading-badge-title">Amanda Blog</span>
-            <span class="loading-badge-text">Loading content</span>
+            <span class="loading-badge-title">
+                <span class="loading-badge-title-amanda">Amanda Blog</span>
+                {{-- <span class="loading-badge-title-blog">Amanda Blog</span> --}}
+            </span>
+            <span class="loading-badge-text">載入中</span>
         </div>
     </div>
 </div>
