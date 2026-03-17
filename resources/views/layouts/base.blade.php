@@ -19,24 +19,29 @@
     @yield('styles')
 </head>
 
-<body>
+<body class="page-loading">
     {{-- header --}}
     <div id="app">
         <template v-if="!base.inital">
-            @hasSection('ssr_content')
-                <div class="loading-shell">
-                    @yield('ssr_content')
-                    <div class="loading-overlay" aria-live="polite" aria-busy="true">
-                        @include('layouts.loading')
-                    </div>
+            <div class="loading-page">
+                @include('layouts.loading_header')
+                <div class="loading-page-body">
+                    @hasSection('ssr_content')
+                        <div class="loading-shell">
+                            @yield('ssr_content')
+                            <div class="loading-overlay" aria-live="polite" aria-busy="true">
+                                @include('layouts.loading')
+                            </div>
+                        </div>
+                    @else
+                        <div class="loading-fallback" aria-live="polite" aria-busy="true">
+                            <div class="loading-fallback-inner">
+                                @include('layouts.loading')
+                            </div>
+                        </div>
+                    @endif
                 </div>
-            @else
-                <div class="loading-fallback" aria-live="polite" aria-busy="true">
-                    <div class="loading-fallback-inner">
-                        @include('layouts.loading')
-                    </div>
-                </div>
-            @endif
+            </div>
         </template>
         <template v-else>
             @include('layouts/header')
@@ -94,6 +99,7 @@
             watch: {
             },
             mounted() {
+                document.body.classList.add('page-loading');
                 Promise.all([
                     this.getAbout(),
                     this.getTags(),
@@ -102,6 +108,7 @@
                     this.getNewArticles(),
                 ]).then(() => {
                     this.base.inital = true;
+                    document.body.classList.remove('page-loading');
                 });
                 this.addVisit();
             },
