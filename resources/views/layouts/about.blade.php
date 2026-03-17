@@ -44,7 +44,7 @@
         <h5 class="text-white bg-dark bg-gradient rounded-1 title p-2 my-4">
             網站瀏覽
         </h5>
-        <div class="date">今日瀏覽數：@{{ base.visit.data?.today || 0 }}</div>
-        <div class="total">總瀏覽數：@{{ base.visit.data?.total || 0 }}</div>
+        <div class="date">今日瀏覽數：@{{ formatNumber(base.visit.data?.today) }}</div>
+        <div class="total">總瀏覽數：@{{ formatNumber(base.visit.data?.total) }}</div>
     </div>
 </div>

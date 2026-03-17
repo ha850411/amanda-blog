@@ -182,6 +182,9 @@
                         day: '2-digit',
                     });
                 },
+                formatNumber(value) {
+                    return Number(value || 0).toLocaleString('zh-TW');
+                },
             }
         };
     </script>
