@@ -23,11 +23,20 @@
     {{-- header --}}
     <div id="app">
         <template v-if="!base.inital">
-            <div class="d-flex justify-content-center align-items-center" style="height: 100vh;">
-                <div class="spinner-border text-secondary" role="status">
-                    <span class="visually-hidden">Loading...</span>
+            @hasSection('ssr_content')
+                <div class="loading-shell">
+                    @yield('ssr_content')
+                    <div class="loading-overlay" aria-live="polite" aria-busy="true">
+                        @include('layouts.loading')
+                    </div>
                 </div>
-            </div>
+            @else
+                <div class="loading-fallback" aria-live="polite" aria-busy="true">
+                    <div class="loading-fallback-inner">
+                        @include('layouts.loading')
+                    </div>
+                </div>
+            @endif
         </template>
         <template v-else>
             @include('layouts/header')

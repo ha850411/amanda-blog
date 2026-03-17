@@ -25,8 +25,32 @@ class Article extends Model
         'updated_at' => 'datetime:Y/m/d H:i:s',
     ];
 
+    protected $appends = [
+        'first_image',
+    ];
+
     public function tags()
     {
         return $this->belongsToMany(Tag::class, 'article_tag', 'article_id', 'tag_id');
+    }
+
+    public function getFirstImageAttribute(): ?string
+    {
+        preg_match('/<img[^>]+src=["\'](.*?)["\']/', (string) $this->content, $matches);
+
+        return $matches[1] ?? null;
+    }
+
+    public function getExcerptAttribute(): string
+    {
+        $content = html_entity_decode(strip_tags((string) $this->content), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $content = preg_replace('/\s+/u', ' ', trim($content)) ?? '';
+        $excerpt = mb_substr($content, 0, 150);
+
+        if (mb_strlen($content) > 150) {
+            $excerpt .= '...';
+        }
+
+        return $excerpt;
     }
 }

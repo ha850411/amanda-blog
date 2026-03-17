@@ -6,6 +6,14 @@
         <changefreq>daily</changefreq>
         <priority>1.0</priority>
     </url>
+    @foreach ($tags as $tag)
+    <url>
+        <loc>{{ url('/tag/' . $tag->id) }}</loc>
+        <lastmod>{{ $tag->updated_at ? \Carbon\Carbon::parse($tag->updated_at)->tz('UTC')->toAtomString() : now()->tz('UTC')->toAtomString() }}</lastmod>
+        <changefreq>weekly</changefreq>
+        <priority>0.7</priority>
+    </url>
+    @endforeach
     @foreach ($articles as $article)
     <url>
         <loc>{{ url('/article/' . $article->id) }}</loc>

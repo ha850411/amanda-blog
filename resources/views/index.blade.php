@@ -1,11 +1,15 @@
 @extends('layouts/base')
 
+@section('title')
+<title>{{ $selectedTag ? $selectedTag->name . ' - Amanda | 探店 | 美食 | 生活 | 開箱' : 'Amanda | 探店 | 美食 | 生活 | 開箱' }}</title>
+@endsection
+
 @section('meta')
-<meta name="description" content="Amanda的探店、美食、生活與開箱紀錄">
-<meta property="og:title" content="Amanda | 探店 | 美食 | 生活 | 開箱">
-<meta property="og:description" content="Amanda的探店、美食、生活與開箱紀錄">
+<meta name="description" content="{{ $selectedTag ? 'Amanda 的「' . $selectedTag->name . '」文章整理與分享。' : 'Amanda的探店、美食、生活與開箱紀錄' }}">
+<meta property="og:title" content="{{ $selectedTag ? $selectedTag->name . ' - Amanda | 探店 | 美食 | 生活 | 開箱' : 'Amanda | 探店 | 美食 | 生活 | 開箱' }}">
+<meta property="og:description" content="{{ $selectedTag ? 'Amanda 的「' . $selectedTag->name . '」文章整理與分享。' : 'Amanda的探店、美食、生活與開箱紀錄' }}">
 <meta property="og:type" content="website">
-<meta property="og:url" content="{{ url()->current() }}">
+<meta property="og:url" content="{{ request()->fullUrl() }}">
 <meta property="og:site_name" content="Amanda">
 @endsection
 
