@@ -8,7 +8,6 @@
             <div class="loading-badge-copy">
                 <span class="loading-badge-title">
                     <span class="loading-badge-title-amanda">Amanda Blog</span>
-                    {{-- <span class="loading-badge-title-blog">Amanda Blog</span> --}}
                 </span>
                 <span class="loading-badge-text">載入中</span>
             </div>

@@ -428,11 +428,12 @@ ul li:hover .fa-caret-down {
 }
 
 .loading-badge-title-amanda {
-    font-family: "Brush Script MT", "Snell Roundhand", "Apple Chancery", "Segoe Script", cursive;
-    font-size: 1.16rem;
-    font-style: italic;
-    font-weight: 500;
-    letter-spacing: 0.01em;
+    font-family: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Heiti TC", sans-serif;
+    font-size: 1.08rem;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    line-height: 1.15;
     color: rgba(82, 73, 65, 0.9);
     text-shadow: 0 1px 0 rgba(255, 255, 255, 0.28);
 }
@@ -547,7 +548,7 @@ ul li:hover .fa-caret-down {
     }
 
     .loading-badge-title-amanda {
-        font-size: 1.04rem;
+        font-size: 1rem;
     }
 
     .loading-badge-title-separator {
