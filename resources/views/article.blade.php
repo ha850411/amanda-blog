@@ -112,10 +112,12 @@
                 return {
                     article: @json($article),
                     password: '',
-                    lock: true,
+                    lock: Number(@json($article->status)) === 2,
                 }
             },
             mounted() {
+                this.syncVerifiedArticleState(this.article);
+                this.lock = !this.isArticlePasswordVerified(this.article);
             },
             watch: {
             },
@@ -125,6 +127,7 @@
                 verify() {
                     if (this.password == this.article.password) {
                         this.lock = false;
+                        this.rememberVerifiedArticlePassword(this.article);
                     } else {
                         Swal.fire({
                             icon: 'error',

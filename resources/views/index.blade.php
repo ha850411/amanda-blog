@@ -133,7 +133,8 @@ const app = Vue.createApp({
                 const res = await axios.get(this.articles.route, {
                     params: this.articles.params
                 });
-                this.articles.data = [...this.articles.data, ...res.data.data];
+                const nextArticles = res.data.data.map(item => this.syncVerifiedArticleState(item));
+                this.articles.data = [...this.articles.data, ...nextArticles];
                 this.articles.current_page = res.data.current_page;
                 this.articles.total = res.data.total;
             } catch (error) {
@@ -164,6 +165,7 @@ const app = Vue.createApp({
         verify(item, ref) {
             if (item.password == item.temp_pwd) {
                 item.confirm_password = item.password;
+                this.rememberVerifiedArticlePassword(item);
             } else {
                 Swal.fire({
                     icon: 'error',
