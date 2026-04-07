@@ -61,6 +61,8 @@ Route::get('/about', [Api\AboutController::class, 'index'])
 // 取得文章
 Route::get('/article', [Api\ArticleController::class, 'index'])
     ->name('article.index');
+Route::post('/article/{id}/verify', [Api\ArticleController::class, 'verify'])
+    ->name('article.verify');
 
 // 取得社群 icon
 Route::get('/social', [Api\SocialController::class, 'index'])

@@ -6,6 +6,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: blog_test
       MYSQL_ROOT_HOST: "%"
+      MYSQL_PORT: ${TEST_MYSQL_PORT:-3306}
     networks:
       - web-network
 

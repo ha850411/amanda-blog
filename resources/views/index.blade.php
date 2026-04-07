@@ -41,7 +41,7 @@
                             </div>
                         </div>
                         <div class="article_area">
-                            <div class="row g-3" v-if="item.status == 2 && item.password != item.confirm_password">
+                            <div class="row g-3" v-if="item.status == 2 && !item.is_password_verified">
                                 <div class="col-auto">
                                     <label for="inputPassword2" class="visually-hidden">密碼</label>
                                     <input type="password" class="form-control" placeholder="請輸入您的密碼" v-model="item.temp_pwd" :ref="'pwd_idx_' + index" @keyup.enter="verify(item, 'pwd_idx_' + index)">
@@ -133,7 +133,10 @@ const app = Vue.createApp({
                 const res = await axios.get(this.articles.route, {
                     params: this.articles.params
                 });
-                const nextArticles = res.data.data.map(item => this.syncVerifiedArticleState(item));
+                const nextArticles = res.data.data.map(item => ({
+                    ...item,
+                    temp_pwd: '',
+                }));
                 this.articles.data = [...this.articles.data, ...nextArticles];
                 this.articles.current_page = res.data.current_page;
                 this.articles.total = res.data.total;
@@ -162,11 +165,13 @@ const app = Vue.createApp({
                 this.articles.params.page++;
             }
         },
-        verify(item, ref) {
-            if (item.password == item.temp_pwd) {
-                item.confirm_password = item.password;
-                this.rememberVerifiedArticlePassword(item);
-            } else {
+        async verify(item, ref) {
+            try {
+                const verifiedArticle = await this.verifyArticlePassword(item.id, item.temp_pwd);
+                Object.assign(item, verifiedArticle, {
+                    temp_pwd: '',
+                });
+            } catch (error) {
                 Swal.fire({
                     icon: 'error',
                     title: '密碼錯誤',

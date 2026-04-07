@@ -54,7 +54,7 @@
                             @endif
                         </div>
 
-                        @if ($article->status == 2)
+                        @if ($article->status == 2 && !$isPasswordVerified)
                             <span class="text-secondary">這篇文章受密碼保護，請等待頁面載入後輸入密碼。</span>
                         @else
                             <div class="article-content ck-content">{!! $article->content !!}</div>
@@ -110,25 +110,26 @@
             mixins: [baseMixin],
             data() {
                 return {
-                    article: @json($article),
+                    article: @json($frontendArticle),
                     password: '',
-                    lock: Number(@json($article->status)) === 2,
+                    lock: Number(@json($article->status)) === 2 && !@json($isPasswordVerified),
                 }
             },
             mounted() {
-                this.syncVerifiedArticleState(this.article);
-                this.lock = !this.isArticlePasswordVerified(this.article);
+                this.lock = Number(this.article.status) === 2 && !this.article.is_password_verified;
             },
             watch: {
             },
             computed: {
             },
             methods: {
-                verify() {
-                    if (this.password == this.article.password) {
-                        this.lock = false;
-                        this.rememberVerifiedArticlePassword(this.article);
-                    } else {
+                async verify() {
+                    try {
+                        const verifiedArticle = await this.verifyArticlePassword(this.article.id, this.password);
+                        Object.assign(this.article, verifiedArticle);
+                        this.lock = !this.article.is_password_verified;
+                        this.password = '';
+                    } catch (error) {
                         Swal.fire({
                             icon: 'error',
                             title: '密碼錯誤',

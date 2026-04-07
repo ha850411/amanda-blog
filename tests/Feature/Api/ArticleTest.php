@@ -5,6 +5,7 @@ namespace Tests\Feature\Api;
 use App\Models\Admin;
 use App\Models\Article;
 use App\Models\Tag;
+use App\Support\ArticlePasswordCache;
 use Carbon\Carbon;
 
 class ArticleTest extends ApiTestCase
@@ -116,6 +117,7 @@ class ArticleTest extends ApiTestCase
     {
         Article::factory()->create([
             'content' => '<p><img src="https://example.com/photo.jpg" /></p>',
+            'status' => 1,
         ]);
 
         $response = $this->getJson('/api/article?show_first_image=1');
@@ -130,7 +132,10 @@ class ArticleTest extends ApiTestCase
     /** 無圖片的文章，first_image 應為 null */
     public function testGetArticlesFirstImageIsNullWhenNoImage(): void
     {
-        Article::factory()->create(['content' => '<p>純文字內容</p>']);
+        Article::factory()->create([
+            'content' => '<p>純文字內容</p>',
+            'status' => 1,
+        ]);
 
         $response = $this->getJson('/api/article?show_first_image=1');
 
@@ -252,6 +257,73 @@ class ArticleTest extends ApiTestCase
             ->deleteJson("/api/article/{$article->id}");
 
         $this->assertDatabaseMissing('article_tag', ['article_id' => $article->id]);
+    }
+
+    /** 錯誤密碼不應通過文章驗證 */
+    public function testVerifyArticleRejectsWrongPassword(): void
+    {
+        config(['cache.default' => 'array']);
+
+        $article = Article::factory()->create([
+            'status' => 2,
+            'password' => 'secret',
+        ]);
+
+        $response = $this->postJson("/api/article/{$article->id}/verify", [
+            'password' => 'wrong-password',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'status' => 'error',
+                'message' => '密碼錯誤',
+            ]);
+    }
+
+    /** 驗證成功後，後續同使用者 cookie 的列表查詢應帶出已驗證狀態 */
+    public function testVerifiedArticleStateIsReadFromLaravelCache(): void
+    {
+        config(['cache.default' => 'file']);
+        app('cache')->setDefaultDriver('file');
+
+        $article = Article::factory()->create([
+            'status' => 2,
+            'password' => 'secret',
+            'content' => '<p><img src="https://example.com/protected.jpg" /></p>',
+        ]);
+
+        $cacheCookieName = app(ArticlePasswordCache::class)->cookieName();
+
+        $verifyResponse = $this->postJson("/api/article/{$article->id}/verify", [
+            'password' => 'secret',
+        ]);
+
+        $verifyResponse->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+                'data' => [
+                    'id' => $article->id,
+                    'is_password_verified' => true,
+                ],
+            ]);
+
+        $cacheCookie = collect($verifyResponse->baseResponse->headers->getCookies())
+            ->first(fn ($cookie) => $cookie->getName() === $cacheCookieName);
+
+        $this->assertNotNull($cacheCookie);
+
+        $listResponse = $this->withCredentials()
+            ->withUnencryptedCookie($cacheCookieName, $cacheCookie->getValue())
+            ->getJson('/api/article?show_first_image=1');
+
+        $listResponse->assertStatus(200);
+
+        $verifiedArticle = collect($listResponse->json('data'))
+            ->firstWhere('id', $article->id);
+
+        $this->assertNotNull($verifiedArticle);
+        $this->assertTrue($verifiedArticle['is_password_verified']);
+        $this->assertEquals('https://example.com/protected.jpg', $verifiedArticle['first_image']);
     }
 
     /** 未登入時 POST /api/article 應回傳 401 */

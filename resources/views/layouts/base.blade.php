@@ -61,7 +61,6 @@
             data() {
                 return {
                     base: {
-                        articlePasswordStorageKey: 'verified_article_passwords',
                         isMenuOpen: false,
                         inital: false,
                         tagId: '{{ $tagId ?? null }}',
@@ -93,6 +92,7 @@
                             loading: false,
                             data: [],
                         },
+                        article_verify_route: '{{ route("api.article.verify", ["id" => "__ARTICLE_ID__"]) }}',
                         detail_route: '{{ route("article", ["id" => "__ARTICLE_ID__"]) }}',
                     }
                 }
@@ -176,6 +176,9 @@
                 getArticleUrl(id) {
                     return this.base.detail_route.replace('__ARTICLE_ID__', encodeURIComponent(String(id)));
                 },
+                getArticleVerifyUrl(id) {
+                    return this.base.article_verify_route.replace('__ARTICLE_ID__', encodeURIComponent(String(id)));
+                },
                 formatDate(dateString) {
                     return new Date(dateString).toLocaleDateString('zh-TW', {
                         year: 'numeric',
@@ -186,77 +189,12 @@
                 formatNumber(value) {
                     return Number(value || 0).toLocaleString('zh-TW');
                 },
-                getVerifiedArticlePasswords() {
-                    if (typeof window === 'undefined') {
-                        return {};
-                    }
+                async verifyArticlePassword(articleId, password) {
+                    const res = await axios.post(this.getArticleVerifyUrl(articleId), {
+                        password,
+                    });
 
-                    try {
-                        const raw = window.localStorage.getItem(this.base.articlePasswordStorageKey);
-                        const parsed = raw ? JSON.parse(raw) : {};
-
-                        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                            return {};
-                        }
-
-                        return parsed;
-                    } catch (error) {
-                        console.error(error);
-                        return {};
-                    }
-                },
-                setVerifiedArticlePasswords(passwords) {
-                    if (typeof window === 'undefined') {
-                        return;
-                    }
-
-                    try {
-                        window.localStorage.setItem(
-                            this.base.articlePasswordStorageKey,
-                            JSON.stringify(passwords)
-                        );
-                    } catch (error) {
-                        console.error(error);
-                    }
-                },
-                rememberVerifiedArticlePassword(article) {
-                    if (!article?.id || Number(article.status) !== 2) {
-                        return;
-                    }
-
-                    const passwords = this.getVerifiedArticlePasswords();
-                    passwords[String(article.id)] = article.password ?? '';
-                    this.setVerifiedArticlePasswords(passwords);
-                },
-                isArticlePasswordVerified(article) {
-                    if (!article?.id || Number(article.status) !== 2) {
-                        return false;
-                    }
-
-                    const passwords = this.getVerifiedArticlePasswords();
-                    return passwords[String(article.id)] === (article.password ?? '');
-                },
-                syncVerifiedArticleState(article) {
-                    if (!article || Number(article.status) !== 2) {
-                        return article;
-                    }
-
-                    const passwords = this.getVerifiedArticlePasswords();
-                    const articleId = String(article.id);
-                    const currentPassword = article.password ?? '';
-
-                    if (passwords[articleId] === currentPassword) {
-                        article.confirm_password = article.password;
-                    } else {
-                        article.confirm_password = '';
-
-                        if (typeof passwords[articleId] !== 'undefined') {
-                            delete passwords[articleId];
-                            this.setVerifiedArticlePasswords(passwords);
-                        }
-                    }
-
-                    return article;
+                    return res.data.data;
                 },
             }
         };

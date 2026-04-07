@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Article;
 use App\Models\Tag;
+use App\Support\ArticlePasswordCache;
 
 class IndexController extends Controller
 {
@@ -25,11 +26,12 @@ class IndexController extends Controller
         ]);
     }
 
-    public function article(int $id)
+    public function article(Request $request, int $id, ArticlePasswordCache $articlePasswordCache)
     {
         $article = Article::where('id', $id)
             ->with('tags')
             ->firstOrFail();
+        $isPasswordVerified = $articlePasswordCache->isVerified($request, $article);
 
         $description = $article->excerpt;
         $articleUrl = url()->current();
@@ -63,6 +65,20 @@ class IndexController extends Controller
 
         return view('article')->with([
             'article' => $article,
+            'frontendArticle' => [
+                'id' => $article->id,
+                'title' => $article->title,
+                'content' => (int) $article->status === 2 && !$isPasswordVerified ? '' : $article->content,
+                'status' => $article->status,
+                'created_at' => $article->created_at?->format('Y/m/d H:i:s'),
+                'updated_at' => $article->updated_at?->format('Y/m/d H:i:s'),
+                'tags' => $article->tags->map(fn ($tag) => [
+                    'id' => $tag->id,
+                    'name' => $tag->name,
+                ])->values()->all(),
+                'is_password_verified' => $isPasswordVerified,
+            ],
+            'isPasswordVerified' => $isPasswordVerified,
             'description' => $description,
             'articleUrl' => $articleUrl,
             'articleImage' => $articleImage,

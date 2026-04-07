@@ -7,11 +7,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Models\Article;
+use App\Support\ArticlePasswordCache;
 use Carbon\Carbon;
 
 class ArticleController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request, ArticlePasswordCache $articlePasswordCache)
     {
         try {
             $page = $request->input('page', 1);
@@ -41,16 +42,29 @@ class ArticleController extends Controller
                 })
                 ->paginate($perpage, ['*'], 'page', $page);
 
-            $data = $articles->items();
+            $showFirstImage = $request->boolean('show_first_image');
+            $data = collect($articles->items())
+                ->map(function (Article $article) use ($request, $articlePasswordCache, $showFirstImage) {
+                    $isPasswordVerified = $articlePasswordCache->isVerified($request, $article);
 
-            if ($request->has("show_first_image")) {
-                $data = array_map(function ($item) {
-                    // 從 data->content 中找出第一個 <img> 標籤的 src 屬性值
-                    preg_match('/<img.*?src=["\'](.*?)["\']/', $item->content, $matches);
-                    $item->first_image = $matches[1] ?? null;
-                    return $item;
-                }, $data);
-            }
+                    return [
+                        'id' => $article->id,
+                        'title' => $article->title,
+                        'status' => $article->status,
+                        'created_at' => $article->created_at?->format('Y/m/d H:i:s'),
+                        'updated_at' => $article->updated_at?->format('Y/m/d H:i:s'),
+                        'tags' => $article->tags->map(fn ($tag) => [
+                            'id' => $tag->id,
+                            'name' => $tag->name,
+                        ])->values()->all(),
+                        'is_password_verified' => $isPasswordVerified,
+                        'first_image' => $showFirstImage
+                            ? $this->resolveFirstImage($article, $isPasswordVerified)
+                            : null,
+                    ];
+                })
+                ->values()
+                ->all();
 
             return response()->json([
                 'status' => 'success',
@@ -66,6 +80,48 @@ class ArticleController extends Controller
                 'message' => $e->getMessage(),
             ]);
         }
+    }
+
+    public function verify(Request $request, int $id, ArticlePasswordCache $articlePasswordCache)
+    {
+        $article = Article::query()
+            ->with('tags')
+            ->findOrFail($id);
+
+        if ((int) $article->status !== 2) {
+            return response()->json([
+                'status' => 'success',
+                'data' => $this->buildVerifiedArticlePayload($article),
+            ]);
+        }
+
+        $validated = $request->validate([
+            'password' => ['required', 'string'],
+        ]);
+
+        if (!hash_equals((string) $article->password, (string) $validated['password'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => '密碼錯誤',
+            ], 422);
+        }
+
+        $clientId = $articlePasswordCache->remember($request, $article);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $this->buildVerifiedArticlePayload($article),
+        ])->cookie(cookie()->make(
+            $articlePasswordCache->cookieName(),
+            $clientId,
+            60 * 24,
+            '/',
+            null,
+            false,
+            true,
+            false,
+            'lax'
+        ));
     }
 
     public function store(Request $request)
@@ -131,5 +187,26 @@ class ArticleController extends Controller
             ]);
         }
         return response()->noContent();
+    }
+
+    private function buildVerifiedArticlePayload(Article $article): array
+    {
+        return [
+            'id' => $article->id,
+            'content' => $article->content,
+            'first_image' => $this->resolveFirstImage($article, true),
+            'is_password_verified' => true,
+        ];
+    }
+
+    private function resolveFirstImage(Article $article, bool $isPasswordVerified): ?string
+    {
+        if ((int) $article->status === 2 && !$isPasswordVerified) {
+            return null;
+        }
+
+        preg_match('/<img.*?src=["\'](.*?)["\']/', (string) $article->content, $matches);
+
+        return $matches[1] ?? null;
     }
 }
