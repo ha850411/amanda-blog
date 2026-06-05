@@ -28,7 +28,11 @@ class ArticleController extends Controller
                     $query->where('created_at', '<=', Carbon::parse($request->input('end'))->endOfDay());
                 })
                 ->when($request->input('status'), function ($query) use ($request) {
-                    $query->where('status', $request->input('status'));
+                    if (is_array($request->input('status'))) {
+                        $query->whereIn('status', $request->input('status'));
+                    } else {
+                        $query->where('status', $request->input('status'));
+                    }
                 })
                 ->when($request->input('tag'), function ($query) use ($request) {
                     $query->whereHas('tags', function ($query) use ($request) {

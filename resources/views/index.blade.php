@@ -94,6 +94,7 @@ const app = Vue.createApp({
                     page: 1,
                     perpage: 5,
                     show_first_image: 1,
+                    status: [1, 2],
                     tagId: '{{ $tagId ?? null }}',
                 },
                 current_page: 1,

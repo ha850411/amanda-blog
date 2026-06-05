@@ -175,6 +175,7 @@
                             params: {
                                 page: 1,
                                 perpage: 3,
+                                status: [1, 2],
                             }
                         });
                         this.base.newArticles.data = res.data.data;
