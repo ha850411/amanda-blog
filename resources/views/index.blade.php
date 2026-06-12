@@ -30,7 +30,7 @@
                         <div class="title_area">
                             <div class="title d-flex justify-content-between align-items-center">
                                 <h4 class="m-0 py-3">@{{ item.title }}</h4>
-                                <div class="time py-2 text-secondary">@{{ formatDate(item.created_at) }}</div>
+                                <div class="time py-2 text-secondary">@{{ formatDate(item.updated_at) }}</div>
                             </div>
                             <div class="tag py-2 mb-4" v-if="item.tags && item.tags.length > 0">
                                 <template v-for="(tag, tagIndex) in item.tags" :key="tagIndex">

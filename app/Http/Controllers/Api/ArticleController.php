@@ -20,7 +20,7 @@ class ArticleController extends Controller
 
             $query = Article::query()->with('tags');
 
-            $articles = $query->orderBy('id', 'desc')
+            $articles = $query->orderBy('updated_at', 'desc')
                 ->when($request->input('start'), function ($query) use ($request) {
                     $query->where('created_at', '>=', Carbon::parse($request->input('start'))->startOfDay());
                 })
