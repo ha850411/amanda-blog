@@ -11,11 +11,25 @@ Route::get('/', [IndexController::class, 'index'])
 Route::get('/tag/{tagId}', [IndexController::class, 'tag'])
     ->name('tag');
 
+Route::get('/article/{id}.md', [IndexController::class, 'articleMarkdown'])
+    ->name('article.markdown');
+
 Route::get('/article/{id}', [IndexController::class, 'article'])
     ->name('article');
 
 Route::get('/sitemap.xml', [IndexController::class, 'sitemap'])
     ->name('sitemap');
+
+Route::get('/llms.txt', [IndexController::class, 'llmsTxt'])
+    ->name('llms.txt');
+
+Route::get('/llms-full.txt', [IndexController::class, 'llmsFullTxt'])
+    ->name('llms.full.txt');
+
+Route::get('/rss.xml', [IndexController::class, 'rss'])
+    ->name('rss');
+
+Route::get('/feed', [IndexController::class, 'rss']);
 
 
 Route::prefix('admin')->group(function () {

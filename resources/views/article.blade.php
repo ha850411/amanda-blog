@@ -10,6 +10,7 @@
 <meta property="og:description" content="{{ $description }}">
 <meta property="og:type" content="article">
 <meta property="og:url" content="{{ $articleUrl }}">
+<link rel="alternate" type="text/markdown" href="{{ route('article.markdown', ['id' => $article->id]) }}" title="Markdown Version" />
 @if($articleImage)
 <meta property="og:image" content="{{ $articleImage }}">
 @endif
@@ -33,15 +34,15 @@
 @endsection
 
 @section('ssr_content')
-    <div class="container">
+    <main class="container">
         <div class="col-12">
             <div class="row">
                 <div class="col-md-8 col-12">
-                    <div class="post my-4">
-                        <div class="title_area">
+                    <article class="post my-4" itemscope itemtype="https://schema.org/BlogPosting">
+                        <header class="title_area">
                             <div class="title d-flex justify-content-between align-items-center">
-                                <h1 class="h4 m-0 py-3">{{ $article->title }}</h1>
-                                <div class="time py-2 text-secondary">{{ $article->created_at?->format('Y/m/d') }}</div>
+                                <h1 class="h4 m-0 py-3" itemprop="headline">{{ $article->title }}</h1>
+                                <time class="time py-2 text-secondary" datetime="{{ $article->created_at?->toIso8601String() }}" itemprop="datePublished">{{ $article->created_at?->format('Y/m/d') }}</time>
                             </div>
                             @if ($article->tags && $article->tags->count() > 0)
                                 <div class="tag py-2 mb-4">
@@ -52,18 +53,18 @@
                                     @endforeach
                                 </div>
                             @endif
-                        </div>
+                        </header>
 
                         @if ($article->status == 2 && !$isPasswordVerified)
                             <span class="text-secondary">這篇文章受密碼保護，請等待頁面載入後輸入密碼。</span>
                         @else
-                            <div class="article-content ck-content">{!! $article->content !!}</div>
+                            <div class="article-content ck-content" itemprop="articleBody">{!! $article->content !!}</div>
                         @endif
-                    </div>
+                    </article>
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 @endsection
 
 @section('content')

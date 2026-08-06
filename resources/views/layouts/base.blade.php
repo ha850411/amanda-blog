@@ -11,6 +11,10 @@
         <title>Amanda | 探店 | 美食 | 生活 | 開箱</title>
     @endif
     <link rel="canonical" href="{{ url()->current() }}" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="author" content="Amanda">
+    <link rel="alternate" type="application/rss+xml" title="Amanda's Blog RSS Feed" href="{{ url('/rss.xml') }}" />
+    <link rel="llms-txt" type="text/markdown" title="LLMs Summary Index" href="{{ url('/llms.txt') }}" />
     @yield('meta')
     <link rel="icon" href="{{ asset('images/favicon.png') }}" type="image/png">
     <link rel="stylesheet" href="{{ asset('css/bootstrap.min.css') }}">

@@ -11,6 +11,21 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{ request()->fullUrl() }}">
 <meta property="og:site_name" content="Amanda">
+@if (isset($siteJsonLd))
+<script type="application/ld+json">{!! json_encode($siteJsonLd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) !!}</script>
+@endif
+@endsection
+
+@section('ssr_content')
+<main class="container my-4">
+    <div class="row">
+        <div class="col-md-8 col-12">
+            <h1 class="h3">{{ $selectedTag ? $selectedTag->name . ' - 文章列表' : 'Amanda 的探店、美食、生活與開箱紀錄' }}</h1>
+            <p class="text-secondary">{{ $selectedTag ? 'Amanda 的「' . $selectedTag->name . '」文章整理與分享。' : '歡迎來到 Amanda 的部落格，閱讀最新探店、美食、生活與開箱文章。' }}</p>
+            <p><a href="{{ url('/llms.txt') }}">LLMs.txt 文字摘要</a> | <a href="{{ url('/rss.xml') }}">RSS 訂閱</a></p>
+        </div>
+    </div>
+</main>
 @endsection
 
 @section('content')
