@@ -18,6 +18,9 @@ class LineWebhookTest extends TestCase
             'services.line.channel_access_token' => 'test-token',
             'services.bo3.base_url' => 'https://bo3.gg',
             'services.bo3.timezone' => 'Asia/Taipei',
+            'services.odds.api_key' => null,
+            'services.odds.base_url' => 'https://api.odds-api.io/v3',
+            'services.odds.bookmakers' => 'Pinnacle,Bet365',
         ]);
 
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-11 09:00:00', 'Asia/Taipei'));
@@ -76,6 +79,8 @@ class LineWebhookTest extends TestCase
                 && $request['replyToken'] === 'reply-token'
                 && str_contains($text, 'LoL 08/12 賽程（S/A Tier，台灣時間）')
                 && str_contains($text, '07:00｜Team Alpha vs Team Beta')
+                && str_contains($text, '賽事：LCK 2026 Summer')
+                && str_contains($text, '獨贏賠率：暫無盤口')
                 && ! str_contains($text, 'Previous Day Match');
         });
     }
@@ -122,6 +127,59 @@ class LineWebhookTest extends TestCase
             && ! isset($request['tiers']));
     }
 
+    public function test_tournament_and_best_moneyline_odds_are_included(): void
+    {
+        config([
+            'services.odds.api_key' => 'odds-test-key',
+            'services.odds.bookmakers' => null,
+        ]);
+
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.odds-api.io/v3/events*' => Http::response([[
+                'id' => 456,
+                'home' => 'Team Alpha',
+                'away' => 'Team Beta',
+                'date' => '2026-08-11T23:00:00Z',
+                'league' => ['name' => 'League of Legends'],
+                'sport' => ['name' => 'Esports'],
+                'status' => 'pending',
+            ]], 200),
+            'https://api.odds-api.io/v3/bookmakers/selected*' => Http::response([
+                'bookmakers' => ['Stake', 'Bet365'],
+                'count' => 2,
+            ], 200),
+            'https://api.odds-api.io/v3/odds/multi*' => Http::response([[
+                'id' => 456,
+                'home' => 'Team Alpha',
+                'away' => 'Team Beta',
+                'bookmakers' => [
+                    'Stake' => [[
+                        'name' => 'ML',
+                        'odds' => [['home' => '1.55', 'away' => '2.40']],
+                    ]],
+                    'Bet365' => [[
+                        'name' => 'ML',
+                        'odds' => [['home' => '1.60', 'away' => '2.30']],
+                    ]],
+                ],
+            ]], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->respond('!lol 明天 team="Team Alpha"');
+
+        $this->assertStringContainsString('賽事：LCK 2026 Summer', $reply);
+        $this->assertStringContainsString('Team Alpha 1.60（Bet365）', $reply);
+        $this->assertStringContainsString('Team Beta 2.40（Stake）', $reply);
+
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/events')
+            && $request['sport'] === 'esports'
+            && $request['apiKey'] === 'odds-test-key');
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/odds/multi')
+            && $request['eventIds'] === '456'
+            && $request['bookmakers'] === 'Stake,Bet365');
+    }
+
     private function callWebhook(string $body, string $signature)
     {
         return $this->call(
@@ -159,7 +217,11 @@ class LineWebhookTest extends TestCase
             ],
         ];
 
-        return '<html><script id="micro-markup" type="application/ld+json">'
+        return '<html><div class="table-row table-row--upcoming">'
+            .'<a href="/lol/matches/previous"></a><p class="tournament-name">KeSPA Cup 2026</p></div>'
+            .'<div class="table-row table-row--upcoming">'
+            .'<a href="/lol/matches/alpha-vs-beta"></a><p class="tournament-name">LCK 2026 Summer</p></div>'
+            .'<script id="micro-markup" type="application/ld+json">'
             .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
             .'</script></html>';
     }

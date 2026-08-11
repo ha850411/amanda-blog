@@ -13,7 +13,10 @@ class LineScheduleBot
         'lol' => 'LoL',
     ];
 
-    public function __construct(private readonly Bo3ScheduleService $schedules) {}
+    public function __construct(
+        private readonly Bo3ScheduleService $schedules,
+        private readonly OddsApiService $odds,
+    ) {}
 
     public function respond(string $message): string
     {
@@ -55,13 +58,29 @@ class LineScheduleBot
             return "{$label} {$dateLabel} 查無賽程。\n資料來源：bo3.gg";
         }
 
+        $visibleMatches = array_slice($matches, 0, $command['limit']);
+        $visibleMatches = $this->odds->enrich($visibleMatches, $command['date']);
         $lines = ["{$label} {$dateLabel} 賽程（{$tierLabel}，台灣時間）"];
 
-        foreach (array_slice($matches, 0, $command['limit']) as $match) {
+        foreach ($visibleMatches as $match) {
+            $odds = $match['odds'] === null
+                ? '暫無盤口'
+                : sprintf(
+                    '%s %.2f（%s）｜%s %.2f（%s）',
+                    $match['team1'],
+                    $match['odds']['team1']['price'],
+                    $match['odds']['team1']['bookmaker'],
+                    $match['team2'],
+                    $match['odds']['team2']['price'],
+                    $match['odds']['team2']['bookmaker'],
+                );
+
             $lines[] = sprintf(
-                "\n%s｜%s\n%s",
+                "\n%s｜%s\n賽事：%s\n獨贏賠率：%s\n%s",
                 $match['start_at']->format('H:i'),
                 $match['name'],
+                $match['tournament'],
+                $odds,
                 $match['url'],
             );
         }

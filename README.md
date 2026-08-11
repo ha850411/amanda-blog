@@ -50,6 +50,8 @@ LINE_CHANNEL_ACCESS_TOKEN=你的_Channel_Access_Token
 
 指令格式為 `!lol 08/11`、`!val 今天`、`!cs 明天`，日期支援 `MM/DD`、今天、明天與後天，預設只查 S/A Tier。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。
 
+每場回覆會顯示 bo3.gg 的賽事名稱，並以 Odds-API.io 的日期、開賽時間與雙方隊名匹配盤口。設定 `ODDS_API_KEY` 後會顯示最佳的 ML（獨贏）賠率；`ODDS_API_BOOKMAKERS` 留空時自動使用帳號已選擇的莊家，沒有匹配盤口時顯示「暫無盤口」。
+
 # 程式架構說明
 
 本專案為 Laravel + Vue.js 部落格系統，分為**前台**（文章閱讀）與**後台**（管理員 CMS）兩大區塊。

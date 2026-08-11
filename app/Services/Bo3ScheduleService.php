@@ -17,7 +17,7 @@ class Bo3ScheduleService
     ];
 
     /**
-     * @return array<int, array{name: string, start_at: CarbonImmutable, url: string}>
+     * @return array<int, array{name: string, team1: string, team2: string, tournament: string, start_at: CarbonImmutable, url: string}>
      */
     public function forDate(string $game, CarbonImmutable $date, array $tiers = ['s', 'a']): array
     {
@@ -56,7 +56,7 @@ class Bo3ScheduleService
     }
 
     /**
-     * @return array<int, array{name: string, start_at: CarbonImmutable, url: string}>
+     * @return array<int, array{name: string, team1: string, team2: string, tournament: string, start_at: CarbonImmutable, url: string}>
      */
     private function fetch(string $game, string $date, array $tiers): array
     {
@@ -80,16 +80,23 @@ class Bo3ScheduleService
 
         $events = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+        $tournaments = $this->extractTournaments($response->body());
 
         return collect($events)
             ->filter(fn (mixed $event): bool => is_array($event)
                 && ($event['@type'] ?? null) === 'SportsEvent'
                 && isset($event['name'], $event['startDate'], $event['url']))
-            ->map(function (array $event) use ($timezone): array {
+            ->map(function (array $event) use ($timezone, $tournaments): array {
                 $name = preg_replace('/\s+/u', ' ', (string) $event['name']);
+                $name = trim($name ?? (string) $event['name']);
+                $teams = preg_split('/\s+vs\s+/iu', $name, 2);
+                $path = (string) parse_url((string) $event['url'], PHP_URL_PATH);
 
                 return [
-                    'name' => trim($name ?? (string) $event['name']),
+                    'name' => $name,
+                    'team1' => trim($teams[0] ?? $name),
+                    'team2' => trim($teams[1] ?? ''),
+                    'tournament' => $tournaments[$path] ?? '未知賽事',
                     'start_at' => CarbonImmutable::parse($event['startDate'])->setTimezone($timezone),
                     'url' => (string) $event['url'],
                 ];
@@ -98,6 +105,40 @@ class Bo3ScheduleService
             ->sortBy('start_at')
             ->values()
             ->all();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function extractTournaments(string $html): array
+    {
+        $document = new \DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        $document->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        $xpath = new \DOMXPath($document);
+        $rows = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " table-row ")]');
+        $result = [];
+
+        foreach ($rows ?: [] as $row) {
+            $matchLink = $xpath->query('.//a[contains(@href, "/matches/")]', $row)?->item(0);
+            $tournament = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " tournament-name ")]', $row)?->item(0);
+
+            if ($matchLink === null || $tournament === null) {
+                continue;
+            }
+
+            $path = (string) parse_url($matchLink->getAttribute('href'), PHP_URL_PATH);
+            $name = preg_replace('/\s+/u', ' ', $tournament->textContent);
+
+            if ($path !== '' && trim($name ?? '') !== '') {
+                $result[$path] = trim($name);
+            }
+        }
+
+        return $result;
     }
 
     /**
