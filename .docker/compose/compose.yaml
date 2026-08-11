@@ -1,6 +1,6 @@
 services:
   service:
-    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-v3}"
+    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-local}"
     build:
       context: ../.
       dockerfile: Dockerfile
@@ -39,7 +39,7 @@ services:
       - web-network
 
   scheduler:
-    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-v3}"
+    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-local}"
     command: ["php", "artisan", "schedule:work"]
     restart: unless-stopped
     environment:

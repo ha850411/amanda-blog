@@ -39,6 +39,10 @@
 - 前台: http://localhost:8091
 - 後台: http://localhost:8091/admin
 
+# Runtime image
+
+透過 `make deploy-up` 部署時，Runtime image tag 會依 `.docker/Dockerfile`、PHP base image 與 Composer base image自動產生；相同建置內容會沿用既有 image，建置內容有變更時則會自動使用新 tag。可執行 `make runtime-tag` 查看目前 tag，不需在 `.env` 手動維護 `RUNTIME_IMAGE_TAG`。
+
 # LINE 賽程 Bot
 
 Webhook URL 設為 `https://你的網域/api/line/webhook`，並在 `.env` 設定：
@@ -48,6 +52,7 @@ LINE_CHANNEL_SECRET=你的_Messaging_API_Channel_Secret
 LINE_CHANNEL_ACCESS_TOKEN=你的_Channel_Access_Token
 # 圖片必須位於 LINE 可讀取的公開 HTTPS 網址；正式環境建議使用 s3
 LINE_SCHEDULE_IMAGE_DISK=s3
+LINE_SCHEDULE_IMAGE_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 LINE_SCHEDULE_IMAGE_RETENTION_DAYS=7
 ```
 

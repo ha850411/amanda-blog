@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
-# Pin the upstream manifests so rebuilding the same runtime version is
-# reproducible. Update the digest together with RUNTIME_IMAGE_TAG.
+# Pin the upstream manifests so rebuilding the same runtime definition is
+# reproducible. The Makefile includes these values in the generated image tag.
 ARG PHP_IMAGE=php:8.4-fpm-bookworm@sha256:c5fb7a0c02f4efe280691910c8b734995fa83598cdcf3115ef5dcb2e4617681c
 ARG COMPOSER_IMAGE=composer:2@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244481723664138fd36d5040
 
@@ -41,7 +41,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     freetds-dev \
     libgssapi-krb5-2 \
     ca-certificates \
-    && update-ca-certificates
+    && update-ca-certificates \
+    && test -r /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 
 # 使用 cache mount 保留 PECL 下載檔，runtime layer 失效時不必全部重抓。
 RUN --mount=type=cache,target=/tmp/pear/cache,sharing=locked \
