@@ -8,15 +8,6 @@ ARG COMPOSER_IMAGE=composer:2@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244
 FROM ${COMPOSER_IMAGE} AS composer
 FROM ${PHP_IMAGE}
 
-LABEL org.opencontainers.image.source="https://github.com/ha850411/amanda-blog" \
-    org.opencontainers.image.description="PHP runtime for Amanda Blog" \
-    org.opencontainers.image.licenses="MIT"
-
-ARG REDIS_EXTENSION_VERSION=6.3.0
-ARG IMAGICK_EXTENSION_VERSION=3.8.1
-ARG MEMCACHED_EXTENSION_VERSION=3.4.0
-ARG XDEBUG_EXTENSION_VERSION=3.5.3
-
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -48,6 +39,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && update-ca-certificates \
     && test -r /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 
+ARG REDIS_EXTENSION_VERSION=6.3.0
+ARG IMAGICK_EXTENSION_VERSION=3.8.1
+ARG MEMCACHED_EXTENSION_VERSION=3.4.0
+ARG XDEBUG_EXTENSION_VERSION=3.5.3
+
 # 使用 cache mount 保留 PECL 下載檔，runtime layer 失效時不必全部重抓。
 RUN --mount=type=cache,target=/tmp/pear/cache,sharing=locked \
     pecl install \
@@ -69,6 +65,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
+
+LABEL org.opencontainers.image.source="https://github.com/ha850411/amanda-blog" \
+    org.opencontainers.image.description="PHP runtime for Amanda Blog" \
+    org.opencontainers.image.licenses="MIT"
 
 EXPOSE 9000
 

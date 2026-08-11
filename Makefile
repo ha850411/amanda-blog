@@ -57,6 +57,7 @@ runtime-build-push:
 		docker buildx create --name "$(BUILDX_BUILDER)" --driver docker-container
 	docker buildx build \
 		--builder "$(BUILDX_BUILDER)" \
+		--progress=plain \
 		--platform "$(RUNTIME_PLATFORMS)" \
 		--file .docker/Dockerfile \
 		--tag "$(PUBLISH_RUNTIME_IMAGE)" \
