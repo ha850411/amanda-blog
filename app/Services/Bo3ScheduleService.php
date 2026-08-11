@@ -28,7 +28,7 @@ class Bo3ScheduleService
         $tiers = $this->normalizeTiers($tiers);
         $dateString = $date->format('Y-m-d');
         $tierKey = $tiers === [] ? 'all' : implode(',', $tiers);
-        $cacheKey = "bo3-schedule:v2:{$game}:{$dateString}:{$tierKey}";
+        $cacheKey = "bo3-schedule:v3:{$game}:{$dateString}:{$tierKey}";
 
         try {
             $cached = Cache::get($cacheKey);
@@ -107,7 +107,7 @@ class Bo3ScheduleService
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         $metadata = $this->extractMatchMetadata($response->body());
 
-        return collect($events)
+        $structuredMatches = collect($events)
             ->filter(fn (mixed $event): bool => is_array($event)
                 && ($event['@type'] ?? null) === 'SportsEvent'
                 && isset($event['name'], $event['startDate'], $event['url']))
@@ -128,9 +128,118 @@ class Bo3ScheduleService
                 ];
             })
             ->filter(fn (array $event): bool => $event['start_at']->format('Y-m-d') === $date)
+            ->all();
+
+        // bo3.gg leaves matches with an undecided participant (for example,
+        // "TBD vs JD Gaming") out of its JSON-LD SportsEvent list. The visible
+        // schedule table still contains those rows, so merge it in as a fallback.
+        $tableMatches = $this->extractTableMatches($response->body(), $game, $date, $timezone);
+        $knownMatches = collect($structuredMatches)
+            ->mapWithKeys(fn (array $match): array => [$this->matchKey($match) => true])
+            ->all();
+
+        foreach ($tableMatches as $match) {
+            $key = $this->matchKey($match);
+
+            if (! isset($knownMatches[$key])) {
+                $structuredMatches[] = $match;
+                $knownMatches[$key] = true;
+            }
+        }
+
+        return collect($structuredMatches)
             ->sortBy('start_at')
             ->values()
             ->all();
+    }
+
+    /**
+     * Extract schedule rows that may be missing from bo3.gg's JSON-LD data.
+     *
+     * Times in the server-rendered table are UTC. The browser changes them to
+     * the visitor's timezone after hydration, so convert them before returning.
+     *
+     * @return array<int, array{name: string, team1: string, team2: string, tournament: string, format: string, start_at: CarbonImmutable, url: string}>
+     */
+    private function extractTableMatches(string $html, string $game, string $date, string $timezone): array
+    {
+        $document = new \DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        $document->loadHTML($html, LIBXML_NOERROR | LIBXML_NOWARNING);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        $xpath = new \DOMXPath($document);
+        $rows = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " table-row--upcoming ")]');
+        $result = [];
+
+        foreach ($rows ?: [] as $row) {
+            $teams = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " team-name ")]', $row);
+            $time = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " time ")]', $row)?->item(0);
+
+            if ($teams === false || $teams->length < 2 || $time === null) {
+                continue;
+            }
+
+            $team1 = $this->normalizeText($teams->item(0)?->textContent ?? '');
+            $team2 = $this->normalizeText($teams->item(1)?->textContent ?? '');
+            $startTime = $this->normalizeText($time->textContent);
+
+            if ($team1 === '' || $team2 === '' || ! preg_match('/^\d{1,2}:\d{2}$/', $startTime)) {
+                continue;
+            }
+
+            try {
+                $startAt = CarbonImmutable::createFromFormat(
+                    '!Y-m-d H:i',
+                    "{$date} {$startTime}",
+                    'UTC',
+                )->setTimezone($timezone);
+            } catch (Throwable) {
+                continue;
+            }
+
+            if ($startAt->format('Y-m-d') !== $date) {
+                continue;
+            }
+
+            $format = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " bo-type ")]', $row)?->item(0);
+            $tournament = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " tournament-name ")]', $row)?->item(0);
+            $matchLink = $xpath->query('.//a[contains(@href, "/matches/")]', $row)?->item(0);
+            $path = $matchLink?->getAttribute('href') ?? '';
+            $url = str_starts_with($path, 'http')
+                ? $path
+                : rtrim((string) config('services.bo3.base_url'), '/').($path !== '' ? $path : self::PATHS[$game].'?date='.$date);
+
+            $result[] = [
+                'name' => "{$team1} vs {$team2}",
+                'team1' => $team1,
+                'team2' => $team2,
+                'tournament' => $this->normalizeText($tournament?->textContent ?? '') ?: '未知賽事',
+                'format' => mb_strtoupper($this->normalizeText($format?->textContent ?? '')) ?: '未知',
+                'start_at' => $startAt,
+                'url' => $url,
+            ];
+        }
+
+        return $result;
+    }
+
+    /** @param array{team1: string, team2: string, start_at: CarbonImmutable} $match */
+    private function matchKey(array $match): string
+    {
+        $teams = [
+            mb_strtolower($this->normalizeText($match['team1'])),
+            mb_strtolower($this->normalizeText($match['team2'])),
+        ];
+        sort($teams, SORT_STRING);
+
+        return implode('|', [...$teams, $match['start_at']->utc()->format('Y-m-d H:i')]);
+    }
+
+    private function normalizeText(string $value): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
     }
 
     /**

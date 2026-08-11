@@ -310,6 +310,23 @@ class LineWebhookTest extends TestCase
             && ! isset($request['tiers']));
     }
 
+    public function test_tbd_match_missing_from_structured_data_is_included_from_the_visible_table(): void
+    {
+        Http::fake([
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3HtmlWithTbdMatch(), 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!val 明天');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString("TBD\nvs\nJD Gaming", $reply->text);
+        $this->assertStringContainsString('第 2 場｜18:00｜BO3', $reply->text);
+        $this->assertSame('台灣時間｜2 場賽程', $reply->imageData['subtitle']);
+        $this->assertSame('TBD', $reply->imageData['matches'][1]['team1']);
+        $this->assertSame('JD Gaming', $reply->imageData['matches'][1]['team2']);
+        $this->assertSame('VCT 2026: China Stage 2', $reply->imageData['matches'][1]['tournament']);
+    }
+
     public function test_tournament_and_preferred_bookmaker_odds_are_included(): void
     {
         config([
@@ -413,6 +430,44 @@ class LineWebhookTest extends TestCase
             .'<a href="/lol/matches/previous">Previous Team Bo5 Another Team</a><p class="tournament-name">KeSPA Cup 2026</p></div>'
             .'<div class="table-row table-row--upcoming">'
             .'<a href="/lol/matches/alpha-vs-beta">Team AlphaBo3Team Beta</a><p class="tournament-name">LCK 2026 Summer</p></div>'
+            .'<script id="micro-markup" type="application/ld+json">'
+            .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+            .'</script></html>';
+    }
+
+    private function bo3HtmlWithTbdMatch(): string
+    {
+        $events = [[
+            '@context' => 'https://schema.org',
+            '@type' => 'SportsEvent',
+            'name' => 'All Gamers vs Titan Esports Club',
+            'url' => 'https://bo3.gg/valorant/matches/all-gamers-vs-tec-esports-12-08-2026',
+            'startDate' => '2026-08-12T08:00:00.000+00:00',
+        ]];
+        $knownRow = '<div class="table-row table-row--upcoming">'
+            .'<a href="/valorant/matches/all-gamers-vs-tec-esports-12-08-2026" class="c-global-match-link table-cell">'
+            .'<span class="time">08:00</span>'
+            .'<div class="team-name">All Gamers</div>'
+            .'<span class="bo-type">Bo3</span>'
+            .'<div class="team-name">Titan Esports Club</div>'
+            .'</a>'
+            .'<div class="table-cell tournament">'
+            .'<p class="tournament-name">VCT 2026: China Stage 2</p>'
+            .'</div>'
+            .'</div>';
+        $tbdRow = '<div class="table-row table-row--upcoming">'
+            .'<button class="c-global-match-link c-global-match-link--disabled table-cell">'
+            .'<span class="time">10:00</span>'
+            .'<div class="team-name">TBD</div>'
+            .'<span class="bo-type">Bo3</span>'
+            .'<div class="team-name">JD Gaming</div>'
+            .'</button>'
+            .'<div class="table-cell tournament">'
+            .'<p class="tournament-name">VCT 2026: China Stage 2</p>'
+            .'</div>'
+            .'</div>';
+
+        return '<html>'.$knownRow.$tbdRow
             .'<script id="micro-markup" type="application/ld+json">'
             .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
             .'</script></html>';
