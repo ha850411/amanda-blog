@@ -10,9 +10,17 @@ use RuntimeException;
 
 class LineScheduleImageService
 {
-    private const CANVAS_SIZE = 1040;
+    private const CANVAS_WIDTH = 1040;
 
-    private const CACHE_VERSION = 2;
+    private const CACHE_VERSION = 3;
+
+    private const CARD_HEIGHT = 160;
+
+    private const CARD_GAP = 16;
+
+    private const CARDS_TOP = 132;
+
+    private const CANVAS_BOTTOM_PADDING = 30;
 
     /** @var array<int, int> */
     private const IMAGE_WIDTHS = [700, 1040];
@@ -52,8 +60,9 @@ class LineScheduleImageService
             foreach (self::IMAGE_WIDTHS as $width) {
                 $variant = clone $image;
 
-                if ($width !== self::CANVAS_SIZE) {
-                    $variant->resizeImage($width, $width, Imagick::FILTER_LANCZOS, 1, true);
+                if ($width !== self::CANVAS_WIDTH) {
+                    $height = (int) round($variant->getImageHeight() * ($width / self::CANVAS_WIDTH));
+                    $variant->resizeImage($width, $height, Imagick::FILTER_LANCZOS, 1);
                 }
 
                 $variant->setImageFormat('png');
@@ -74,8 +83,10 @@ class LineScheduleImageService
      */
     private function render(array $data): Imagick
     {
+        $matches = array_slice($data['matches'], 0, 10);
+        $canvasHeight = $this->canvasHeight(count($matches));
         $image = new Imagick;
-        $image->newImage(self::CANVAS_SIZE, self::CANVAS_SIZE, '#0b1220', 'png');
+        $image->newImage(self::CANVAS_WIDTH, $canvasHeight, '#0b1220', 'png');
         $image->setImageColorspace(Imagick::COLORSPACE_SRGB);
 
         $font = $this->fontPath();
@@ -93,7 +104,7 @@ class LineScheduleImageService
         $draw->setFontWeight(400);
         $draw->annotation(48, 105, $this->fitText($image, $draw, $data['subtitle'], 760, 18));
 
-        $count = count($data['matches']);
+        $count = count($matches);
         $draw->setFillColor('#2563eb');
         $draw->roundRectangle(852, 35, 994, 92, 28, 28);
         $draw->setFillColor('#ffffff');
@@ -103,26 +114,20 @@ class LineScheduleImageService
         $draw->annotation(923, 72, $count.' 場');
         $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
-        $cardWidth = 466;
-        $cardHeight = 145;
+        $cardWidth = 956;
         $left = 42;
-        $top = 132;
-        $gapX = 24;
-        $gapY = 12;
 
-        foreach (array_slice($data['matches'], 0, 10) as $index => $match) {
-            $column = $index % 2;
-            $row = intdiv($index, 2);
-            $x = $left + ($column * ($cardWidth + $gapX));
-            $y = $top + ($row * ($cardHeight + $gapY));
+        foreach ($matches as $index => $match) {
+            $x = $left;
+            $y = self::CARDS_TOP + ($index * (self::CARD_HEIGHT + self::CARD_GAP));
 
             $draw->setFillColor('#162033');
-            $draw->roundRectangle($x, $y, $x + $cardWidth, $y + $cardHeight, 18, 18);
+            $draw->roundRectangle($x, $y, $x + $cardWidth, $y + self::CARD_HEIGHT, 18, 18);
 
             $draw->setFillColor('#60a5fa');
             $draw->setFontSize(22);
             $draw->setFontWeight(700);
-            $draw->annotation($x + 18, $y + 31, sprintf(
+            $draw->annotation($x + 22, $y + 34, sprintf(
                 '%s  ·  %s',
                 $match['start_time'],
                 $match['format'],
@@ -132,34 +137,34 @@ class LineScheduleImageService
             $draw->setFillColor('#f8fafc');
             $draw->setFontSize(23);
             $draw->setFontWeight(700);
-            $draw->annotation($x + 18, $y + 65, $this->fitText($image, $draw, $teams, $cardWidth - 36, 17));
+            $draw->annotation($x + 22, $y + 73, $this->fitText($image, $draw, $teams, $cardWidth - 44, 19));
 
             $draw->setFillColor('#94a3b8');
             $draw->setFontSize(18);
             $draw->setFontWeight(400);
-            $draw->annotation($x + 18, $y + 96, $this->fitText($image, $draw, (string) $match['tournament'], $cardWidth - 36, 15));
+            $draw->annotation($x + 22, $y + 109, $this->fitText($image, $draw, (string) $match['tournament'], $cardWidth - 44, 16));
 
             $draw->setFillColor('#cbd5e1');
             $draw->setFontSize(18);
             $draw->annotation(
-                $x + 18,
-                $y + 126,
-                $this->fitText($image, $draw, $this->oddsLabel($match), $cardWidth - 36, 15),
+                $x + 22,
+                $y + 141,
+                $this->fitText($image, $draw, $this->oddsLabel($match), $cardWidth - 44, 16),
             );
         }
-
-        $draw->setFillColor('#1e293b');
-        $draw->roundRectangle(42, 934, 998, 1008, 18, 18);
-        $draw->setFillColor('#93c5fd');
-        $draw->setFontSize(23);
-        $draw->setFontWeight(700);
-        $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-        $draw->annotation(520, 980, '點擊圖片可放大查看');
 
         $image->drawImage($draw);
         $image->stripImage();
 
         return $image;
+    }
+
+    private function canvasHeight(int $matchCount): int
+    {
+        return self::CARDS_TOP
+            + ($matchCount * self::CARD_HEIGHT)
+            + (max(0, $matchCount - 1) * self::CARD_GAP)
+            + self::CANVAS_BOTTOM_PADDING;
     }
 
     private function fitText(Imagick $image, ImagickDraw $draw, string $text, int $maxWidth, int $minimumFontSize): string
