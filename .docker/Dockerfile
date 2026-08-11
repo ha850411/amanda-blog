@@ -8,6 +8,10 @@ ARG COMPOSER_IMAGE=composer:2@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244
 FROM ${COMPOSER_IMAGE} AS composer
 FROM ${PHP_IMAGE}
 
+LABEL org.opencontainers.image.source="https://github.com/ha850411/amanda-blog" \
+    org.opencontainers.image.description="PHP runtime for Amanda Blog" \
+    org.opencontainers.image.licenses="MIT"
+
 ARG REDIS_EXTENSION_VERSION=6.3.0
 ARG IMAGICK_EXTENSION_VERSION=3.8.1
 ARG MEMCACHED_EXTENSION_VERSION=3.4.0

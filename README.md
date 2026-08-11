@@ -43,6 +43,10 @@
 
 透過 `make deploy-up` 部署時，Runtime image tag 會依 `.docker/Dockerfile`、PHP base image 與 Composer base image自動產生；相同建置內容會沿用既有 image，建置內容有變更時則會自動使用新 tag。可執行 `make runtime-tag` 查看目前 tag，不需在 `.env` 手動維護 `RUNTIME_IMAGE_TAG`。
 
+CI 必須從 secret store 注入 `GHCR_TOKEN`（GitHub classic PAT，具備 `write:packages`），不得將 token 寫入 repository 或 `.env`。`make deploy-up` 會先登入 GHCR，檢查 fingerprint image 是否存在；不存在時才建置並推送至 `ghcr.io/ha850411/amanda-blog-runtime`，同時將 BuildKit layer cache 保存於 `buildcache-php8.4` tag，完成後才啟動新容器。
+
+Jenkins 使用 Credentials Binding 將 Secret text credential 綁定為 `GHCR_TOKEN`；若使用 Pipeline，可用 `withCredentials([string(credentialsId: 'ghcr-token', variable: 'GHCR_TOKEN')])` 包住原本的部署指令。部署主機上的 Docker 登入狀態也會讓後續 private image pull 使用同一份憑證。
+
 # LINE 賽程 Bot
 
 Webhook URL 設為 `https://你的網域/api/line/webhook`，並在 `.env` 設定：

@@ -11,6 +11,8 @@ TEST_COMPOSE_CMD = cd $(COMPOSE_DIR) && docker compose -f compose.test.yaml
 -include $(COMPOSE_DIR)/.env
 APP_IMAGE ?= amanda-blog-runtime
 PHP_VERSION ?= 8.4
+GHCR_REGISTRY ?= ghcr.io
+GHCR_USERNAME ?= ha850411
 RUNTIME_REGISTRY_IMAGE ?= ghcr.io/ha850411/amanda-blog-runtime
 # Amazon Linux EC2 預設以 x86_64 發布；Graviton 使用者可覆寫為 linux/arm64。
 # 多架構發布必須使用已配置原生 nodes 或可靠 binfmt/QEMU 的 builder。
@@ -29,7 +31,7 @@ RUNTIME_IMAGE_TAG := php$(PHP_VERSION)-$(RUNTIME_IMAGE_FINGERPRINT)
 export RUNTIME_IMAGE_TAG
 RUNTIME_IMAGE := $(APP_IMAGE):$(RUNTIME_IMAGE_TAG)
 PUBLISH_RUNTIME_IMAGE := $(RUNTIME_REGISTRY_IMAGE):$(RUNTIME_IMAGE_TAG)
-BUILD_CACHE_IMAGE ?= ghcr.io/ha850411/amanda-blog-runtime:buildcache-php$(PHP_VERSION)
+BUILD_CACHE_IMAGE ?= $(RUNTIME_REGISTRY_IMAGE):buildcache-php$(PHP_VERSION)
 BUILDX_BUILDER ?= amanda-blog-runtime-builder
 COMPOSER_INSTALL_FLAGS ?= --no-interaction --prefer-dist --no-progress
 COMPOSER_CACHE_VOLUME ?= amanda-blog-composer-cache
@@ -39,6 +41,53 @@ COMPOSER_CACHE_VOLUME ?= amanda-blog-composer-cache
 runtime-tag:
 	@echo "$(RUNTIME_IMAGE_TAG)"
 
+.PHONY: registry-login
+registry-login:
+	@if [ -z "$$GHCR_TOKEN" ]; then \
+		echo "GHCR_TOKEN is required. Inject it from the CI secret store." >&2; \
+		exit 1; \
+	fi
+	@printf '%s' "$$GHCR_TOKEN" | docker login "$(GHCR_REGISTRY)" \
+		--username "$(GHCR_USERNAME)" --password-stdin >/dev/null
+
+# Build and push a versioned runtime image and a separate mode=max registry cache.
+.PHONY: runtime-build-push
+runtime-build-push:
+	@docker buildx inspect "$(BUILDX_BUILDER)" >/dev/null 2>&1 || \
+		docker buildx create --name "$(BUILDX_BUILDER)" --driver docker-container
+	docker buildx build \
+		--builder "$(BUILDX_BUILDER)" \
+		--platform "$(RUNTIME_PLATFORMS)" \
+		--file .docker/Dockerfile \
+		--tag "$(PUBLISH_RUNTIME_IMAGE)" \
+		--build-arg "PHP_IMAGE=$(PHP_IMAGE)" \
+		--build-arg "COMPOSER_IMAGE=$(COMPOSER_IMAGE)" \
+		--cache-from "type=registry,ref=$(BUILD_CACHE_IMAGE)" \
+		--cache-to "type=registry,ref=$(BUILD_CACHE_IMAGE),mode=max" \
+		--push \
+		.docker
+
+.PHONY: runtime-publish
+runtime-publish: registry-login
+	@$(MAKE) --no-print-directory runtime-build-push
+
+# Fingerprint tags are immutable: only publish when this exact runtime definition
+# is not already available in GHCR.
+.PHONY: runtime-publish-if-needed
+runtime-publish-if-needed: registry-login
+	@if [ "$(APP_IMAGE)" != "$(RUNTIME_REGISTRY_IMAGE)" ]; then \
+		echo "APP_IMAGE must equal RUNTIME_REGISTRY_IMAGE for CI deployment." >&2; \
+		echo "APP_IMAGE=$(APP_IMAGE)" >&2; \
+		echo "RUNTIME_REGISTRY_IMAGE=$(RUNTIME_REGISTRY_IMAGE)" >&2; \
+		exit 1; \
+	fi
+	@if docker buildx imagetools inspect "$(PUBLISH_RUNTIME_IMAGE)" >/dev/null 2>&1; then \
+		echo "Runtime image already published: $(PUBLISH_RUNTIME_IMAGE)"; \
+	else \
+		echo "Runtime image is missing from GHCR; building and publishing: $(PUBLISH_RUNTIME_IMAGE)"; \
+		$(MAKE) --no-print-directory runtime-build-push; \
+	fi
+
 # Build the Docker image
 .PHONY: build
 build:
@@ -47,7 +96,7 @@ build:
 # Production deployment entrypoint. Reuse an image only after confirming that
 # the LINE image renderer's native extension and Traditional Chinese font exist.
 .PHONY: runtime-ready
-runtime-ready:
+runtime-ready: runtime-publish-if-needed
 	@if docker image inspect "$(RUNTIME_IMAGE)" >/dev/null 2>&1; then \
 		if docker run --rm --entrypoint sh "$(RUNTIME_IMAGE)" -c \
 			'php -r '\''exit(extension_loaded("imagick") ? 0 : 1);'\'' && test -r /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'; then \
@@ -79,24 +128,6 @@ composer-cache-ready:
 .PHONY: deploy-up
 deploy-up: runtime-ready composer-cache-ready
 	$(COMPOSE_CMD) up -d --no-build
-
-# Publish a versioned runtime image and a separate mode=max cache to the registry.
-# Run docker login for the target registry before invoking this target.
-.PHONY: runtime-publish
-runtime-publish:
-	@docker buildx inspect "$(BUILDX_BUILDER)" >/dev/null 2>&1 || \
-		docker buildx create --name "$(BUILDX_BUILDER)" --driver docker-container
-	docker buildx build \
-		--builder "$(BUILDX_BUILDER)" \
-		--platform "$(RUNTIME_PLATFORMS)" \
-		--file .docker/Dockerfile \
-		--tag "$(PUBLISH_RUNTIME_IMAGE)" \
-		--build-arg "PHP_IMAGE=$(PHP_IMAGE)" \
-		--build-arg "COMPOSER_IMAGE=$(COMPOSER_IMAGE)" \
-		--cache-from "type=registry,ref=$(BUILD_CACHE_IMAGE)" \
-		--cache-to "type=registry,ref=$(BUILD_CACHE_IMAGE),mode=max" \
-		--push \
-		.docker
 
 # Start the services
 .PHONY: up
