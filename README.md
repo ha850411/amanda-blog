@@ -61,7 +61,7 @@ amanda-blog-system/
 系統核心的 `system/deploy.sh` 腳本定義了嚴謹且自動化的無停機服務上線流程：
 1. **偵測目前狀態**：讀取 `active-upstream.conf` 的狀態，假設當前為 Blue，下一次部署便會建立 Green 環境並配置新的 HTTP Port。
 2. **準備全新環境**：藉由 `git clone` 從遠端拉取最新的主分支程式碼，將 `app-env` 內的環境變數 `.env` 動態注入到新建立的資料夾內，並更新裡面 `docker-compose.yml` 需要的 Nginx Name、Image 與 Port 等對應變數。
-3. **啟動新服務**：透過 `make build && make up` 指令在新資料夾內建立並運行全新的應用層容器群與載入最新的依賴包 (Composer Install)。
+3. **啟動新服務**：透過 `make deploy-up` 重用同一個版本化 PHP runtime image，並運行全新的應用層容器群與載入最新的依賴包 (Composer Install)。指定版本若不在本機，流程會先嘗試從 GHCR 下載；registry 尚未發布時才會在部署機建置一次。
 4. **系統健康檢查 (Health Check)**：持續嘗試呼叫新服務的 `/api/health` 介面。若未能在指定次數內收到底層返回的 `ok`，即代表啟動失敗，中斷本次部署並保留現有的穩定環境。
 5. **執行單元測試**：在服務上線前啟動專屬隔離的測試資料庫容器群，執行資料表遷移與專案的 Unit Tests。若測試失敗便會放棄啟動新節點，確保上線服務皆符合測試要求。
 6. **切換流量與資源回收**：所有測試項目都通過後，將 `active-upstream.conf` 檔案重新指向剛建好且測試通過的新服務節點，並命令 Nginx 重啟更新關聯 (`nginx -s reload`)。流量轉移完畢後，安全關停並刪除舊目錄所有佔用的容器與資源。
@@ -91,8 +91,23 @@ amanda-blog-system/
    ```
 6. **執行首次部署**：至 Jenkins 設定相關組態，或可手動執行 `/workspace/amanda-blog-system/system/deploy.sh` 來觸發第一次的環境建置。
 
+### Runtime image 更新
+
+一般程式碼部署不會重建 PHP runtime。只有調整應用專案中的 `.docker/Dockerfile`、PHP 版本或 PHP extensions 時，才需要：
+
+1. 將 `app-env/.env.docker` 的 `RUNTIME_IMAGE_TAG` 遞增，例如由 `php8.4-v2` 改成 `php8.4-v3`。
+2. 登入 GHCR，並在 `amanda-blog` 專案根目錄執行 `make runtime-publish`。預設發布 Amazon Linux x86_64 對應的 `linux/amd64` image 與獨立 `mode=max` BuildKit cache，建議在 Amazon/Jenkins 的原生 amd64 builder 執行。Graviton 主機改用 `make runtime-publish RUNTIME_PLATFORMS=linux/arm64`；若要一次發布兩種架構，builder 必須配置兩種原生 build nodes 或可靠的 binfmt/QEMU，再指定 `RUNTIME_PLATFORMS=linux/amd64,linux/arm64`。
+3. 若沒有 GHCR 發布權限，可直接部署；新 tag 首次部署會 fallback 為本機建置，後續 Blue/Green 部署會持續重用該 image。
+
+Blue/Green 兩個 release 另外共用 `COMPOSER_CACHE_VOLUME`，只快取套件下載檔；各 release 的 `vendor/` 仍彼此隔離，避免舊程式碼污染新部署。
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+make runtime-publish
+```
+
 ---
 
 ## 📌 注意事項
 - 請確保使用者和 Jenkins 容器均有存取 `/var/run/docker.sock` 的權限，這是部署腳本生成 Blue/Green 容器的關鍵。
-- 目錄被硬編碼依賴並安裝於 `/workspace` 根目錄之下（由 `init.sh` 自動建立），請確保磁碟容量與權限皆有妥善掛載。
+- 專案目錄預設為 `/workspace`（由 `init.sh` 自動建立）；本機或其他環境可用 `WORKSPACE` 覆寫，並請確保磁碟容量與權限皆有妥善掛載。
