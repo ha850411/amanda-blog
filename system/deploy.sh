@@ -62,10 +62,6 @@ NEW_PROJECT_NAME="$APP_NAME_PREFIX-$NEW_APP_ENV"
 NEW_NGINX_NAME="$APP_NAME_PREFIX-nginx-$NEW_APP_ENV"
 DEPLOY_DIR="$DEPLOY_ROOT/$NEW_FOLDER"
 
-# Jenkins 可能未提供 USER/GROUP，避免 set -u 造成 unbound variable。
-DEPLOY_USER="${SUDO_USER:-${USER:-$(id -un)}}"
-DEPLOY_GROUP="${SUDO_GROUP:-${GROUP:-$(id -gn "$DEPLOY_USER")}}"
-
 # 若目錄已存在，先停止殘留容器再刪除目錄
 if [ -d "$DEPLOY_DIR" ]; then
     echo "偵測到殘留目錄 $NEW_FOLDER，先停止容器..."
@@ -95,11 +91,7 @@ echo "啟動新容器: 'cd $NEW_FOLDER && make deploy-up'"
 cd "$DEPLOY_DIR"
 make deploy-up
 make composer-install
-
-# 調整整個新部署目錄權限
-echo "調整新部署目錄整體權限..."
-run_privileged chown -R "$DEPLOY_USER":"$DEPLOY_GROUP" "$DEPLOY_DIR"
-run_privileged chmod -R a+rwX "$DEPLOY_DIR"
+make runtime-permissions
 
 # 檢查容器是否啟動成功(回應200)
 HEALTH_STATUS=""
@@ -155,6 +147,11 @@ cd "$DEPLOY_DIR" && make test || {
 }
 # 測試完畢，移除測試用 MySQL 容器
 cd "$DEPLOY_DIR" && make test-db-down
+
+# Artisan tests are executed as root inside the container and can recreate
+# daily log/cache files as root:root. Restore PHP-FPM ownership before traffic
+# is switched to this release.
+cd "$DEPLOY_DIR" && make runtime-permissions
 
 # 切換 nginx 配置
 sed -i.bak "s/set \\\$active_backend .*/set \\\$active_backend $NEW_NGINX_NAME;/" "$CONFIG_FILE"
