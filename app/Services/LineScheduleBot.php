@@ -16,6 +16,7 @@ class LineScheduleBot
     public function __construct(
         private readonly Bo3ScheduleService $schedules,
         private readonly OddsApiService $odds,
+        private readonly Bo3OddsService $bo3Odds,
     ) {}
 
     public function respond(string $message): ?string
@@ -77,6 +78,7 @@ class LineScheduleBot
 
         $visibleMatches = array_slice($matches, 0, $command['limit']);
         $visibleMatches = $this->odds->enrich($visibleMatches, $command['date']);
+        $visibleMatches = $this->bo3Odds->enrichMissing($visibleMatches);
         $lines = [
             "{$label}｜{$dateLabel}｜{$tierLabel}",
             '時間基準｜台灣時間',

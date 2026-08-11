@@ -378,6 +378,60 @@ class LineWebhookTest extends TestCase
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/odds/multi')
             && $request['eventIds'] === '456'
             && $request['bookmakers'] === 'Stake,Bet365');
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/api/v1/matches/'));
+    }
+
+    public function test_bo3_moneyline_is_used_when_selected_bookmakers_have_no_odds(): void
+    {
+        config([
+            'services.odds.api_key' => 'odds-test-key',
+            'services.odds.bookmakers' => null,
+        ]);
+
+        Http::fake([
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3HtmlWithTbdMatch(), 200),
+            'https://api.odds-api.io/v3/events*' => Http::response([[
+                'id' => 6539993323,
+                'home' => 'All Gamers',
+                'away' => 'TEC Esports',
+                'date' => '2026-08-12T08:00:00Z',
+                'status' => 'pending',
+            ]], 200),
+            'https://api.odds-api.io/v3/bookmakers/selected*' => Http::response([
+                'bookmakers' => ['Stake', 'Bet365'],
+            ], 200),
+            'https://api.odds-api.io/v3/odds/multi*' => Http::response([], 200),
+            'https://bo3.gg/api/v1/matches/all-gamers-vs-tec-esports-12-08-2026' => Http::response([
+                'team1' => ['name' => 'All Gamers'],
+                'team2' => ['name' => 'Titan Esports Club'],
+                'bet_updates' => [
+                    'team_1' => [
+                        'name' => 'All Gamers',
+                        'coeff' => 1.588,
+                        'active' => true,
+                    ],
+                    'team_2' => [
+                        'name' => 'Titan Esports Club',
+                        'coeff' => 2.302,
+                        'active' => true,
+                    ],
+                    'bet_provider_id' => 39,
+                ],
+            ], 200),
+            'https://bo3.gg/api/v1/bet_providers' => Http::response([
+                'results' => [[
+                    'id' => 39,
+                    'name' => '1xbit',
+                ]],
+            ], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->respond('!val 明天 team="All Gamers"');
+
+        $this->assertStringContainsString('All Gamers　1.59（1xbit）', $reply);
+        $this->assertStringContainsString('Titan Esports Club　2.30（1xbit）', $reply);
+        Http::assertSent(fn ($request): bool => $request->url()
+            === 'https://bo3.gg/api/v1/matches/all-gamers-vs-tec-esports-12-08-2026');
     }
 
     private function callWebhook(string $body, string $signature)
