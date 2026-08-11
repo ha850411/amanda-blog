@@ -28,31 +28,24 @@ class LineMessagingService
         ]]);
     }
 
-    public function replyImagemap(
+    public function replyImageWithLink(
         string $replyToken,
         string $baseUrl,
-        string $altText,
         string $linkUrl,
     ): void {
-        $this->send($replyToken, [[
-            'type' => 'imagemap',
-            'baseUrl' => $baseUrl,
-            'altText' => mb_substr($altText, 0, 400),
-            'baseSize' => [
-                'width' => 1040,
-                'height' => 1040,
+        $baseUrl = rtrim($baseUrl, '/');
+
+        $this->send($replyToken, [
+            [
+                'type' => 'image',
+                'originalContentUrl' => $baseUrl.'/1040',
+                'previewImageUrl' => $baseUrl.'/700',
             ],
-            'actions' => [[
-                'type' => 'uri',
-                'linkUri' => $linkUrl,
-                'area' => [
-                    'x' => 0,
-                    'y' => 0,
-                    'width' => 1040,
-                    'height' => 1040,
-                ],
-            ]],
-        ]]);
+            [
+                'type' => 'text',
+                'text' => mb_substr('完整賽程｜'.$linkUrl, 0, 5000),
+            ],
+        ]);
     }
 
     /** @param  array<int, array<string, mixed>>  $messages */

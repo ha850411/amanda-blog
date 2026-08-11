@@ -80,19 +80,19 @@ class LineWebhookTest extends TestCase
                 return false;
             }
 
-            $message = $request['messages'][0];
+            $messages = $request['messages'];
 
             return $request->hasHeader('Authorization', 'Bearer test-token')
                 && $request['replyToken'] === 'reply-token'
-                && count($request['messages']) === 1
-                && $message['type'] === 'imagemap'
-                && $message['baseUrl'] === 'https://cdn.example.com/line-schedules/test'
-                && $message['actions'][0]['linkUri'] === 'https://bo3.gg/lol/matches/current?tiers=s,a&date=2026-08-12'
-                && $message['actions'][0]['area'] === [
-                    'x' => 0,
-                    'y' => 0,
-                    'width' => 1040,
-                    'height' => 1040,
+                && count($messages) === 2
+                && $messages[0] === [
+                    'type' => 'image',
+                    'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1040',
+                    'previewImageUrl' => 'https://cdn.example.com/line-schedules/test/700',
+                ]
+                && $messages[1] === [
+                    'type' => 'text',
+                    'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s,a&date=2026-08-12',
                 ];
         });
     }
@@ -261,8 +261,12 @@ class LineWebhookTest extends TestCase
 
         $response->assertOk()->assertExactJson([]);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.line.me/v2/bot/message/reply'
-            && $request['messages'][0]['type'] === 'imagemap'
-            && $request['messages'][0]['actions'][0]['linkUri'] === 'https://bo3.gg/lol/matches/current?tiers=s,a&period');
+            && $request['messages'][0]['type'] === 'image'
+            && $request['messages'][0]['originalContentUrl'] === 'https://cdn.example.com/line-schedules/test/1040'
+            && $request['messages'][1] === [
+                'type' => 'text',
+                'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s,a&period',
+            ]);
     }
 
     public function test_log_viewer_requires_admin_authentication(): void

@@ -12,12 +12,13 @@ class LineScheduleImageService
 {
     private const CANVAS_SIZE = 1040;
 
+    private const CACHE_VERSION = 2;
+
     /** @var array<int, int> */
-    private const IMAGEMAP_WIDTHS = [240, 300, 460, 700, 1040];
+    private const IMAGE_WIDTHS = [700, 1040];
 
     /**
-     * Generate the five resolutions required by a LINE imagemap and return
-     * the base URL. LINE appends /240, /300, /460, /700 or /1040 to it.
+     * Generate the image resolutions used by LINE and return their base URL.
      *
      * @param  array{
      *     title: string,
@@ -42,13 +43,13 @@ class LineScheduleImageService
         }
 
         $disk = Storage::disk((string) config('services.line.schedule_image_disk', 's3'));
-        $hash = hash('sha256', json_encode([$data, $linkUrl], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+        $hash = hash('sha256', json_encode([self::CACHE_VERSION, $data, $linkUrl], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
         $directory = 'line-schedules/'.$hash;
 
         if (! $disk->exists($directory.'/1040')) {
             $image = $this->render($data);
 
-            foreach (self::IMAGEMAP_WIDTHS as $width) {
+            foreach (self::IMAGE_WIDTHS as $width) {
                 $variant = clone $image;
 
                 if ($width !== self::CANVAS_SIZE) {
@@ -153,7 +154,7 @@ class LineScheduleImageService
         $draw->setFontSize(23);
         $draw->setFontWeight(700);
         $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-        $draw->annotation(520, 980, '點擊圖片開啟 bo3.gg 完整賽程');
+        $draw->annotation(520, 980, '點擊圖片可放大查看');
 
         $image->drawImage($draw);
         $image->stripImage();

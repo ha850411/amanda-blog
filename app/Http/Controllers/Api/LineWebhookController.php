@@ -77,10 +77,9 @@ class LineWebhookController extends Controller
                 if ($reply->prefersImage()) {
                     try {
                         $imageUrl = $images->create($reply->imageData, $reply->linkUrl);
-                        $line->replyImagemap(
+                        $line->replyImageWithLink(
                             $replyToken,
                             $imageUrl,
-                            $reply->imageData['title'].' 賽程（點擊圖片開啟 bo3.gg）',
                             $reply->linkUrl,
                         );
                     } catch (Throwable $imageException) {

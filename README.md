@@ -62,7 +62,7 @@ LINE_SCHEDULE_IMAGE_RETENTION_DAYS=7
 
 輸入 `!help` 才會顯示使用說明；一般訊息與無效指令不會回覆。指令格式為 `!lol 08/11`、`!val 今天`、`!cs 明天`，日期支援 `MM/DD`、今天、明天與後天，預設只查 S/A Tier。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。
 
-查到賽程時只會回覆一張可點擊的賽程圖；點擊圖片會開啟符合遊戲、日期與 Tier 條件的 bo3.gg 總覽頁，不會再為每場賽事附上個別連結。圖片會顯示賽事名稱與 BO 賽制，並以 Odds-API.io 的日期、開賽時間與雙方隊名匹配盤口。設定 `ODDS_API_KEY` 後，會依 `ODDS_API_BOOKMAKER_PRIORITY` 選擇同一家莊家的完整雙邊 ML（預設 Stake 優先、Bet365 備援），不會混搭兩家盤口；`ODDS_API_BOOKMAKERS` 留空時自動使用帳號已選擇的莊家，沒有匹配盤口時顯示「暫無盤口」。圖片會直接寫入 `LINE_SCHEDULE_IMAGE_DISK`（預設固定為 `s3`），不會儲存在主機的 `public/storage`；S3 的 `Storage::url()` 必須產生公開 HTTPS 網址。Scheduler 每天 03:30（台灣時間）只清理 `line-schedules/` 下超過 `LINE_SCHEDULE_IMAGE_RETENTION_DAYS`（預設 7 天）的物件，因此 S3 IAM 除了上傳與讀取外，也需要 `ListBucket` 與 `DeleteObject` 權限。若圖片產生或儲存失敗，Bot 會降級成文字回覆，且只保留一個總覽連結。
+查到賽程時會回覆一張可點擊放大的賽程圖，並另外用一則文字訊息提供符合遊戲、日期與 Tier 條件的 bo3.gg 總覽連結，不會再為每場賽事附上個別連結。圖片會顯示賽事名稱與 BO 賽制，並以 Odds-API.io 的日期、開賽時間與雙方隊名匹配盤口。設定 `ODDS_API_KEY` 後，會依 `ODDS_API_BOOKMAKER_PRIORITY` 選擇同一家莊家的完整雙邊 ML（預設 Stake 優先、Bet365 備援），不會混搭兩家盤口；`ODDS_API_BOOKMAKERS` 留空時自動使用帳號已選擇的莊家，沒有匹配盤口時顯示「暫無盤口」。圖片會直接寫入 `LINE_SCHEDULE_IMAGE_DISK`（預設固定為 `s3`），不會儲存在主機的 `public/storage`；S3 的 `Storage::url()` 必須產生公開 HTTPS 網址。Scheduler 每天 03:30（台灣時間）只清理 `line-schedules/` 下超過 `LINE_SCHEDULE_IMAGE_RETENTION_DAYS`（預設 7 天）的物件，因此 S3 IAM 除了上傳與讀取外，也需要 `ListBucket` 與 `DeleteObject` 權限。若圖片產生或儲存失敗，Bot 會降級成文字回覆，且只保留一個總覽連結。
 
 Webhook 執行紀錄寫入 `storage/logs/webhook-*.log`。登入後台後可由「Webhook 紀錄」或 `/log-viewer` 查看；Log Viewer 與其 API 都受後台管理員登入保護。
 
