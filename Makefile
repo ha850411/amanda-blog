@@ -93,6 +93,13 @@ restart:
 composer-install:
 	$(COMPOSE_CMD) exec $(APP_SERVICE) composer install $(COMPOSER_INSTALL_FLAGS)
 
+# CLI commands in CI run as root and may create Laravel logs/cache files that
+# PHP-FPM (www-data) cannot update. Restore runtime ownership before serving traffic.
+.PHONY: runtime-permissions
+runtime-permissions:
+	$(COMPOSE_CMD) exec -T --user root $(APP_SERVICE) sh -c \
+		'chown -R www-data:www-data storage bootstrap/cache && chmod -R ug+rwX storage bootstrap/cache'
+
 # 啟動測試用 MySQL 容器（等待就緒）
 .PHONY: test-db-up
 test-db-up:

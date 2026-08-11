@@ -8,6 +8,7 @@ use App\Services\LineScheduleBot;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 class LineWebhookController extends Controller
@@ -22,7 +23,7 @@ class LineWebhookController extends Controller
         $body = $request->getContent();
 
         if (! $line->isValidSignature($body, $request->header('x-line-signature'))) {
-            $webhookLog->warning('LINE webhook rejected.', [
+            $this->writeLog($webhookLog, 'warning', 'LINE webhook rejected.', [
                 'reason' => 'invalid_signature',
                 'duration_ms' => $this->durationMs($startedAt),
             ]);
@@ -33,7 +34,7 @@ class LineWebhookController extends Controller
         $payload = json_decode($body, true);
 
         if (! is_array($payload)) {
-            $webhookLog->warning('LINE webhook rejected.', [
+            $this->writeLog($webhookLog, 'warning', 'LINE webhook rejected.', [
                 'reason' => 'invalid_payload',
                 'duration_ms' => $this->durationMs($startedAt),
             ]);
@@ -41,7 +42,7 @@ class LineWebhookController extends Controller
             return response()->json(['message' => 'Invalid payload.'], 400);
         }
 
-        $webhookLog->info('LINE webhook received.', [
+        $this->writeLog($webhookLog, 'info', 'LINE webhook received.', [
             'event_count' => count($payload['events'] ?? []),
         ]);
 
@@ -62,22 +63,26 @@ class LineWebhookController extends Controller
                     $bot->respond($message),
                 );
 
-                $webhookLog->info('LINE webhook replied.', [
+                $this->writeLog($webhookLog, 'info', 'LINE webhook replied.', [
                     'message_id' => $event['message']['id'] ?? null,
                     'command' => $command,
                     'duration_ms' => $this->durationMs($eventStartedAt),
                 ]);
             } catch (Throwable $exception) {
-                $webhookLog->error('LINE webhook failed.', [
+                $this->writeLog($webhookLog, 'error', 'LINE webhook failed.', [
                     'message_id' => $event['message']['id'] ?? null,
                     'type' => $exception::class,
                     'duration_ms' => isset($eventStartedAt) ? $this->durationMs($eventStartedAt) : null,
                 ]);
 
-                Log::error('Failed to handle LINE webhook event.', [
-                    'exception' => $exception,
-                    'message_id' => $event['message']['id'] ?? null,
-                ]);
+                try {
+                    Log::error('Failed to handle LINE webhook event.', [
+                        'exception' => $exception,
+                        'message_id' => $event['message']['id'] ?? null,
+                    ]);
+                } catch (Throwable $loggingException) {
+                    error_log(sprintf('Unable to write application log: %s', $loggingException->getMessage()));
+                }
             }
         }
 
@@ -87,5 +92,24 @@ class LineWebhookController extends Controller
     private function durationMs(int $startedAt): int
     {
         return (int) round((hrtime(true) - $startedAt) / 1_000_000);
+    }
+
+    /**
+     * Logging is diagnostic and must never prevent LINE from receiving a response.
+     * PHP's error log remains available as a last-resort signal in container logs.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function writeLog(
+        LoggerInterface $logger,
+        string $level,
+        string $message,
+        array $context = [],
+    ): void {
+        try {
+            $logger->log($level, $message, $context);
+        } catch (Throwable $exception) {
+            error_log(sprintf('Unable to write webhook log: %s', $exception->getMessage()));
+        }
     }
 }

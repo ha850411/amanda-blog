@@ -5,6 +5,10 @@ namespace Tests\Feature\Api;
 use App\Services\LineScheduleBot;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Mockery;
+use Psr\Log\LoggerInterface;
+use RuntimeException;
 use Tests\TestCase;
 
 class LineWebhookTest extends TestCase
@@ -94,6 +98,41 @@ class LineWebhookTest extends TestCase
 
         $response->assertOk()->assertExactJson([]);
         Http::assertNothingSent();
+    }
+
+    public function test_logging_failure_does_not_prevent_a_line_reply(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
+        ]);
+
+        $logger = Mockery::mock(LoggerInterface::class);
+        $logger->shouldReceive('log')
+            ->twice()
+            ->andThrow(new RuntimeException('Permission denied'));
+        Log::shouldReceive('channel')
+            ->once()
+            ->with('webhook')
+            ->andReturn($logger);
+
+        $body = json_encode([
+            'events' => [[
+                'type' => 'message',
+                'replyToken' => 'reply-token',
+                'message' => [
+                    'id' => '456',
+                    'type' => 'text',
+                    'text' => '!lol 08/11',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.line.me/v2/bot/message/reply'
+            && str_contains($request['messages'][0]['text'], 'LoL｜08/11｜S/A Tier'));
     }
 
     public function test_log_viewer_requires_admin_authentication(): void
