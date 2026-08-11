@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api;
 
+use App\Services\LineScheduleBot;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -51,7 +52,7 @@ class LineWebhookTest extends TestCase
                 'message' => [
                     'id' => '123',
                     'type' => 'text',
-                    'text' => 'lol 明天',
+                    'text' => '!lol 明天',
                 ],
             ]],
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
@@ -61,7 +62,8 @@ class LineWebhookTest extends TestCase
         $response->assertOk()->assertExactJson([]);
 
         Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/lol/matches/current')
-            && $request['date'] === '2026-08-12');
+            && $request['date'] === '2026-08-12'
+            && $request['tiers'] === 's,a');
 
         Http::assertSent(function ($request): bool {
             if ($request->url() !== 'https://api.line.me/v2/bot/message/reply') {
@@ -72,7 +74,7 @@ class LineWebhookTest extends TestCase
 
             return $request->hasHeader('Authorization', 'Bearer test-token')
                 && $request['replyToken'] === 'reply-token'
-                && str_contains($text, 'LoL 08/12 賽程（台灣時間）')
+                && str_contains($text, 'LoL 08/12 賽程（S/A Tier，台灣時間）')
                 && str_contains($text, '07:00｜Team Alpha vs Team Beta')
                 && ! str_contains($text, 'Previous Day Match');
         });
@@ -87,6 +89,37 @@ class LineWebhookTest extends TestCase
 
         $response->assertOk()->assertExactJson([]);
         Http::assertNothingSent();
+    }
+
+    public function test_today_and_default_tiers_are_supported(): void
+    {
+        Http::fake([
+            'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->respond('!cs 今天');
+
+        $this->assertStringContainsString('CS2 08/11 賽程（S/A Tier，台灣時間）', $reply);
+        $this->assertStringContainsString('Previous Day Match', $reply);
+
+        Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-11'
+            && $request['tiers'] === 's,a');
+    }
+
+    public function test_optional_tier_limit_and_team_parameters_are_supported(): void
+    {
+        Http::fake([
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->respond('!val 明天 tier=all limit=1 team="Team Alpha"');
+
+        $this->assertStringContainsString('VALORANT 08/12 賽程（全部 Tier，台灣時間）', $reply);
+        $this->assertStringContainsString('Team Alpha vs Team Beta', $reply);
+        $this->assertStringNotContainsString('Previous Day Match', $reply);
+
+        Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-12'
+            && ! isset($request['tiers']));
     }
 
     private function callWebhook(string $body, string $signature)

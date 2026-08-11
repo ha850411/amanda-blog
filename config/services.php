@@ -48,4 +48,8 @@ return [
         'timezone' => env('BO3_TIMEZONE', 'Asia/Taipei'),
     ],
 
+    'odds' => [
+        'api_key' => env('ODDS_API_KEY'),
+    ],
+
 ];

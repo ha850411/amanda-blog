@@ -19,14 +19,16 @@ class Bo3ScheduleService
     /**
      * @return array<int, array{name: string, start_at: CarbonImmutable, url: string}>
      */
-    public function forDate(string $game, CarbonImmutable $date): array
+    public function forDate(string $game, CarbonImmutable $date, array $tiers = ['s', 'a']): array
     {
         if (! isset(self::PATHS[$game])) {
             throw new RuntimeException("Unsupported game: {$game}");
         }
 
+        $tiers = $this->normalizeTiers($tiers);
         $dateString = $date->format('Y-m-d');
-        $cacheKey = "bo3-schedule:{$game}:{$dateString}";
+        $tierKey = $tiers === [] ? 'all' : implode(',', $tiers);
+        $cacheKey = "bo3-schedule:{$game}:{$dateString}:{$tierKey}";
 
         try {
             $cached = Cache::get($cacheKey);
@@ -38,7 +40,7 @@ class Bo3ScheduleService
             report($exception);
         }
 
-        $matches = $this->fetch($game, $dateString);
+        $matches = $this->fetch($game, $dateString, $tiers);
 
         try {
             Cache::put(
@@ -56,15 +58,19 @@ class Bo3ScheduleService
     /**
      * @return array<int, array{name: string, start_at: CarbonImmutable, url: string}>
      */
-    private function fetch(string $game, string $date): array
+    private function fetch(string $game, string $date, array $tiers): array
     {
+        $query = ['date' => $date];
+
+        if ($tiers !== []) {
+            $query['tiers'] = implode(',', $tiers);
+        }
+
         $response = Http::accept('text/html')
             ->withUserAgent('AmandaBlogLineBot/1.0')
             ->timeout((int) config('services.bo3.timeout_seconds', 10))
             ->retry(2, 200)
-            ->get(rtrim((string) config('services.bo3.base_url'), '/').self::PATHS[$game], [
-                'date' => $date,
-            ]);
+            ->get(rtrim((string) config('services.bo3.base_url'), '/').self::PATHS[$game], $query);
 
         $response->throw();
 
@@ -90,6 +96,21 @@ class Bo3ScheduleService
             })
             ->filter(fn (array $event): bool => $event['start_at']->format('Y-m-d') === $date)
             ->sortBy('start_at')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizeTiers(array $tiers): array
+    {
+        $allowed = ['s', 'a', 'b', 'c', 'd'];
+
+        return collect($tiers)
+            ->map(fn (mixed $tier): string => mb_strtolower(trim((string) $tier)))
+            ->filter(fn (string $tier): bool => in_array($tier, $allowed, true))
+            ->unique()
             ->values()
             ->all();
     }

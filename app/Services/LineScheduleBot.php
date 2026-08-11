@@ -17,31 +17,47 @@ class LineScheduleBot
 
     public function respond(string $message): string
     {
-        $game = $this->detectGame($message);
+        $command = $this->parseCommand($message);
 
-        if ($game === null) {
+        if ($command === null) {
             return $this->help();
         }
 
         try {
-            $date = $this->detectDate($message);
-            $matches = $this->schedules->forDate($game, $date);
+            $matches = $this->schedules->forDate(
+                $command['game'],
+                $command['date'],
+                $command['tiers'],
+            );
         } catch (Throwable $exception) {
             report($exception);
 
             return '目前無法取得 bo3.gg 賽程，請稍後再試。';
         }
 
-        $label = self::GAME_LABELS[$game];
-        $dateLabel = $date->format('m/d');
+        if ($command['team'] !== null) {
+            $matches = array_values(array_filter(
+                $matches,
+                fn (array $match): bool => str_contains(
+                    mb_strtolower($match['name']),
+                    mb_strtolower($command['team']),
+                ),
+            ));
+        }
+
+        $label = self::GAME_LABELS[$command['game']];
+        $dateLabel = $command['date']->format('m/d');
+        $tierLabel = $command['tiers'] === []
+            ? '全部 Tier'
+            : implode('/', array_map('mb_strtoupper', $command['tiers'])).' Tier';
 
         if ($matches === []) {
             return "{$label} {$dateLabel} 查無賽程。\n資料來源：bo3.gg";
         }
 
-        $lines = ["{$label} {$dateLabel} 賽程（台灣時間）"];
+        $lines = ["{$label} {$dateLabel} 賽程（{$tierLabel}，台灣時間）"];
 
-        foreach (array_slice($matches, 0, 10) as $match) {
+        foreach (array_slice($matches, 0, $command['limit']) as $match) {
             $lines[] = sprintf(
                 "\n%s｜%s\n%s",
                 $match['start_at']->format('H:i'),
@@ -50,54 +66,125 @@ class LineScheduleBot
             );
         }
 
-        if (count($matches) > 10) {
-            $lines[] = sprintf("\n另有 %d 場，請至 bo3.gg 查看。", count($matches) - 10);
+        if (count($matches) > $command['limit']) {
+            $lines[] = sprintf("\n另有 %d 場，請至 bo3.gg 查看。", count($matches) - $command['limit']);
         }
 
         return implode("\n", $lines);
     }
 
-    private function detectGame(string $message): ?string
+    /**
+     * @return array{game: string, date: CarbonImmutable, tiers: array<int, string>, limit: int, team: ?string}|null
+     */
+    private function parseCommand(string $message): ?array
     {
-        $normalized = mb_strtolower(trim($message));
-
-        if (preg_match('/(?:valorant|特戰英豪|瓦羅蘭特)/u', $normalized)) {
-            return 'valorant';
+        if (! preg_match('/^!(lol|val|cs)\s+(今天|明天|後天|\d{1,2}\/\d{1,2})(?:\s+(.*))?$/iu', trim($message), $matches)) {
+            return null;
         }
 
-        if (preg_match('/(?:英雄聯盟|league of legends|\blol\b)/u', $normalized)) {
-            return 'lol';
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+        $date = $this->parseDate($matches[2], $timezone);
+
+        if ($date === null) {
+            return null;
         }
 
-        if (preg_match('/(?:counter[ -]?strike|絕對武力|\bcs2?\b)/u', $normalized)) {
-            return 'cs';
+        $options = $this->parseOptions($matches[3] ?? '');
+
+        if ($options === null) {
+            return null;
         }
 
-        return null;
+        return [
+            'game' => ['lol' => 'lol', 'val' => 'valorant', 'cs' => 'cs'][mb_strtolower($matches[1])],
+            'date' => $date,
+            ...$options,
+        ];
     }
 
-    private function detectDate(string $message): CarbonImmutable
+    private function parseDate(string $value, string $timezone): ?CarbonImmutable
     {
-        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         $today = CarbonImmutable::now($timezone)->startOfDay();
 
-        if (preg_match('/\b(20\d{2}-\d{2}-\d{2})\b/u', $message, $matches)) {
-            return CarbonImmutable::createFromFormat('!Y-m-d', $matches[1], $timezone);
+        if ($value === '今天') {
+            return $today;
         }
 
-        if (str_contains($message, '後天')) {
-            return $today->addDays(2);
-        }
-
-        if (str_contains($message, '明天') || str_contains(mb_strtolower($message), 'tomorrow')) {
+        if ($value === '明天') {
             return $today->addDay();
         }
 
-        return $today;
+        if ($value === '後天') {
+            return $today->addDays(2);
+        }
+
+        $date = CarbonImmutable::createFromFormat('!Y/m/d', "{$today->year}/{$value}", $timezone);
+        $dateErrors = CarbonImmutable::getLastErrors();
+
+        if ($date === false || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))) {
+            return null;
+        }
+
+        return $date;
+    }
+
+    /**
+     * @return array{tiers: array<int, string>, limit: int, team: ?string}|null
+     */
+    private function parseOptions(string $input): ?array
+    {
+        $options = ['tiers' => ['s', 'a'], 'limit' => 10, 'team' => null];
+
+        if (trim($input) === '') {
+            return $options;
+        }
+
+        preg_match_all('/(tier|limit|team)=(?:"([^"]+)"|(\S+))/iu', $input, $optionMatches, PREG_SET_ORDER);
+        $consumed = trim((string) preg_replace('/(tier|limit|team)=(?:"[^"]+"|\S+)/iu', '', $input));
+
+        if ($consumed !== '') {
+            return null;
+        }
+
+        foreach ($optionMatches as $option) {
+            $key = mb_strtolower($option[1]);
+            $value = trim($option[2] !== '' ? $option[2] : $option[3]);
+
+            if ($key === 'tier') {
+                if (mb_strtolower($value) === 'all') {
+                    $options['tiers'] = [];
+
+                    continue;
+                }
+
+                $tiers = array_values(array_unique(array_filter(array_map(
+                    fn (string $tier): string => mb_strtolower(trim($tier)),
+                    explode(',', $value),
+                ))));
+
+                if ($tiers === [] || array_diff($tiers, ['s', 'a', 'b', 'c', 'd']) !== []) {
+                    return null;
+                }
+
+                $options['tiers'] = $tiers;
+            } elseif ($key === 'limit') {
+                if (! ctype_digit($value) || (int) $value < 1 || (int) $value > 10) {
+                    return null;
+                }
+
+                $options['limit'] = (int) $value;
+            } elseif ($value === '') {
+                return null;
+            } else {
+                $options['team'] = $value;
+            }
+        }
+
+        return $options;
     }
 
     private function help(): string
     {
-        return "請輸入遊戲與日期查詢 bo3.gg 賽程。\n例如：\n・lol 今天\n・valorant 明天\n・cs2 2026-08-12";
+        return "指令格式：\n!lol 今天\n!val 明天\n!cs 08/11\n\n預設查 S/A Tier。\n可選參數：tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }

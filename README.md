@@ -48,7 +48,7 @@ LINE_CHANNEL_SECRET=你的_Messaging_API_Channel_Secret
 LINE_CHANNEL_ACCESS_TOKEN=你的_Channel_Access_Token
 ```
 
-支援 `lol`／`英雄聯盟`、`valorant`／`特戰英豪`、`cs`／`cs2`，日期可輸入「今天」、「明天」、「後天」或 `YYYY-MM-DD`。例如：`valorant 明天`。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。
+指令格式為 `!lol 08/11`、`!val 今天`、`!cs 明天`，日期支援 `MM/DD`、今天、明天與後天，預設只查 S/A Tier。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。
 
 # 程式架構說明
 
