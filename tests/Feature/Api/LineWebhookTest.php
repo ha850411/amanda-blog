@@ -77,10 +77,10 @@ class LineWebhookTest extends TestCase
 
             return $request->hasHeader('Authorization', 'Bearer test-token')
                 && $request['replyToken'] === 'reply-token'
-                && str_contains($text, 'LoL 08/12 賽程（S/A Tier，台灣時間）')
-                && str_contains($text, '07:00｜Team Alpha vs Team Beta')
-                && str_contains($text, '賽事：LCK 2026 Summer')
-                && str_contains($text, '獨贏賠率：暫無盤口')
+                && str_contains($text, 'LoL｜08/12｜S/A Tier')
+                && str_contains($text, '第 1 場｜07:00｜BO3')
+                && str_contains($text, '賽事｜LCK 2026 Summer')
+                && str_contains($text, '獨贏賠率｜暫無盤口')
                 && ! str_contains($text, 'Previous Day Match');
         });
     }
@@ -96,6 +96,12 @@ class LineWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_log_viewer_requires_admin_authentication(): void
+    {
+        $this->get('/log-viewer')
+            ->assertRedirect(route('admin.login'));
+    }
+
     public function test_today_and_default_tiers_are_supported(): void
     {
         Http::fake([
@@ -104,7 +110,7 @@ class LineWebhookTest extends TestCase
 
         $reply = app(LineScheduleBot::class)->respond('!cs 今天');
 
-        $this->assertStringContainsString('CS2 08/11 賽程（S/A Tier，台灣時間）', $reply);
+        $this->assertStringContainsString('CS2｜08/11｜S/A Tier', $reply);
         $this->assertStringContainsString('Previous Day Match', $reply);
 
         Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-11'
@@ -119,15 +125,15 @@ class LineWebhookTest extends TestCase
 
         $reply = app(LineScheduleBot::class)->respond('!val 明天 tier=all limit=1 team="Team Alpha"');
 
-        $this->assertStringContainsString('VALORANT 08/12 賽程（全部 Tier，台灣時間）', $reply);
-        $this->assertStringContainsString('Team Alpha vs Team Beta', $reply);
+        $this->assertStringContainsString('VALORANT｜08/12｜全部 Tier', $reply);
+        $this->assertStringContainsString("Team Alpha\nvs\nTeam Beta", $reply);
         $this->assertStringNotContainsString('Previous Day Match', $reply);
 
         Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-12'
             && ! isset($request['tiers']));
     }
 
-    public function test_tournament_and_best_moneyline_odds_are_included(): void
+    public function test_tournament_and_preferred_bookmaker_odds_are_included(): void
     {
         config([
             'services.odds.api_key' => 'odds-test-key',
@@ -168,9 +174,9 @@ class LineWebhookTest extends TestCase
 
         $reply = app(LineScheduleBot::class)->respond('!lol 明天 team="Team Alpha"');
 
-        $this->assertStringContainsString('賽事：LCK 2026 Summer', $reply);
-        $this->assertStringContainsString('Team Alpha 1.60（Bet365）', $reply);
-        $this->assertStringContainsString('Team Beta 2.40（Stake）', $reply);
+        $this->assertStringContainsString('賽事｜LCK 2026 Summer', $reply);
+        $this->assertStringContainsString('Team Alpha　1.55（Stake）', $reply);
+        $this->assertStringContainsString('Team Beta　2.40（Stake）', $reply);
 
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/events')
             && $request['sport'] === 'esports'
@@ -218,9 +224,9 @@ class LineWebhookTest extends TestCase
         ];
 
         return '<html><div class="table-row table-row--upcoming">'
-            .'<a href="/lol/matches/previous"></a><p class="tournament-name">KeSPA Cup 2026</p></div>'
+            .'<a href="/lol/matches/previous">Previous Team Bo5 Another Team</a><p class="tournament-name">KeSPA Cup 2026</p></div>'
             .'<div class="table-row table-row--upcoming">'
-            .'<a href="/lol/matches/alpha-vs-beta"></a><p class="tournament-name">LCK 2026 Summer</p></div>'
+            .'<a href="/lol/matches/alpha-vs-beta">Team AlphaBo3Team Beta</a><p class="tournament-name">LCK 2026 Summer</p></div>'
             .'<script id="micro-markup" type="application/ld+json">'
             .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
             .'</script></html>';

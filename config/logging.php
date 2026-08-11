@@ -73,6 +73,14 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'webhook' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/webhook.log'),
+            'level' => env('WEBHOOK_LOG_LEVEL', 'info'),
+            'days' => env('WEBHOOK_LOG_DAYS', 14),
+            'replace_placeholders' => true,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'url' => env('LOG_SLACK_WEBHOOK_URL'),

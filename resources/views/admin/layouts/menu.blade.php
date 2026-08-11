@@ -31,6 +31,12 @@
             </a>
         </li>
         <li>
+            <a href="{{ url('/log-viewer') }}" target="_blank" rel="noopener">
+                <span class="icon"><i class="fa-solid fa-list-check"></i></span>
+                <span class="title">Webhook 紀錄</span>
+            </a>
+        </li>
+        <li>
             <a href="{{ route('admin.logout') }}">
                 <span class="icon"><i class="fa-solid fa-right-from-bracket"></i></span>
                 <span class="title">登出</span>

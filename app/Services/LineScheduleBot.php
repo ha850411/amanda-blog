@@ -60,13 +60,28 @@ class LineScheduleBot
 
         $visibleMatches = array_slice($matches, 0, $command['limit']);
         $visibleMatches = $this->odds->enrich($visibleMatches, $command['date']);
-        $lines = ["{$label} {$dateLabel} 賽程（{$tierLabel}，台灣時間）"];
+        $lines = [
+            "{$label}｜{$dateLabel}｜{$tierLabel}",
+            '時間基準｜台灣時間',
+        ];
 
-        foreach ($visibleMatches as $match) {
-            $odds = $match['odds'] === null
-                ? '暫無盤口'
-                : sprintf(
-                    '%s %.2f（%s）｜%s %.2f（%s）',
+        foreach ($visibleMatches as $index => $match) {
+            $lines[] = "\n──────────";
+            $lines[] = sprintf(
+                "第 %d 場｜%s｜%s\n%s\nvs\n%s\n\n賽事｜%s",
+                $index + 1,
+                $match['start_at']->format('H:i'),
+                $match['format'],
+                $match['team1'],
+                $match['team2'],
+                $match['tournament'],
+            );
+
+            if ($match['odds'] === null) {
+                $lines[] = '獨贏賠率｜暫無盤口';
+            } else {
+                $lines[] = sprintf(
+                    "獨贏賠率｜\n%s　%.2f（%s）\n%s　%.2f（%s）",
                     $match['team1'],
                     $match['odds']['team1']['price'],
                     $match['odds']['team1']['bookmaker'],
@@ -74,15 +89,9 @@ class LineScheduleBot
                     $match['odds']['team2']['price'],
                     $match['odds']['team2']['bookmaker'],
                 );
+            }
 
-            $lines[] = sprintf(
-                "\n%s｜%s\n賽事：%s\n獨贏賠率：%s\n%s",
-                $match['start_at']->format('H:i'),
-                $match['name'],
-                $match['tournament'],
-                $odds,
-                $match['url'],
-            );
+            $lines[] = '連結｜'.$match['url'];
         }
 
         if (count($matches) > $command['limit']) {

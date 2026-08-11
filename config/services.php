@@ -52,6 +52,7 @@ return [
         'api_key' => env('ODDS_API_KEY'),
         'base_url' => env('ODDS_API_BASE_URL', 'https://api.odds-api.io/v3'),
         'bookmakers' => env('ODDS_API_BOOKMAKERS'),
+        'bookmaker_priority' => env('ODDS_API_BOOKMAKER_PRIORITY', 'Stake,Bet365'),
         'cache_seconds' => (int) env('ODDS_API_CACHE_SECONDS', 60),
         'timeout_seconds' => (int) env('ODDS_API_TIMEOUT_SECONDS', 10),
     ],

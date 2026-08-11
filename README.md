@@ -50,7 +50,9 @@ LINE_CHANNEL_ACCESS_TOKEN=你的_Channel_Access_Token
 
 指令格式為 `!lol 08/11`、`!val 今天`、`!cs 明天`，日期支援 `MM/DD`、今天、明天與後天，預設只查 S/A Tier。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。
 
-每場回覆會顯示 bo3.gg 的賽事名稱，並以 Odds-API.io 的日期、開賽時間與雙方隊名匹配盤口。設定 `ODDS_API_KEY` 後會顯示最佳的 ML（獨贏）賠率；`ODDS_API_BOOKMAKERS` 留空時自動使用帳號已選擇的莊家，沒有匹配盤口時顯示「暫無盤口」。
+每場回覆會顯示 bo3.gg 的賽事名稱與 BO 賽制，並以 Odds-API.io 的日期、開賽時間與雙方隊名匹配盤口。設定 `ODDS_API_KEY` 後，會依 `ODDS_API_BOOKMAKER_PRIORITY` 選擇同一家莊家的完整雙邊 ML（預設 Stake 優先、Bet365 備援），不會混搭兩家盤口；`ODDS_API_BOOKMAKERS` 留空時自動使用帳號已選擇的莊家，沒有匹配盤口時顯示「暫無盤口」。
+
+Webhook 執行紀錄寫入 `storage/logs/webhook-*.log`。登入後台後可由「Webhook 紀錄」或 `/log-viewer` 查看；Log Viewer 與其 API 都受後台管理員登入保護。
 
 # 程式架構說明
 

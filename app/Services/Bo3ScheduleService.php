@@ -17,7 +17,7 @@ class Bo3ScheduleService
     ];
 
     /**
-     * @return array<int, array{name: string, team1: string, team2: string, tournament: string, start_at: CarbonImmutable, url: string}>
+     * @return array<int, array{name: string, team1: string, team2: string, tournament: string, format: string, start_at: CarbonImmutable, url: string}>
      */
     public function forDate(string $game, CarbonImmutable $date, array $tiers = ['s', 'a']): array
     {
@@ -28,7 +28,7 @@ class Bo3ScheduleService
         $tiers = $this->normalizeTiers($tiers);
         $dateString = $date->format('Y-m-d');
         $tierKey = $tiers === [] ? 'all' : implode(',', $tiers);
-        $cacheKey = "bo3-schedule:{$game}:{$dateString}:{$tierKey}";
+        $cacheKey = "bo3-schedule:v2:{$game}:{$dateString}:{$tierKey}";
 
         try {
             $cached = Cache::get($cacheKey);
@@ -56,7 +56,7 @@ class Bo3ScheduleService
     }
 
     /**
-     * @return array<int, array{name: string, team1: string, team2: string, tournament: string, start_at: CarbonImmutable, url: string}>
+     * @return array<int, array{name: string, team1: string, team2: string, tournament: string, format: string, start_at: CarbonImmutable, url: string}>
      */
     private function fetch(string $game, string $date, array $tiers): array
     {
@@ -80,13 +80,13 @@ class Bo3ScheduleService
 
         $events = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
-        $tournaments = $this->extractTournaments($response->body());
+        $metadata = $this->extractMatchMetadata($response->body());
 
         return collect($events)
             ->filter(fn (mixed $event): bool => is_array($event)
                 && ($event['@type'] ?? null) === 'SportsEvent'
                 && isset($event['name'], $event['startDate'], $event['url']))
-            ->map(function (array $event) use ($timezone, $tournaments): array {
+            ->map(function (array $event) use ($timezone, $metadata): array {
                 $name = preg_replace('/\s+/u', ' ', (string) $event['name']);
                 $name = trim($name ?? (string) $event['name']);
                 $teams = preg_split('/\s+vs\s+/iu', $name, 2);
@@ -96,7 +96,8 @@ class Bo3ScheduleService
                     'name' => $name,
                     'team1' => trim($teams[0] ?? $name),
                     'team2' => trim($teams[1] ?? ''),
-                    'tournament' => $tournaments[$path] ?? '未知賽事',
+                    'tournament' => $metadata[$path]['tournament'] ?? '未知賽事',
+                    'format' => $metadata[$path]['format'] ?? '未知',
                     'start_at' => CarbonImmutable::parse($event['startDate'])->setTimezone($timezone),
                     'url' => (string) $event['url'],
                 ];
@@ -108,9 +109,9 @@ class Bo3ScheduleService
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, array{tournament: string, format: string}>
      */
-    private function extractTournaments(string $html): array
+    private function extractMatchMetadata(string $html): array
     {
         $document = new \DOMDocument;
         $previous = libxml_use_internal_errors(true);
@@ -132,9 +133,13 @@ class Bo3ScheduleService
 
             $path = (string) parse_url($matchLink->getAttribute('href'), PHP_URL_PATH);
             $name = preg_replace('/\s+/u', ' ', $tournament->textContent);
+            preg_match('/Bo([1-5])/i', $row->textContent, $formatMatch);
 
             if ($path !== '' && trim($name ?? '') !== '') {
-                $result[$path] = trim($name);
+                $result[$path] = [
+                    'tournament' => trim($name),
+                    'format' => isset($formatMatch[1]) ? 'BO'.$formatMatch[1] : '未知',
+                ];
             }
         }
 

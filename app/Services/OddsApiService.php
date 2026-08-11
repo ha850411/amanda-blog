@@ -228,8 +228,7 @@ class OddsApiService
             return null;
         }
 
-        $bestHome = null;
-        $bestAway = null;
+        $lines = [];
 
         foreach ($odds['bookmakers'] as $bookmaker => $markets) {
             foreach (is_array($markets) ? $markets : [] as $market) {
@@ -243,35 +242,44 @@ class OddsApiService
                     continue;
                 }
 
-                $bestHome = $this->chooseBetter($bestHome, $line['home'] ?? null, (string) $bookmaker);
-                $bestAway = $this->chooseBetter($bestAway, $line['away'] ?? null, (string) $bookmaker);
+                if (is_numeric($line['home'] ?? null)
+                    && is_numeric($line['away'] ?? null)
+                    && (float) $line['home'] > 1
+                    && (float) $line['away'] > 1) {
+                    $lines[mb_strtolower((string) $bookmaker)] = [
+                        'home' => (float) $line['home'],
+                        'away' => (float) $line['away'],
+                        'bookmaker' => (string) $bookmaker,
+                    ];
+                }
             }
         }
 
-        if ($bestHome === null || $bestAway === null) {
+        $selected = null;
+        $priority = array_filter(array_map(
+            'trim',
+            explode(',', (string) config('services.odds.bookmaker_priority', 'Stake,Bet365')),
+        ));
+
+        foreach ($priority as $bookmaker) {
+            if (isset($lines[mb_strtolower($bookmaker)])) {
+                $selected = $lines[mb_strtolower($bookmaker)];
+
+                break;
+            }
+        }
+
+        if ($selected === null) {
             return null;
         }
 
         $team1IsHome = $this->similarity($match['team1'], $event['home']) >= $this->similarity($match['team1'], $event['away']);
+        $home = ['price' => $selected['home'], 'bookmaker' => $selected['bookmaker']];
+        $away = ['price' => $selected['away'], 'bookmaker' => $selected['bookmaker']];
 
         return $team1IsHome
-            ? ['team1' => $bestHome, 'team2' => $bestAway]
-            : ['team1' => $bestAway, 'team2' => $bestHome];
-    }
-
-    /**
-     * @param  array{price: float, bookmaker: string}|null  $current
-     * @return array{price: float, bookmaker: string}|null
-     */
-    private function chooseBetter(?array $current, mixed $price, string $bookmaker): ?array
-    {
-        if (! is_numeric($price) || (float) $price <= 1) {
-            return $current;
-        }
-
-        return $current === null || (float) $price > $current['price']
-            ? ['price' => (float) $price, 'bookmaker' => $bookmaker]
-            : $current;
+            ? ['team1' => $home, 'team2' => $away]
+            : ['team1' => $away, 'team2' => $home];
     }
 
     private function similarity(string $left, string $right): float
