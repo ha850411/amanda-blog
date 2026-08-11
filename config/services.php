@@ -35,4 +35,17 @@ return [
         ],
     ],
 
+    'line' => [
+        'channel_secret' => env('LINE_CHANNEL_SECRET'),
+        'channel_access_token' => env('LINE_CHANNEL_ACCESS_TOKEN'),
+        'reply_url' => env('LINE_REPLY_URL', 'https://api.line.me/v2/bot/message/reply'),
+    ],
+
+    'bo3' => [
+        'base_url' => env('BO3_BASE_URL', 'https://bo3.gg'),
+        'cache_seconds' => (int) env('BO3_CACHE_SECONDS', 300),
+        'timeout_seconds' => (int) env('BO3_TIMEOUT_SECONDS', 10),
+        'timezone' => env('BO3_TIMEZONE', 'Asia/Taipei'),
+    ],
+
 ];

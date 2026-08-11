@@ -1,12 +1,20 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api;
 use App\Http\Middleware\AdminMiddleware;
+use Illuminate\Support\Facades\Route;
 
 Route::get('health', function () {
-    return "ok";
+    return 'ok';
 })->name('health');
+
+Route::post('/line/webhook', [Api\LineWebhookController::class, 'handle'])
+    ->withoutMiddleware([
+        \Illuminate\Cookie\Middleware\EncryptCookies::class,
+        \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+        \Illuminate\Session\Middleware\StartSession::class,
+    ])
+    ->name('line.webhook');
 
 Route::prefix('admin')->group(function () {
     Route::post('/login', [Api\LoginController::class, 'handleLogin'])

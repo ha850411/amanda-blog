@@ -39,6 +39,17 @@
 - 前台: http://localhost:8091
 - 後台: http://localhost:8091/admin
 
+# LINE 賽程 Bot
+
+Webhook URL 設為 `https://你的網域/api/line/webhook`，並在 `.env` 設定：
+
+```env
+LINE_CHANNEL_SECRET=你的_Messaging_API_Channel_Secret
+LINE_CHANNEL_ACCESS_TOKEN=你的_Channel_Access_Token
+```
+
+支援 `lol`／`英雄聯盟`、`valorant`／`特戰英豪`、`cs`／`cs2`，日期可輸入「今天」、「明天」、「後天」或 `YYYY-MM-DD`。例如：`valorant 明天`。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。
+
 # 程式架構說明
 
 本專案為 Laravel + Vue.js 部落格系統，分為**前台**（文章閱讀）與**後台**（管理員 CMS）兩大區塊。

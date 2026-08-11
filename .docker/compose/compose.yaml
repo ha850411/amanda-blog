@@ -1,14 +1,15 @@
 services:
   service:
-    image: "${APP_IMAGE}:${PHP_VERSION}-fpm"
+    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-v1}"
     build:
       context: ../.
       dockerfile: Dockerfile
       args:
-        PHP_VERSION: ${PHP_VERSION}
-        COMPOSER_VERSION: ${COMPOSER_VERSION}
+        PHP_IMAGE: ${PHP_IMAGE:-php:8.4-fpm-bookworm@sha256:c5fb7a0c02f4efe280691910c8b734995fa83598cdcf3115ef5dcb2e4617681c}
+        COMPOSER_IMAGE: ${COMPOSER_IMAGE:-composer:2@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244481723664138fd36d5040}
     environment:
       XDEBUG_MODE: ${XDEBUG_MODE:-off}
+      COMPOSER_CACHE_DIR: /tmp/composer-cache
       TZ: Asia/Taipei
     volumes:
       # 專案原始碼（與 Nginx 共用）
@@ -17,6 +18,8 @@ services:
       - ../php/local.ini:/usr/local/etc/php/conf.d/99-local.ini:ro
       # 將 Xdebug 設定掛到 FPM 的 conf.d（非 CLI 路徑）
       - ../php/docker-php-ext-xdebug.ini:/usr/local/etc/php/conf.d/20-xdebug.ini:ro
+      # 藍綠部署共用下載 cache；vendor 仍留在各自的 release 目錄。
+      - composer-cache:/tmp/composer-cache
     # PHP-FPM 不對外開埠，由 Nginx 代理
     working_dir: /var/www/html
     networks:
@@ -38,4 +41,9 @@ services:
 networks:
   web-network:
     name: ${NETWORK_NAME}
+    external: true
+
+volumes:
+  composer-cache:
+    name: ${COMPOSER_CACHE_VOLUME:-amanda-blog-composer-cache}
     external: true
