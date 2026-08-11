@@ -1,6 +1,6 @@
 services:
   service:
-    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-v1}"
+    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-v3}"
     build:
       context: ../.
       dockerfile: Dockerfile
@@ -35,6 +35,20 @@ services:
       - ../nginx/laravel.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - service
+    networks:
+      - web-network
+
+  scheduler:
+    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-v3}"
+    command: ["php", "artisan", "schedule:work"]
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Taipei
+    volumes:
+      - ../../.:/var/www/html:delegated
+      - ../php/local.ini:/usr/local/etc/php/conf.d/99-local.ini:ro
+      - composer-cache:/tmp/composer-cache
+    working_dir: /var/www/html
     networks:
       - web-network
 

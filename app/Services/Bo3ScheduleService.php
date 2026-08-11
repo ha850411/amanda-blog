@@ -55,6 +55,31 @@ class Bo3ScheduleService
         return $matches;
     }
 
+    public function filteredUrl(string $game, CarbonImmutable $date, array $tiers = ['s', 'a']): string
+    {
+        if (! isset(self::PATHS[$game])) {
+            throw new RuntimeException("Unsupported game: {$game}");
+        }
+
+        $tiers = $this->normalizeTiers($tiers);
+        $url = rtrim((string) config('services.bo3.base_url'), '/').self::PATHS[$game].'?';
+        $query = [];
+
+        if ($tiers !== []) {
+            $query[] = 'tiers='.implode(',', array_map('rawurlencode', $tiers));
+        }
+
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+
+        if ($date->isSameDay(CarbonImmutable::now($timezone))) {
+            $query[] = 'period';
+        } else {
+            $query[] = 'date='.$date->format('Y-m-d');
+        }
+
+        return $url.implode('&', $query);
+    }
+
     /**
      * @return array<int, array{name: string, team1: string, team2: string, tournament: string, format: string, start_at: CarbonImmutable, url: string}>
      */

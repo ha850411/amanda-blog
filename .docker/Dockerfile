@@ -36,6 +36,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libmagickwand-dev \
     libmemcached-dev \
     libmemcached-tools \
+    fonts-noto-cjk \
     unixodbc-dev \
     freetds-dev \
     libgssapi-krb5-2 \

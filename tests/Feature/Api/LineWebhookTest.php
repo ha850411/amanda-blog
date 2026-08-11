@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Services\LineScheduleBot;
+use App\Services\LineScheduleImageService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -47,6 +48,8 @@ class LineWebhookTest extends TestCase
 
     public function test_line_can_query_tomorrow_lol_schedule(): void
     {
+        $this->fakeScheduleImage();
+
         Http::fake([
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
@@ -77,15 +80,20 @@ class LineWebhookTest extends TestCase
                 return false;
             }
 
-            $text = $request['messages'][0]['text'];
+            $message = $request['messages'][0];
 
             return $request->hasHeader('Authorization', 'Bearer test-token')
                 && $request['replyToken'] === 'reply-token'
-                && str_contains($text, 'LoL｜08/12｜S/A Tier')
-                && str_contains($text, '第 1 場｜07:00｜BO3')
-                && str_contains($text, '賽事｜LCK 2026 Summer')
-                && str_contains($text, '獨贏賠率｜暫無盤口')
-                && ! str_contains($text, 'Previous Day Match');
+                && count($request['messages']) === 1
+                && $message['type'] === 'imagemap'
+                && $message['baseUrl'] === 'https://cdn.example.com/line-schedules/test'
+                && $message['actions'][0]['linkUri'] === 'https://bo3.gg/lol/matches/current?tiers=s,a&date=2026-08-12'
+                && $message['actions'][0]['area'] === [
+                    'x' => 0,
+                    'y' => 0,
+                    'width' => 1040,
+                    'height' => 1040,
+                ];
         });
     }
 
@@ -100,8 +108,52 @@ class LineWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_image_failure_falls_back_to_text_with_one_filtered_link(): void
+    {
+        $images = Mockery::mock(LineScheduleImageService::class);
+        $images->shouldReceive('create')
+            ->once()
+            ->andThrow(new RuntimeException('Image storage is unavailable'));
+        $this->app->instance(LineScheduleImageService::class, $images);
+
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
+        ]);
+
+        $body = json_encode([
+            'events' => [[
+                'type' => 'message',
+                'replyToken' => 'reply-token',
+                'message' => [
+                    'id' => 'fallback-test',
+                    'type' => 'text',
+                    'text' => '!lol 明天',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+        Http::assertSent(function ($request): bool {
+            if ($request->url() !== 'https://api.line.me/v2/bot/message/reply') {
+                return false;
+            }
+
+            $text = $request['messages'][0]['text'] ?? '';
+
+            return $request['messages'][0]['type'] === 'text'
+                && str_contains($text, '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s,a&date=2026-08-12')
+                && substr_count($text, 'https://bo3.gg/') === 1
+                && ! str_contains($text, '/lol/matches/alpha-vs-beta');
+        });
+    }
+
     public function test_logging_failure_does_not_prevent_a_line_reply(): void
     {
+        $this->fakeScheduleImage();
+
         Http::fake([
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
@@ -132,7 +184,8 @@ class LineWebhookTest extends TestCase
 
         $response->assertOk()->assertExactJson([]);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.line.me/v2/bot/message/reply'
-            && str_contains($request['messages'][0]['text'], 'LoL｜08/11｜S/A Tier'));
+            && $request['messages'][0]['type'] === 'imagemap'
+            && $request['messages'][0]['actions'][0]['linkUri'] === 'https://bo3.gg/lol/matches/current?tiers=s,a&period');
     }
 
     public function test_log_viewer_requires_admin_authentication(): void
@@ -151,6 +204,8 @@ class LineWebhookTest extends TestCase
 
         $this->assertStringContainsString('CS2｜08/11｜S/A Tier', $reply);
         $this->assertStringContainsString('Previous Day Match', $reply);
+        $this->assertStringContainsString('完整賽程｜https://bo3.gg/matches/current?tiers=s,a&period', $reply);
+        $this->assertSame(1, substr_count($reply, 'https://bo3.gg/'));
 
         Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-11'
             && $request['tiers'] === 's,a');
@@ -167,6 +222,8 @@ class LineWebhookTest extends TestCase
         $this->assertStringContainsString('VALORANT｜08/12｜全部 Tier', $reply);
         $this->assertStringContainsString("Team Alpha\nvs\nTeam Beta", $reply);
         $this->assertStringNotContainsString('Previous Day Match', $reply);
+        $this->assertStringContainsString('完整賽程｜https://bo3.gg/valorant/matches/current?date=2026-08-12', $reply);
+        $this->assertStringNotContainsString('/lol/matches/alpha-vs-beta', $reply);
 
         Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-12'
             && ! isset($request['tiers']));
@@ -241,6 +298,15 @@ class LineWebhookTest extends TestCase
     private function signature(string $body): string
     {
         return base64_encode(hash_hmac('sha256', $body, 'test-secret', true));
+    }
+
+    private function fakeScheduleImage(): void
+    {
+        $images = Mockery::mock(LineScheduleImageService::class);
+        $images->shouldReceive('create')
+            ->once()
+            ->andReturn('https://cdn.example.com/line-schedules/test');
+        $this->app->instance(LineScheduleImageService::class, $images);
     }
 
     private function bo3Html(): string

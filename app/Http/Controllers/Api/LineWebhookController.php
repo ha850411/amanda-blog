@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\LineMessagingService;
 use App\Services\LineScheduleBot;
+use App\Services\LineScheduleImageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -17,6 +18,7 @@ class LineWebhookController extends Controller
         Request $request,
         LineMessagingService $line,
         LineScheduleBot $bot,
+        LineScheduleImageService $images,
     ): JsonResponse {
         $startedAt = hrtime(true);
         $webhookLog = Log::channel('webhook');
@@ -58,10 +60,25 @@ class LineWebhookController extends Controller
                 $message = (string) $event['message']['text'];
                 $command = str_starts_with(trim($message), '!') ? mb_substr(trim($message), 0, 120) : '[non-command]';
 
-                $line->reply(
-                    (string) $event['replyToken'],
-                    $bot->respond($message),
-                );
+                $reply = $bot->reply($message);
+                $replyToken = (string) $event['replyToken'];
+
+                if ($reply->prefersImage()) {
+                    try {
+                        $imageUrl = $images->create($reply->imageData, $reply->linkUrl);
+                        $line->replyImagemap(
+                            $replyToken,
+                            $imageUrl,
+                            $reply->imageData['title'].' 賽程（點擊圖片開啟 bo3.gg）',
+                            $reply->linkUrl,
+                        );
+                    } catch (Throwable $imageException) {
+                        report($imageException);
+                        $line->reply($replyToken, $reply->text);
+                    }
+                } else {
+                    $line->reply($replyToken, $reply->text);
+                }
 
                 $this->writeLog($webhookLog, 'info', 'LINE webhook replied.', [
                     'message_id' => $event['message']['id'] ?? null,

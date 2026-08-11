@@ -20,10 +20,15 @@ class LineScheduleBot
 
     public function respond(string $message): string
     {
+        return $this->reply($message)->text;
+    }
+
+    public function reply(string $message): LineBotReply
+    {
         $command = $this->parseCommand($message);
 
         if ($command === null) {
-            return $this->help();
+            return new LineBotReply($this->help());
         }
 
         try {
@@ -35,7 +40,7 @@ class LineScheduleBot
         } catch (Throwable $exception) {
             report($exception);
 
-            return '目前無法取得 bo3.gg 賽程，請稍後再試。';
+            return new LineBotReply('目前無法取得 bo3.gg 賽程，請稍後再試。');
         }
 
         if ($command['team'] !== null) {
@@ -53,9 +58,17 @@ class LineScheduleBot
         $tierLabel = $command['tiers'] === []
             ? '全部 Tier'
             : implode('/', array_map('mb_strtoupper', $command['tiers'])).' Tier';
+        $filteredUrl = $this->schedules->filteredUrl(
+            $command['game'],
+            $command['date'],
+            $command['tiers'],
+        );
 
         if ($matches === []) {
-            return "{$label} {$dateLabel} 查無賽程。\n資料來源：bo3.gg";
+            return new LineBotReply(
+                "{$label} {$dateLabel} 查無賽程。\n完整賽程｜{$filteredUrl}",
+                $filteredUrl,
+            );
         }
 
         $visibleMatches = array_slice($matches, 0, $command['limit']);
@@ -90,15 +103,33 @@ class LineScheduleBot
                     $match['odds']['team2']['bookmaker'],
                 );
             }
-
-            $lines[] = '連結｜'.$match['url'];
         }
 
         if (count($matches) > $command['limit']) {
             $lines[] = sprintf("\n另有 %d 場，請至 bo3.gg 查看。", count($matches) - $command['limit']);
         }
 
-        return implode("\n", $lines);
+        $lines[] = "\n完整賽程｜{$filteredUrl}";
+
+        return new LineBotReply(
+            implode("\n", $lines),
+            $filteredUrl,
+            [
+                'title' => "{$label}｜{$dateLabel}｜{$tierLabel}",
+                'subtitle' => '台灣時間｜'.count($visibleMatches).' 場賽程',
+                'matches' => array_map(
+                    fn (array $match): array => [
+                        'start_time' => $match['start_at']->format('H:i'),
+                        'format' => $match['format'],
+                        'team1' => $match['team1'],
+                        'team2' => $match['team2'],
+                        'tournament' => $match['tournament'],
+                        'odds' => $match['odds'],
+                    ],
+                    $visibleMatches,
+                ),
+            ],
+        );
     }
 
     /**
