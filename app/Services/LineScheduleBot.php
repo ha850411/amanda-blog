@@ -18,17 +18,21 @@ class LineScheduleBot
         private readonly OddsApiService $odds,
     ) {}
 
-    public function respond(string $message): string
+    public function respond(string $message): ?string
     {
-        return $this->reply($message)->text;
+        return $this->reply($message)?->text;
     }
 
-    public function reply(string $message): LineBotReply
+    public function reply(string $message): ?LineBotReply
     {
+        if (mb_strtolower(trim($message)) === '!help') {
+            return new LineBotReply($this->help());
+        }
+
         $command = $this->parseCommand($message);
 
         if ($command === null) {
-            return new LineBotReply($this->help());
+            return null;
         }
 
         try {

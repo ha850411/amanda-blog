@@ -61,6 +61,17 @@ class LineWebhookController extends Controller
                 $command = str_starts_with(trim($message), '!') ? mb_substr(trim($message), 0, 120) : '[non-command]';
 
                 $reply = $bot->reply($message);
+
+                if ($reply === null) {
+                    $this->writeLog($webhookLog, 'info', 'LINE webhook message ignored.', [
+                        'message_id' => $event['message']['id'] ?? null,
+                        'command' => $command,
+                        'duration_ms' => $this->durationMs($eventStartedAt),
+                    ]);
+
+                    continue;
+                }
+
                 $replyToken = (string) $event['replyToken'];
 
                 if ($reply->prefersImage()) {

@@ -108,6 +108,83 @@ class LineWebhookTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_help_command_returns_usage_instructions(): void
+    {
+        Http::fake([
+            'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
+        ]);
+
+        $body = json_encode([
+            'events' => [[
+                'type' => 'message',
+                'replyToken' => 'reply-token',
+                'message' => [
+                    'id' => 'help-test',
+                    'type' => 'text',
+                    'text' => '!help',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+        Http::assertSent(function ($request): bool {
+            if ($request->url() !== 'https://api.line.me/v2/bot/message/reply') {
+                return false;
+            }
+
+            return $request['messages'][0] === [
+                'type' => 'text',
+                'text' => "指令格式：\n!lol 今天\n!val 明天\n!cs 08/11\n\n預設查 S/A Tier。\n可選參數：tier=s,a｜tier=all｜limit=5｜team=G2",
+            ];
+        });
+    }
+
+    public function test_non_command_message_is_ignored(): void
+    {
+        Http::fake();
+
+        $body = json_encode([
+            'events' => [[
+                'type' => 'message',
+                'replyToken' => 'reply-token',
+                'message' => [
+                    'id' => 'chat-test',
+                    'type' => 'text',
+                    'text' => '今天有什麼比賽？',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+        Http::assertNothingSent();
+    }
+
+    public function test_invalid_command_is_ignored(): void
+    {
+        Http::fake();
+
+        $body = json_encode([
+            'events' => [[
+                'type' => 'message',
+                'replyToken' => 'reply-token',
+                'message' => [
+                    'id' => 'invalid-command-test',
+                    'type' => 'text',
+                    'text' => '!lol 下週',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+        Http::assertNothingSent();
+    }
+
     public function test_image_failure_falls_back_to_text_with_one_filtered_link(): void
     {
         $images = Mockery::mock(LineScheduleImageService::class);
