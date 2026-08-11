@@ -110,4 +110,4 @@ make runtime-publish
 
 ## 📌 注意事項
 - 請確保使用者和 Jenkins 容器均有存取 `/var/run/docker.sock` 的權限，這是部署腳本生成 Blue/Green 容器的關鍵。
-- 專案目錄預設為 `/workspace`（由 `init.sh` 自動建立）；本機或其他環境可用 `WORKSPACE` 覆寫，並請確保磁碟容量與權限皆有妥善掛載。
+- 專案目錄預設為 `/workspace`（由 `init.sh` 自動建立）；本機或其他環境可用 `AMANDA_DEPLOY_ROOT` 覆寫，並請確保磁碟容量與權限皆有妥善掛載。請勿以 Jenkins 內建的 `WORKSPACE` 當作部署根目錄。

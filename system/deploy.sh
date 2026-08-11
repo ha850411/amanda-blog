@@ -3,10 +3,11 @@
 set -euo pipefail # 啟用更嚴格的錯誤檢查
 
 # Amazon Linux/Jenkins 使用下列預設值；本機整合測試可透過環境變數覆寫，
-# 不需要另外維護 macOS 專用腳本。
-WORKSPACE="${WORKSPACE:-/workspace}"
-WORKSPACE="${WORKSPACE%/}"
-SYSTEM_FOLDER="${SYSTEM_FOLDER:-$WORKSPACE/amanda-blog-system}"
+# 不需要另外維護 macOS 專用腳本。不要使用 WORKSPACE：它是 Jenkins 內建變數，
+# 內容會是 /var/jenkins_home/workspace/<job>，不是部署主機的 /workspace。
+DEPLOY_ROOT="${AMANDA_DEPLOY_ROOT:-/workspace}"
+DEPLOY_ROOT="${DEPLOY_ROOT%/}"
+SYSTEM_FOLDER="${SYSTEM_FOLDER:-$DEPLOY_ROOT/amanda-blog-system}"
 ENV_PATH="${ENV_PATH:-$SYSTEM_FOLDER/app-env}"
 CONFIG_FILE="${CONFIG_FILE:-$SYSTEM_FOLDER/system/nginx/upstream/active-upstream.conf}"
 GITHUB_REPO="${GITHUB_REPO:-https://github.com/ha850411/amanda-blog.git}"
@@ -29,8 +30,18 @@ run_privileged() {
     fi
 }
 
-# 移動到工作目錄
-cd "$WORKSPACE"
+# 在讀取 active upstream 前先確認部署掛載完整，讓 CI 錯誤訊息指出真正缺少的檔案。
+if [ ! -d "$DEPLOY_ROOT" ]; then
+    echo "錯誤: 部署根目錄不存在: $DEPLOY_ROOT" >&2
+    exit 1
+fi
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "錯誤: active upstream 設定不存在: $CONFIG_FILE" >&2
+    exit 1
+fi
+
+# 移動到部署根目錄
+cd "$DEPLOY_ROOT"
 
 # 從 active-upstream.conf 提取當前的後端容器名稱
 CURRENT_SERVICE=$(awk '/set \$active_backend/ {print $3}' "$CONFIG_FILE" | tr -d ';' | head -1)
@@ -49,7 +60,7 @@ echo "NEW_APP_ENV: $NEW_APP_ENV"
 NEW_FOLDER="$APP_NAME_PREFIX-$NEW_APP_ENV"
 NEW_PROJECT_NAME="$APP_NAME_PREFIX-$NEW_APP_ENV"
 NEW_NGINX_NAME="$APP_NAME_PREFIX-nginx-$NEW_APP_ENV"
-DEPLOY_DIR="$WORKSPACE/$NEW_FOLDER"
+DEPLOY_DIR="$DEPLOY_ROOT/$NEW_FOLDER"
 
 # Jenkins 可能未提供 USER/GROUP，避免 set -u 造成 unbound variable。
 DEPLOY_USER="${SUDO_USER:-${USER:-$(id -un)}}"
@@ -59,7 +70,7 @@ DEPLOY_GROUP="${SUDO_GROUP:-${GROUP:-$(id -gn "$DEPLOY_USER")}}"
 if [ -d "$DEPLOY_DIR" ]; then
     echo "偵測到殘留目錄 $NEW_FOLDER，先停止容器..."
     cd "$DEPLOY_DIR" && make down || true
-    cd "$WORKSPACE"
+    cd "$DEPLOY_ROOT"
     run_privileged rm -rf "$DEPLOY_DIR"
 fi
 
@@ -163,9 +174,9 @@ fi
 
 # 停止舊容器
 if [ "$NEW_APP_ENV" == "green" ]; then
-    OLD_FOLDER="$WORKSPACE/$APP_NAME_PREFIX-blue"
+    OLD_FOLDER="$DEPLOY_ROOT/$APP_NAME_PREFIX-blue"
 else
-    OLD_FOLDER="$WORKSPACE/$APP_NAME_PREFIX-green"
+    OLD_FOLDER="$DEPLOY_ROOT/$APP_NAME_PREFIX-green"
 fi
 
 if [ -d "$OLD_FOLDER" ]; then
@@ -177,11 +188,11 @@ else
     echo "舊目錄 $OLD_FOLDER 不存在，跳過停止舊容器"
 fi
 
-# 若 $WORKSPACE/amanda-blog 存在（首次部署前的原始目錄），則停止並刪除
-if [ -d "$WORKSPACE/$APP_NAME_PREFIX" ]; then
+# 若部署根目錄下的 amanda-blog 存在（首次部署前的原始目錄），則停止並刪除
+if [ -d "$DEPLOY_ROOT/$APP_NAME_PREFIX" ]; then
     echo "偵測到原始 $APP_NAME_PREFIX 目錄，停止容器並刪除..."
-    cd "$WORKSPACE/$APP_NAME_PREFIX" && make down || true
-    run_privileged rm -rf "$WORKSPACE/$APP_NAME_PREFIX"
+    cd "$DEPLOY_ROOT/$APP_NAME_PREFIX" && make down || true
+    run_privileged rm -rf "$DEPLOY_ROOT/$APP_NAME_PREFIX"
     echo "原始 $APP_NAME_PREFIX 目錄已刪除"
 fi
 
