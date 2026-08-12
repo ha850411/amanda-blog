@@ -29,8 +29,15 @@ class LineWebhookQueueTest extends TestCase
         $body = json_encode(['events' => [$event]], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $signature = base64_encode(hash_hmac('sha256', $body, 'test-secret', true));
 
-        $response = $this->withHeaders(['X-Line-Signature' => $signature])
-            ->call('POST', '/api/line/webhook', [], [], [], [], $body);
+        $response = $this->call(
+            'POST',
+            '/api/line/webhook',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_X_LINE_SIGNATURE' => $signature,
+            ],
+            content: $body,
+        );
 
         $response->assertOk()->assertExactJson([]);
         Queue::assertPushed(ProcessLineWebhookEvent::class, function (ProcessLineWebhookEvent $job) use ($event): bool {
