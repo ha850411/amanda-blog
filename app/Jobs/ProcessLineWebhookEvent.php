@@ -23,8 +23,10 @@ class ProcessLineWebhookEvent implements ShouldQueue, ShouldBeUnique
     public bool $failOnTimeout = true;
 
     /** @param array<string, mixed> $event */
-    public function __construct(public readonly array $event)
-    {
+    public function __construct(
+        public readonly array $event,
+        public readonly bool $processingAcknowledged = false,
+    ) {
     }
 
     public function uniqueId(): string
@@ -58,6 +60,30 @@ class ProcessLineWebhookEvent implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        $target = $this->processingAcknowledged ? $this->targetId() : null;
+
+        if ($target !== null) {
+            if (! $reply->prefersImage()) {
+                $line->push($target, $reply->text);
+
+                return;
+            }
+
+            try {
+                $imageUrl = $images->create($reply->imageData, $reply->linkUrl);
+                $line->pushImageWithLink(
+                    $target,
+                    $imageUrl,
+                    $reply->linkUrl,
+                );
+            } catch (Throwable $imageException) {
+                report($imageException);
+                $line->push($target, $reply->text);
+            }
+
+            return;
+        }
+
         $replyToken = (string) $this->event['replyToken'];
 
         if (! $reply->prefersImage()) {
@@ -77,6 +103,19 @@ class ProcessLineWebhookEvent implements ShouldQueue, ShouldBeUnique
             report($imageException);
             $line->reply($replyToken, $reply->text);
         }
+    }
+
+    private function targetId(): ?string
+    {
+        $source = is_array($this->event['source'] ?? null) ? $this->event['source'] : [];
+        $target = match ($source['type'] ?? null) {
+            'group' => $source['groupId'] ?? null,
+            'room' => $source['roomId'] ?? null,
+            'user' => $source['userId'] ?? null,
+            default => null,
+        };
+
+        return is_string($target) && $target !== '' ? $target : null;
     }
 
     public function failed(?Throwable $exception): void
