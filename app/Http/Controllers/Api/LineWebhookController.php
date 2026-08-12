@@ -3,9 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessLineWebhookEvent;
 use App\Services\LineMessagingService;
-use App\Services\LineScheduleBot;
-use App\Services\LineScheduleImageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -17,8 +16,6 @@ class LineWebhookController extends Controller
     public function handle(
         Request $request,
         LineMessagingService $line,
-        LineScheduleBot $bot,
-        LineScheduleImageService $images,
     ): JsonResponse {
         $startedAt = hrtime(true);
         $webhookLog = Log::channel('webhook');
@@ -44,74 +41,35 @@ class LineWebhookController extends Controller
             return response()->json(['message' => 'Invalid payload.'], 400);
         }
 
+        $events = array_values(array_filter($payload['events'] ?? [], 'is_array'));
+
         $this->writeLog($webhookLog, 'info', 'LINE webhook received.', [
-            'event_count' => count($payload['events'] ?? []),
+            'event_count' => count($events),
         ]);
 
-        foreach ($payload['events'] ?? [] as $event) {
-            if (($event['type'] ?? null) !== 'message'
-                || ($event['message']['type'] ?? null) !== 'text'
-                || ! isset($event['replyToken'], $event['message']['text'])) {
-                continue;
-            }
-
+        foreach ($events as $event) {
             try {
-                $eventStartedAt = hrtime(true);
-                $message = (string) $event['message']['text'];
-                $command = str_starts_with(trim($message), '!') ? mb_substr(trim($message), 0, 120) : '[non-command]';
+                ProcessLineWebhookEvent::dispatch($event);
 
-                $reply = $bot->reply($message);
-
-                if ($reply === null) {
-                    $this->writeLog($webhookLog, 'info', 'LINE webhook message ignored.', [
-                        'message_id' => $event['message']['id'] ?? null,
-                        'command' => $command,
-                        'duration_ms' => $this->durationMs($eventStartedAt),
-                    ]);
-
-                    continue;
-                }
-
-                $replyToken = (string) $event['replyToken'];
-
-                if ($reply->prefersImage()) {
-                    try {
-                        $imageUrl = $images->create($reply->imageData, $reply->linkUrl);
-                        $line->replyImageWithLink(
-                            $replyToken,
-                            $imageUrl,
-                            $reply->linkUrl,
-                        );
-                    } catch (Throwable $imageException) {
-                        report($imageException);
-                        $line->reply($replyToken, $reply->text);
-                    }
-                } else {
-                    $line->reply($replyToken, $reply->text);
-                }
-
-                $this->writeLog($webhookLog, 'info', 'LINE webhook replied.', [
+                $this->writeLog($webhookLog, 'info', 'LINE webhook event queued.', [
+                    'webhook_event_id' => $event['webhookEventId'] ?? null,
                     'message_id' => $event['message']['id'] ?? null,
-                    'command' => $command,
-                    'duration_ms' => $this->durationMs($eventStartedAt),
                 ]);
             } catch (Throwable $exception) {
-                $this->writeLog($webhookLog, 'error', 'LINE webhook failed.', [
+                $this->writeLog($webhookLog, 'error', 'LINE webhook queue dispatch failed.', [
+                    'webhook_event_id' => $event['webhookEventId'] ?? null,
                     'message_id' => $event['message']['id'] ?? null,
                     'type' => $exception::class,
-                    'duration_ms' => isset($eventStartedAt) ? $this->durationMs($eventStartedAt) : null,
                 ]);
 
-                try {
-                    Log::error('Failed to handle LINE webhook event.', [
-                        'exception' => $exception,
-                        'message_id' => $event['message']['id'] ?? null,
-                    ]);
-                } catch (Throwable $loggingException) {
-                    error_log(sprintf('Unable to write application log: %s', $loggingException->getMessage()));
-                }
+                report($exception);
             }
         }
+
+        $this->writeLog($webhookLog, 'info', 'LINE webhook acknowledged.', [
+            'event_count' => count($events),
+            'duration_ms' => $this->durationMs($startedAt),
+        ]);
 
         return response()->json([]);
     }
