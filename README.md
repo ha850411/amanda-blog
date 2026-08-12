@@ -41,7 +41,7 @@
 
 # Runtime image
 
-透過 `make deploy-up` 部署時，Runtime image tag 會依 `.docker/Dockerfile`、PHP base image與 Composer base image自動產生；相同建置內容會沿用既有 image，建置內容有變更時則會自動使用新 tag。可執行 `make runtime-tag` 查看目前 tag，不需在 `.env` 手動維護 `RUNTIME_IMAGE_TAG`。
+透過 `make deploy-up` 部署時，Runtime image tag 會依 `.docker/Dockerfile`、PHP base image 與 Composer base image自動產生；相同建置內容會沿用既有 image，建置內容有變更時則會自動使用新 tag。可執行 `make runtime-tag` 查看目前 tag，不需在 `.env` 手動維護 `RUNTIME_IMAGE_TAG`。
 
 CI 必須從 secret store 注入 `GHCR_TOKEN`（GitHub classic PAT，具備 `write:packages`），不得將 token 寫入 repository 或 `.env`。`make deploy-up` 會先登入 GHCR，檢查 fingerprint image 是否存在；不存在時才建置並推送至 `ghcr.io/ha850411/amanda-blog-runtime`，同時將 BuildKit layer cache 保存於 `buildcache-php8.4` tag，完成後才啟動新容器。
 
