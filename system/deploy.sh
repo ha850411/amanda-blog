@@ -33,11 +33,10 @@ run_privileged() {
 app_compose() {
     (
         cd "$DEPLOY_DIR/.docker/compose"
-        # `make deploy-up` exports the computed runtime tag only to its own
-        # subprocesses. Pass it explicitly here because these calls run
-        # through sudo and would otherwise fall back to the stale value in
-        # app-env/.env.docker.
-        run_privileged env "RUNTIME_IMAGE_TAG=$RUNTIME_IMAGE_TAG" docker compose "$@"
+        # Keep application Compose commands consistent with the Makefile
+        # commands above. Jenkins runs this script non-interactively, so a
+        # sudo wrapper here would require a password during migration.
+        env "RUNTIME_IMAGE_TAG=$RUNTIME_IMAGE_TAG" docker compose "$@"
     )
 }
 
