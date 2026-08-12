@@ -395,6 +395,25 @@ class LineWebhookTest extends TestCase
             && $request['tiers'] === 's,a');
     }
 
+    public function test_visually_equivalent_unicode_commands_are_normalized(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+        ]);
+
+        $messages = [
+            "\u{200B}!lol 08/13 tier=s",
+            '！ｌｏｌ　０８／１３　ｔｉｅｒ＝ｓ',
+        ];
+
+        foreach ($messages as $message) {
+            $reply = app(LineScheduleBot::class)->respond($message);
+
+            $this->assertNotNull($reply);
+            $this->assertStringContainsString('LoL 08/13 查無賽程。', $reply);
+        }
+    }
+
     public function test_optional_tier_limit_and_team_parameters_are_supported(): void
     {
         Http::fake([

@@ -53,8 +53,9 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
         $startedAt = hrtime(true);
         $webhookLog = Log::channel('webhook');
         $message = (string) ($this->event['message']['text'] ?? '');
-        $command = str_starts_with(trim($message), '!')
-            ? mb_substr(trim($message), 0, 120)
+        $loggableMessage = preg_replace('/^\p{Cf}+/u', '', trim($message)) ?? trim($message);
+        $command = preg_match('/^[!！﹗]/u', $loggableMessage) === 1
+            ? mb_substr($loggableMessage, 0, 120)
             : '[non-command]';
         $messageId = $this->event['message']['id'] ?? null;
 
@@ -70,6 +71,7 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
                 $this->writeLog($webhookLog, 'info', 'LINE webhook message ignored.', [
                     'message_id' => $messageId,
                     'command' => $command,
+                    'message_prefix_hex' => bin2hex(mb_substr($message, 0, 8)),
                     'duration_ms' => $this->durationMs($startedAt),
                 ]);
 

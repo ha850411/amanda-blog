@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Carbon\CarbonImmutable;
+use Normalizer;
 use Throwable;
 
 class LineScheduleBot
@@ -26,7 +27,9 @@ class LineScheduleBot
 
     public function reply(string $message): ?LineBotReply
     {
-        if (mb_strtolower(trim($message)) === '!help') {
+        $message = $this->normalizeCommand($message);
+
+        if (mb_strtolower($message) === '!help') {
             return new LineBotReply($this->help());
         }
 
@@ -143,7 +146,7 @@ class LineScheduleBot
      */
     private function parseCommand(string $message): ?array
     {
-        if (! preg_match('/^!(lol|val|cs)\s+(今天|明天|後天|\d{1,2}\/\d{1,2})(?:\s+(.*))?$/iu', trim($message), $matches)) {
+        if (! preg_match('/^!(lol|val|cs)\s+(今天|明天|後天|\d{1,2}\/\d{1,2})(?:\s+(.*))?$/iu', $message, $matches)) {
             return null;
         }
 
@@ -165,6 +168,25 @@ class LineScheduleBot
             'date' => $date,
             ...$options,
         ];
+    }
+
+    private function normalizeCommand(string $message): string
+    {
+        // LINE clients and input methods may insert invisible formatting marks,
+        // or send full-width punctuation that renders like the documented ASCII
+        // command. Normalize those differences before matching the command.
+        if (class_exists(Normalizer::class)) {
+            $normalized = Normalizer::normalize($message, Normalizer::FORM_KC);
+
+            if (is_string($normalized)) {
+                $message = $normalized;
+            }
+        }
+
+        $message = preg_replace('/\p{Cf}+/u', '', $message) ?? $message;
+        $message = preg_replace('/[\p{Z}\s]+/u', ' ', $message) ?? $message;
+
+        return trim($message);
     }
 
     private function parseDate(string $value, string $timezone): ?CarbonImmutable
