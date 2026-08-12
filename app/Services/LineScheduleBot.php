@@ -24,11 +24,6 @@ class LineScheduleBot
         return $this->reply($message)?->text;
     }
 
-    public function isScheduleQuery(string $message): bool
-    {
-        return $this->parseCommand($message) !== null;
-    }
-
     public function reply(string $message): ?LineBotReply
     {
         if (mb_strtolower(trim($message)) === '!help') {
