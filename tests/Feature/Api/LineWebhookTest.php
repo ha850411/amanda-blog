@@ -6,6 +6,7 @@ use App\Jobs\ProcessLineWebhookEvent;
 use App\Services\LineScheduleBot;
 use App\Services\LineScheduleImageService;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -137,6 +138,77 @@ class LineWebhookTest extends TestCase
                 && $job->event['message']['text'] === '!lol 今天 tier=s';
         });
         Http::assertNothingSent();
+    }
+
+    public function test_val_today_falls_back_to_push_when_the_reply_token_is_unusable(): void
+    {
+        $this->fakeScheduleImage();
+
+        Http::fake([
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.line.me/v2/bot/message/reply' => Http::response([
+                'message' => 'Invalid reply token',
+            ], 400),
+            'https://api.line.me/v2/bot/message/push' => Http::response([], 200),
+        ]);
+
+        $body = json_encode([
+            'events' => [[
+                'webhookEventId' => 'val-today-fallback-event',
+                'type' => 'message',
+                'replyToken' => 'expired-reply-token',
+                'source' => [
+                    'type' => 'user',
+                    'userId' => 'U123',
+                ],
+                'message' => [
+                    'id' => 'val-today-fallback-message',
+                    'type' => 'text',
+                    'text' => '!val 今天',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.line.me/v2/bot/message/reply'
+            && $request['replyToken'] === 'expired-reply-token');
+        Http::assertSent(function ($request): bool {
+            if ($request->url() !== 'https://api.line.me/v2/bot/message/push') {
+                return false;
+            }
+
+            return $request['to'] === 'U123'
+                && $request['messages'][0]['type'] === 'text'
+                && str_contains($request['messages'][0]['text'], 'VALORANT｜08/11｜S/A Tier');
+        });
+    }
+
+    public function test_delivery_failure_is_rethrown_for_the_queue_to_retry(): void
+    {
+        Http::fake([
+            'https://api.line.me/v2/bot/message/reply' => Http::response([], 503),
+            'https://api.line.me/v2/bot/message/push' => Http::response([], 503),
+        ]);
+
+        $job = new ProcessLineWebhookEvent([
+            'type' => 'message',
+            'replyToken' => 'reply-token',
+            'source' => [
+                'type' => 'user',
+                'userId' => 'U123',
+            ],
+            'message' => [
+                'id' => 'retryable-delivery-message',
+                'type' => 'text',
+                'text' => '!help',
+            ],
+        ]);
+
+        $this->expectException(RequestException::class);
+
+        $this->app->call([$job, 'handle']);
     }
 
     public function test_help_command_returns_usage_instructions(): void

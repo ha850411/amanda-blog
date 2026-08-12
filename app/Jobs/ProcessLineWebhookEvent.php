@@ -22,11 +22,14 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $tries = 1;
+    public int $tries = 3;
 
     public int $timeout = 300;
 
     public int $uniqueFor = 3600;
+
+    /** @var array<int, int> */
+    public array $backoff = [2, 10];
 
     /**
      * @param  array<string, mixed>  $event
@@ -75,14 +78,11 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
 
             $replyToken = (string) ($this->event['replyToken'] ?? '');
 
+            $imageUrl = null;
+
             if ($reply->prefersImage()) {
                 try {
                     $imageUrl = $images->create($reply->imageData, $reply->linkUrl);
-                    $line->replyImageWithLink(
-                        $replyToken,
-                        $imageUrl,
-                        $reply->linkUrl,
-                    );
                 } catch (Throwable $imageException) {
                     // Image storage is optional. The text response still contains
                     // the filtered overview URL and is the supported fallback.
@@ -91,10 +91,33 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
                         'type' => $imageException::class,
                         'error' => $imageException->getMessage(),
                     ]);
+                }
+            }
+
+            try {
+                if ($imageUrl !== null) {
+                    $line->replyImageWithLink($replyToken, $imageUrl, $reply->linkUrl);
+                } else {
                     $line->reply($replyToken, $reply->text);
                 }
-            } else {
-                $line->reply($replyToken, $reply->text);
+            } catch (Throwable $replyException) {
+                // Queue latency or slow upstream APIs can make LINE's short-lived
+                // reply token expire. A push message does not depend on that token.
+                $target = $this->pushTarget();
+
+                $this->writeLog($webhookLog, 'warning', 'LINE reply failed; falling back to push.', [
+                    'message_id' => $messageId,
+                    'type' => $replyException::class,
+                    'has_push_target' => $target !== null,
+                ]);
+
+                if ($target === null) {
+                    throw $replyException;
+                }
+
+                // Use text for the recovery path. If LINE rejected the image URL,
+                // retrying the same image as a push would fail for the same reason.
+                $line->push($target, $reply->text);
             }
 
             $this->writeLog($webhookLog, 'info', 'LINE webhook replied.', [
@@ -117,12 +140,38 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
             } catch (Throwable $loggingException) {
                 error_log(sprintf('Unable to write application log: %s', $loggingException->getMessage()));
             }
+
+            // Let the queue retry transient delivery failures and record the job
+            // in failed_jobs if every attempt is exhausted.
+            throw $exception;
         }
     }
 
     private function durationMs(int $startedAt): int
     {
         return (int) round((hrtime(true) - $startedAt) / 1_000_000);
+    }
+
+    private function pushTarget(): ?string
+    {
+        $source = $this->event['source'] ?? null;
+
+        if (! is_array($source)) {
+            return null;
+        }
+
+        $key = match ($source['type'] ?? null) {
+            'group' => 'groupId',
+            'room' => 'roomId',
+            'user' => 'userId',
+            default => null,
+        };
+
+        if ($key === null || ! is_string($source[$key] ?? null) || $source[$key] === '') {
+            return null;
+        }
+
+        return $source[$key];
     }
 
     /**

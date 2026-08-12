@@ -22,10 +22,7 @@ class LineMessagingService
 
     public function reply(string $replyToken, string $text): void
     {
-        $this->send($replyToken, [[
-            'type' => 'text',
-            'text' => mb_substr($text, 0, 5000),
-        ]]);
+        $this->sendReply($replyToken, $this->textMessages($text));
     }
 
     public function replyImageWithLink(
@@ -33,9 +30,29 @@ class LineMessagingService
         string $baseUrl,
         string $linkUrl,
     ): void {
+        $this->sendReply($replyToken, $this->imageMessages($baseUrl, $linkUrl));
+    }
+
+    public function push(string $to, string $text): void
+    {
+        $this->sendPush($to, $this->textMessages($text));
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function textMessages(string $text): array
+    {
+        return [[
+            'type' => 'text',
+            'text' => mb_substr($text, 0, 5000),
+        ]];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function imageMessages(string $baseUrl, string $linkUrl): array
+    {
         $baseUrl = rtrim($baseUrl, '/');
 
-        $this->send($replyToken, [
+        return [
             [
                 'type' => 'image',
                 'originalContentUrl' => $baseUrl.'/1040',
@@ -45,11 +62,33 @@ class LineMessagingService
                 'type' => 'text',
                 'text' => mb_substr('完整賽程｜'.$linkUrl, 0, 5000),
             ],
+        ];
+    }
+
+    /** @param  array<int, array<string, mixed>>  $messages */
+    private function sendReply(string $replyToken, array $messages): void
+    {
+        $this->send((string) config('services.line.reply_url', 'https://api.line.me/v2/bot/message/reply'), [
+            'replyToken' => $replyToken,
+            'messages' => $messages,
         ]);
     }
 
     /** @param  array<int, array<string, mixed>>  $messages */
-    private function send(string $replyToken, array $messages): void
+    private function sendPush(string $to, array $messages): void
+    {
+        if ($to === '') {
+            throw new RuntimeException('LINE push target is not available.');
+        }
+
+        $this->send((string) config('services.line.push_url', 'https://api.line.me/v2/bot/message/push'), [
+            'to' => $to,
+            'messages' => $messages,
+        ]);
+    }
+
+    /** @param  array<string, mixed>  $payload */
+    private function send(string $url, array $payload): void
     {
         $accessToken = (string) config('services.line.channel_access_token');
 
@@ -60,10 +99,7 @@ class LineMessagingService
         Http::withToken($accessToken)
             ->acceptJson()
             ->timeout(10)
-            ->post((string) config('services.line.reply_url'), [
-                'replyToken' => $replyToken,
-                'messages' => $messages,
-            ])
+            ->post($url, $payload)
             ->throw();
     }
 }

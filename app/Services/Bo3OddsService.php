@@ -2,7 +2,8 @@
 
 namespace App\Services;
 
-use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -24,6 +25,7 @@ class Bo3OddsService
         }
 
         $candidates = [];
+        $slugs = [];
 
         foreach ($matches as $index => $match) {
             if (($match['odds'] ?? null) !== null) {
@@ -36,20 +38,16 @@ class Bo3OddsService
                 continue;
             }
 
-            try {
-                $detail = $this->matchDetail($slug);
-                $candidate = $this->moneyline($match, $detail);
+            $slugs[$index] = $slug;
+        }
 
-                if ($candidate !== null) {
-                    $candidates[$index] = $candidate;
-                }
-            } catch (ConnectionException) {
-                Log::warning('bo3.gg odds connection failed.', ['slug' => $slug]);
-            } catch (Throwable $exception) {
-                Log::warning('bo3.gg odds fallback failed.', [
-                    'slug' => $slug,
-                    'type' => $exception::class,
-                ]);
+        $details = $this->matchDetails(array_values(array_unique($slugs)));
+
+        foreach ($slugs as $index => $slug) {
+            $candidate = $this->moneyline($matches[$index], $details[$slug] ?? []);
+
+            if ($candidate !== null) {
+                $candidates[$index] = $candidate;
             }
         }
 
@@ -76,50 +74,83 @@ class Bo3OddsService
         return $matches;
     }
 
-    /** @return array<string, mixed> */
-    private function matchDetail(string $slug): array
+    /**
+     * Fetch missing match details concurrently so a busy VALORANT day does
+     * not consume the LINE reply token one match at a time.
+     *
+     * @param  array<int, string>  $slugs
+     * @return array<string, array<string, mixed>>
+     */
+    private function matchDetails(array $slugs): array
     {
-        $cacheKey = 'bo3-odds:match:'.$slug;
+        $details = [];
+        $missing = [];
 
-        try {
-            $cached = Cache::get($cacheKey);
+        foreach ($slugs as $slug) {
+            try {
+                $cached = Cache::get('bo3-odds:match:'.$slug);
 
-            if (is_array($cached)) {
-                return $cached;
+                if (is_array($cached)) {
+                    $details[$slug] = $cached;
+
+                    continue;
+                }
+            } catch (Throwable) {
+                // Cache is optional for this fallback.
             }
-        } catch (Throwable) {
-            // Cache is optional for this fallback.
+
+            $missing[] = $slug;
         }
 
-        $response = Http::acceptJson()
-            ->withUserAgent('AmandaBlogLineBot/1.0')
-            ->timeout((int) config('services.bo3.timeout_seconds', 10))
-            ->retry(2, 200)
-            ->get($this->baseUrl().'/api/v1/matches/'.rawurlencode($slug));
-
-        if (! $response->successful()) {
-            Log::warning('bo3.gg match odds request failed.', [
-                'slug' => $slug,
-                'status' => $response->status(),
-            ]);
-
-            return [];
+        if ($missing === []) {
+            return $details;
         }
 
-        $detail = $response->json();
-        $detail = is_array($detail) ? $detail : [];
+        $responses = Http::pool(function (Pool $pool) use ($missing): void {
+            foreach ($missing as $slug) {
+                $pool->as($slug)
+                    ->acceptJson()
+                    ->withUserAgent('AmandaBlogLineBot/1.0')
+                    ->timeout((int) config('services.bo3.timeout_seconds', 10))
+                    ->get($this->baseUrl().'/api/v1/matches/'.rawurlencode($slug));
+            }
+        }, 5);
 
-        try {
-            Cache::put(
-                $cacheKey,
-                $detail,
-                (int) config('services.odds.cache_seconds', 60),
-            );
-        } catch (Throwable) {
-            // Cache is optional for this fallback.
+        foreach ($responses as $slug => $response) {
+            if (! $response instanceof Response) {
+                Log::warning('bo3.gg odds connection failed.', [
+                    'slug' => $slug,
+                    'type' => $response::class,
+                ]);
+
+                continue;
+            }
+
+            if (! $response->successful()) {
+                Log::warning('bo3.gg match odds request failed.', [
+                    'slug' => $slug,
+                    'status' => $response->status(),
+                ]);
+
+                continue;
+            }
+
+            $detail = $response->json();
+            $detail = is_array($detail) ? $detail : [];
+            $details[$slug] = $detail;
+
+            try {
+                Cache::put(
+                    'bo3-odds:match:'.$slug,
+                    $detail,
+                    (int) config('services.odds.cache_seconds', 60),
+                );
+            } catch (Throwable) {
+                // Cache is optional for this fallback.
+            }
         }
 
-        return $detail;
+        return $details;
     }
 
     /**
