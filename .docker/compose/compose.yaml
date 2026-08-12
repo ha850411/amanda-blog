@@ -52,6 +52,20 @@ services:
     networks:
       - web-network
 
+  queue:
+    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-local}"
+    command: ["php", "artisan", "queue:work", "--sleep=1", "--tries=1", "--timeout=300"]
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Taipei
+    volumes:
+      - ../../.:/var/www/html:delegated
+      - ../php/local.ini:/usr/local/etc/php/conf.d/99-local.ini:ro
+      - composer-cache:/tmp/composer-cache
+    working_dir: /var/www/html
+    networks:
+      - web-network
+
 networks:
   web-network:
     name: ${NETWORK_NAME}

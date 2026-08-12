@@ -1,6 +1,5 @@
 -- blog.about definition
-DROP TABLE IF EXISTS `about`;
-CREATE TABLE `about` (
+CREATE TABLE IF NOT EXISTS `about` (
   `id` int NOT NULL AUTO_INCREMENT,
   `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '標題',
   `sub_title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '副標題',
@@ -12,8 +11,7 @@ CREATE TABLE `about` (
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- blog.tag definition
-DROP TABLE IF EXISTS `tag`;
-CREATE TABLE `tag` (
+CREATE TABLE IF NOT EXISTS `tag` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(300) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '標籤名稱',
   `parent_id` int unsigned NOT NULL DEFAULT '0',
@@ -24,8 +22,7 @@ CREATE TABLE `tag` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- blog.article definition
-DROP TABLE IF EXISTS `article`;
-CREATE TABLE `article` (
+CREATE TABLE IF NOT EXISTS `article` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '文章標題',
   `content` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '文章內容',
@@ -37,8 +34,7 @@ CREATE TABLE `article` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- blog.article_tag definition
-DROP TABLE IF EXISTS `article_tag`;
-CREATE TABLE `article_tag` (
+CREATE TABLE IF NOT EXISTS `article_tag` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `article_id` int unsigned DEFAULT NULL COMMENT '文章id',
   `tag_id` int unsigned DEFAULT NULL COMMENT '標籤id',
@@ -49,8 +45,7 @@ CREATE TABLE `article_tag` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- blog.social definition
-DROP TABLE IF EXISTS `social`;
-CREATE TABLE `social` (
+CREATE TABLE IF NOT EXISTS `social` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `icon` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'icon圖示class',
   `url` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '連結',
@@ -61,8 +56,7 @@ CREATE TABLE `social` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- blog.admins definition
-DROP TABLE IF EXISTS `admins`;
-CREATE TABLE `admins` (
+CREATE TABLE IF NOT EXISTS `admins` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `username` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -73,8 +67,7 @@ CREATE TABLE `admins` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- blog.visit definition
-DROP TABLE IF EXISTS `visit`;
-CREATE TABLE `visit` (
+CREATE TABLE IF NOT EXISTS `visit` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ip` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'ip',
   `date` date NOT NULL COMMENT '日期',

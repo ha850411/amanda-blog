@@ -2,9 +2,11 @@
 
 namespace Tests\Feature\Api;
 
+use App\Jobs\ProcessLineWebhookEvent;
 use App\Services\LineScheduleBot;
 use App\Services\LineScheduleImageService;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Mockery;
@@ -105,6 +107,35 @@ class LineWebhookTest extends TestCase
         $response = $this->callWebhook($body, $this->signature($body));
 
         $response->assertOk()->assertExactJson([]);
+        Http::assertNothingSent();
+    }
+
+    public function test_webhook_queues_event_processing_before_external_api_calls(): void
+    {
+        config(['queue.default' => 'database']);
+        Bus::fake();
+        Http::fake();
+
+        $body = json_encode([
+            'events' => [[
+                'webhookEventId' => 'queue-test-event',
+                'type' => 'message',
+                'replyToken' => 'reply-token',
+                'message' => [
+                    'id' => 'queue-test-message',
+                    'type' => 'text',
+                    'text' => '!lol 今天 tier=s',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+        Bus::assertDispatched(ProcessLineWebhookEvent::class, function (ProcessLineWebhookEvent $job): bool {
+            return $job->event['webhookEventId'] === 'queue-test-event'
+                && $job->event['message']['text'] === '!lol 今天 tier=s';
+        });
         Http::assertNothingSent();
     }
 
