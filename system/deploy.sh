@@ -33,7 +33,11 @@ run_privileged() {
 app_compose() {
     (
         cd "$DEPLOY_DIR/.docker/compose"
-        run_privileged docker compose "$@"
+        # `make deploy-up` exports the computed runtime tag only to its own
+        # subprocesses. Pass it explicitly here because these calls run
+        # through sudo and would otherwise fall back to the stale value in
+        # app-env/.env.docker.
+        run_privileged env "RUNTIME_IMAGE_TAG=$RUNTIME_IMAGE_TAG" docker compose "$@"
     )
 }
 
@@ -96,6 +100,9 @@ rm -f "$DEPLOY_DIR/.docker/compose/.env.bak"
 # 啟動容器
 echo "啟動新容器: 'cd $NEW_FOLDER && make deploy-up'"
 cd "$DEPLOY_DIR"
+RUNTIME_IMAGE_TAG=$(make runtime-tag)
+export RUNTIME_IMAGE_TAG
+echo "使用 runtime image tag: $RUNTIME_IMAGE_TAG"
 make deploy-up
 make composer-install
 make runtime-permissions

@@ -93,11 +93,9 @@ amanda-blog-system/
 
 ### Runtime image 更新
 
-一般程式碼部署不會重建 PHP runtime。只有調整應用專案中的 `.docker/Dockerfile`、PHP 版本或 PHP extensions 時，才需要：
+Runtime image tag 由應用專案的 Makefile 根據 `.docker/Dockerfile`、PHP/Composer base image 與目標平台自動計算，不要在 `app-env/.env.docker` 手動設定或遞增 `RUNTIME_IMAGE_TAG`。每次部署時 `deploy.sh` 會把同一個動態 tag 傳給所有 `docker compose` 操作，確保 queue、scheduler 與 PHP service 使用同一個 runtime image。
 
-1. 將 `app-env/.env.docker` 的 `RUNTIME_IMAGE_TAG` 遞增，例如由 `php8.4-v2` 改成 `php8.4-v3`。
-2. 登入 GHCR，並在 `amanda-blog` 專案根目錄執行 `make runtime-publish`。預設發布 Amazon Linux x86_64 對應的 `linux/amd64` image 與獨立 `mode=max` BuildKit cache，建議在 Amazon/Jenkins 的原生 amd64 builder 執行。Graviton 主機改用 `make runtime-publish RUNTIME_PLATFORMS=linux/arm64`；若要一次發布兩種架構，builder 必須配置兩種原生 build nodes 或可靠的 binfmt/QEMU，再指定 `RUNTIME_PLATFORMS=linux/amd64,linux/arm64`。
-3. 若沒有 GHCR 發布權限，可直接部署；新 tag 首次部署會 fallback 為本機建置，後續 Blue/Green 部署會持續重用該 image。
+若調整了應用專案中的 `.docker/Dockerfile`、PHP 版本或 PHP extensions，提交變更後重新執行部署即可；`make deploy-up` 會檢查對應 tag 是否已發布，缺少時自動建置並發布。預設發布 Amazon Linux x86_64 對應的 `linux/amd64` image 與獨立 `mode=max` BuildKit cache，Graviton 主機改用 `make deploy-up RUNTIME_PLATFORMS=linux/arm64`；若要一次發布兩種架構，builder 必須配置兩種原生 build nodes 或可靠的 binfmt/QEMU。
 
 Blue/Green 兩個 release 另外共用 `COMPOSER_CACHE_VOLUME`，只快取套件下載檔；各 release 的 `vendor/` 仍彼此隔離，避免舊程式碼污染新部署。
 
