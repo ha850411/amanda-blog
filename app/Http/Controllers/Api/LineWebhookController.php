@@ -54,22 +54,19 @@ class LineWebhookController extends Controller
                 $this->writeLog($webhookLog, 'info', 'LINE webhook event queued.', [
                     'webhook_event_id' => $event['webhookEventId'] ?? null,
                     'message_id' => $event['message']['id'] ?? null,
+                    'duration_ms' => $this->durationMs($startedAt),
                 ]);
             } catch (Throwable $exception) {
                 $this->writeLog($webhookLog, 'error', 'LINE webhook queue dispatch failed.', [
                     'webhook_event_id' => $event['webhookEventId'] ?? null,
                     'message_id' => $event['message']['id'] ?? null,
                     'type' => $exception::class,
+                    'duration_ms' => $this->durationMs($startedAt),
                 ]);
 
                 report($exception);
             }
         }
-
-        $this->writeLog($webhookLog, 'info', 'LINE webhook acknowledged.', [
-            'event_count' => count($events),
-            'duration_ms' => $this->durationMs($startedAt),
-        ]);
 
         return response()->json([]);
     }
