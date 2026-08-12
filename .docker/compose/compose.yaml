@@ -12,15 +12,10 @@ services:
       COMPOSER_CACHE_DIR: /tmp/composer-cache
       TZ: Asia/Taipei
     volumes:
-      # 專案原始碼（與 Nginx 共用）
       - ../../.:/var/www/html:delegated
-      # 將本地 PHP 設定掛到 FPM 的 conf.d
       - ../php/local.ini:/usr/local/etc/php/conf.d/99-local.ini:ro
-      # 將 Xdebug 設定掛到 FPM 的 conf.d（非 CLI 路徑）
       - ../php/docker-php-ext-xdebug.ini:/usr/local/etc/php/conf.d/20-xdebug.ini:ro
-      # 藍綠部署共用下載 cache；vendor 仍留在各自的 release 目錄。
       - composer-cache:/tmp/composer-cache
-    # PHP-FPM 不對外開埠，由 Nginx 代理
     working_dir: /var/www/html
     networks:
       - web-network
@@ -41,6 +36,20 @@ services:
   scheduler:
     image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-local}"
     command: ["php", "artisan", "schedule:work"]
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Taipei
+    volumes:
+      - ../../.:/var/www/html:delegated
+      - ../php/local.ini:/usr/local/etc/php/conf.d/99-local.ini:ro
+      - composer-cache:/tmp/composer-cache
+    working_dir: /var/www/html
+    networks:
+      - web-network
+
+  queue:
+    image: "${APP_IMAGE:-amanda-blog-runtime}:${RUNTIME_IMAGE_TAG:-php8.4-local}"
+    command: ["php", "artisan", "queue:work", "database", "--sleep=1", "--tries=2", "--timeout=55", "--max-time=3600"]
     restart: unless-stopped
     environment:
       TZ: Asia/Taipei
