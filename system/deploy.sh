@@ -30,6 +30,13 @@ run_privileged() {
     fi
 }
 
+app_compose() {
+    (
+        cd "$DEPLOY_DIR/.docker/compose"
+        run_privileged docker compose "$@"
+    )
+}
+
 # 在讀取 active upstream 前先確認部署掛載完整，讓 CI 錯誤訊息指出真正缺少的檔案。
 if [ ! -d "$DEPLOY_ROOT" ]; then
     echo "錯誤: 部署根目錄不存在: $DEPLOY_ROOT" >&2
@@ -92,6 +99,21 @@ cd "$DEPLOY_DIR"
 make deploy-up
 make composer-install
 make runtime-permissions
+
+# 正式資料庫由 blue/green 版本共用。先套用新版本的 migration，確認成功後
+# 才繼續 health check、測試與切換流量；migration 失敗時保留舊版本在線。
+echo "執行正式資料庫 migration..."
+if ! app_compose exec -T service php artisan migrate --force; then
+    echo "錯誤: 正式資料庫 migration 失敗，停止新容器並保留舊版本..." >&2
+    cd "$DEPLOY_DIR" && make down || true
+    exit 1
+fi
+
+# 新版本的 queue worker 可能在 migration 完成前因找不到 jobs table 而退出，
+# migration 成功後重新建立並重啟，確保 LINE webhook job 能正常消費。
+echo "重新啟動 queue worker..."
+app_compose up -d queue
+app_compose restart queue
 
 # 檢查容器是否啟動成功(回應200)
 HEALTH_STATUS=""

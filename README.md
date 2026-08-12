@@ -61,7 +61,7 @@ amanda-blog-system/
 系統核心的 `system/deploy.sh` 腳本定義了嚴謹且自動化的無停機服務上線流程：
 1. **偵測目前狀態**：讀取 `active-upstream.conf` 的狀態，假設當前為 Blue，下一次部署便會建立 Green 環境並配置新的 HTTP Port。
 2. **準備全新環境**：藉由 `git clone` 從遠端拉取最新的主分支程式碼，將 `app-env` 內的環境變數 `.env` 動態注入到新建立的資料夾內，並更新裡面 `docker-compose.yml` 需要的 Nginx Name、Image 與 Port 等對應變數。
-3. **啟動新服務**：透過 `make deploy-up` 重用同一個版本化 PHP runtime image，並運行全新的應用層容器群與載入最新的依賴包 (Composer Install)。指定版本若不在本機，流程會先嘗試從 GHCR 下載；registry 尚未發布時才會在部署機建置一次。Composer 與測試完成後都會重設 `storage`、`bootstrap/cache` 的擁有者，確保 PHP-FPM 可持續寫入 daily logs 與 cache。
+3. **啟動新服務並更新資料庫結構**：透過 `make deploy-up` 重用同一個版本化 PHP runtime image，並運行全新的應用層容器群與載入最新的依賴包 (Composer Install)。指定版本若不在本機，流程會先嘗試從 GHCR 下載；registry 尚未發布時才會在部署機建置一次。Composer 完成後，`deploy.sh` 會在切換流量前以 `php artisan migrate --force` 套用尚未執行的 migration；migration 失敗會停止新版本並保留舊版本在線。最後會重設 `storage`、`bootstrap/cache` 的擁有者，確保 PHP-FPM 可持續寫入 daily logs 與 cache。
 4. **系統健康檢查 (Health Check)**：持續嘗試呼叫新服務的 `/api/health` 介面。若未能在指定次數內收到底層返回的 `ok`，即代表啟動失敗，中斷本次部署並保留現有的穩定環境。
 5. **執行單元測試**：在服務上線前啟動專屬隔離的測試資料庫容器群，執行資料表遷移與專案的 Unit Tests。若測試失敗便會放棄啟動新節點，確保上線服務皆符合測試要求。
 6. **切換流量與資源回收**：所有測試項目都通過後，將 `active-upstream.conf` 檔案重新指向剛建好且測試通過的新服務節點，並命令 Nginx 重啟更新關聯 (`nginx -s reload`)。流量轉移完畢後，安全關停並刪除舊目錄所有佔用的容器與資源。
