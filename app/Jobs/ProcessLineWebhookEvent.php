@@ -5,11 +5,12 @@ namespace App\Jobs;
 use App\Services\LineMessagingService;
 use App\Services\LineScheduleBot;
 use App\Services\LineScheduleImageService;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
 
-class ProcessLineWebhookEvent implements ShouldQueue
+class ProcessLineWebhookEvent implements ShouldQueue, ShouldBeUnique
 {
     use Queueable;
 
@@ -17,11 +18,27 @@ class ProcessLineWebhookEvent implements ShouldQueue
 
     public int $timeout = 50;
 
+    public int $uniqueFor = 300;
+
     public bool $failOnTimeout = true;
 
     /** @param array<string, mixed> $event */
     public function __construct(public readonly array $event)
     {
+    }
+
+    public function uniqueId(): string
+    {
+        if (is_string($this->event['webhookEventId'] ?? null)
+            && $this->event['webhookEventId'] !== '') {
+            return $this->event['webhookEventId'];
+        }
+
+        return hash('sha256', json_encode([
+            $this->event['message']['id'] ?? null,
+            $this->event['replyToken'] ?? null,
+            $this->event['timestamp'] ?? null,
+        ], JSON_THROW_ON_ERROR));
     }
 
     public function handle(
