@@ -157,18 +157,33 @@ class LineScheduleBot
             }
 
             if (($match['h2h'] ?? null) !== null) {
+                $h2h = $match['h2h'];
                 $lines[] = sprintf(
-                    "近期交手｜%s %d 勝・%s %d 勝（近 %d 場）\n小局合計｜%s %d：%d %s",
+                    "近期交手｜%s %d 勝・%s %d 勝（近 %d 場，小局 %d：%d）",
                     $match['team1'],
-                    $match['h2h']['team1_wins'],
+                    $h2h['team1_wins'],
                     $match['team2'],
-                    $match['h2h']['team2_wins'],
-                    $match['h2h']['sample_size'],
-                    $match['team1'],
-                    $match['h2h']['team1_games'],
-                    $match['h2h']['team2_games'],
-                    $match['team2'],
+                    $h2h['team2_wins'],
+                    $h2h['sample_size'],
+                    $h2h['team1_games'],
+                    $h2h['team2_games'],
                 );
+
+                $seriesList = array_slice(is_array($h2h['series'] ?? null) ? $h2h['series'] : [], 0, 5);
+                if ($seriesList !== []) {
+                    $lines[] = '交手明細｜';
+                    foreach ($seriesList as $item) {
+                        $winnerTeam = ($item['winner'] ?? null) === 'team1' ? $match['team1'] : $match['team2'];
+                        $lines[] = sprintf(
+                            '・%s %s  %d：%d（%s 勝）',
+                            $item['date'] ?? '—',
+                            $item['format'] ?? 'BO?',
+                            $item['team1_score'] ?? 0,
+                            $item['team2_score'] ?? 0,
+                            $winnerTeam,
+                        );
+                    }
+                }
             }
         }
 

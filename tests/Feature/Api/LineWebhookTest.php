@@ -123,8 +123,11 @@ class LineWebhookTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!lol 明天');
 
         $this->assertNotNull($reply);
-        $this->assertStringContainsString('近期交手｜Team Alpha 2 勝・Team Beta 1 勝（近 3 場）', $reply->text);
-        $this->assertStringContainsString('小局合計｜Team Alpha 5：2 Team Beta', $reply->text);
+        $this->assertStringContainsString('近期交手｜Team Alpha 2 勝・Team Beta 1 勝（近 3 場，小局 5：2）', $reply->text);
+        $this->assertStringContainsString('交手明細｜', $reply->text);
+        $this->assertStringContainsString('・08/01 BO3  2：0（Team Alpha 勝）', $reply->text);
+        $this->assertStringContainsString('・07/01 BO3  1：2（Team Beta 勝）', $reply->text);
+        $this->assertStringContainsString('・06/01 BO3  2：0（Team Alpha 勝）', $reply->text);
         $this->assertSame([
             'sample_size' => 3,
             'history_total' => 9,

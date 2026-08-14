@@ -85,4 +85,18 @@ class LineScheduleImageServiceTest extends TestCase
         $original->clear();
         $preview->clear();
     }
+
+    public function test_it_abbreviates_team_names_intelligently(): void
+    {
+        $service = app(LineScheduleImageService::class);
+
+        $this->assertSame('AL', $service->teamAbbreviation("Anyone's Legend"));
+        $this->assertSame('BLG', $service->teamAbbreviation('Bilibili Gaming'));
+        $this->assertSame('TES', $service->teamAbbreviation('Top Esports'));
+        $this->assertSame('WBG', $service->teamAbbreviation('Weibo Gaming'));
+        $this->assertSame('T1', $service->teamAbbreviation('T1'));
+        $this->assertSame('GEN', $service->teamAbbreviation('Gen.G'));
+        $this->assertSame('SEN', $service->teamAbbreviation('Sentinels'));
+        $this->assertSame('PRX', $service->teamAbbreviation('Paper Rex'));
+    }
 }
