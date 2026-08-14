@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1040;
 
-    private const CACHE_VERSION = 6;
+    private const CACHE_VERSION = 7;
 
     private const CARD_HEIGHT = 180;
 
@@ -69,6 +69,14 @@ class LineScheduleImageService
      *         odds: ?array{
      *             team1: array{price: float, bookmaker: string},
      *             team2: array{price: float, bookmaker: string}
+     *         },
+     *         h2h?: ?array{
+     *             sample_size: int,
+     *             history_total: int,
+     *             team1_wins: int,
+     *             team2_wins: int,
+     *             team1_games: int,
+     *             team2_games: int
      *         }
      *     }>
      * }  $data
@@ -317,6 +325,25 @@ class LineScheduleImageService
             $draw->setFontSize(14);
             $draw->setFontWeight(400);
             $draw->annotation($x + 24, $y + 154, $statusText);
+
+            $h2h = $match['h2h'] ?? null;
+
+            if (is_array($h2h)) {
+                $h2hText = sprintf(
+                    'H2H 近%d場 · %d勝–%d勝 · 小局%d:%d',
+                    $h2h['sample_size'],
+                    $h2h['team1_wins'],
+                    $h2h['team2_wins'],
+                    $h2h['team1_games'],
+                    $h2h['team2_games'],
+                );
+                $draw->setFillColor('#94a3b8');
+                $draw->setFontSize(14);
+                $draw->setFontWeight(500);
+                $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+                $draw->annotation($x + $cardWidth - 24, $y + 154, $h2hText);
+                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            }
         }
 
         $image->drawImage($draw);

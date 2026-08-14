@@ -17,6 +17,14 @@ final readonly class LineBotReply
      *         odds: ?array{
      *             team1: array{price: float, bookmaker: string},
      *             team2: array{price: float, bookmaker: string}
+     *         },
+     *         h2h?: ?array{
+     *             sample_size: int,
+     *             history_total: int,
+     *             team1_wins: int,
+     *             team2_wins: int,
+     *             team1_games: int,
+     *             team2_games: int
      *         }
      *     }>
      * }|null  $imageData

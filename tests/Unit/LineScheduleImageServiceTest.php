@@ -38,6 +38,14 @@ class LineScheduleImageServiceTest extends TestCase
             'team2' => 'Team '.$number.' Beta',
             'tournament' => 'VCT 2026: Test Stage',
             'odds' => null,
+            'h2h' => [
+                'sample_size' => 5,
+                'history_total' => 12,
+                'team1_wins' => 3,
+                'team2_wins' => 2,
+                'team1_games' => 7,
+                'team2_games' => 5,
+            ],
         ], range(1, 3));
 
         app(LineScheduleImageService::class)->create([

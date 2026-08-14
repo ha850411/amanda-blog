@@ -25,6 +25,7 @@ class LineWebhookTest extends TestCase
             'services.line.channel_secret' => 'test-secret',
             'services.line.channel_access_token' => 'test-token',
             'services.bo3.base_url' => 'https://bo3.gg',
+            'services.bo3.api_url' => 'https://api.bo3.gg/api/v1',
             'services.bo3.timezone' => 'Asia/Taipei',
             'services.odds.api_key' => null,
             'services.odds.base_url' => 'https://api.odds-api.io/v3',
@@ -100,6 +101,40 @@ class LineWebhookTest extends TestCase
         });
     }
 
+    public function test_lol_schedule_reply_includes_head_to_head_api_summary(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches/alpha-vs-beta' => Http::response([
+                'team1_id' => 10,
+                'team2_id' => 20,
+                'discipline_id' => 3,
+            ]),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response([
+                'total' => ['count' => 9],
+                'results' => [
+                    ['team1_id' => 20, 'team2_id' => 10, 'team1_score' => 0, 'team2_score' => 2],
+                    ['team1_id' => 10, 'team2_id' => 20, 'team1_score' => 1, 'team2_score' => 2],
+                    ['team1_id' => 10, 'team2_id' => 20, 'team1_score' => 2, 'team2_score' => 0],
+                ],
+            ]),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!lol 明天');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('近期交手｜Team Alpha 2 勝・Team Beta 1 勝（近 3 場）', $reply->text);
+        $this->assertStringContainsString('小局合計｜Team Alpha 5：2 Team Beta', $reply->text);
+        $this->assertSame([
+            'sample_size' => 3,
+            'history_total' => 9,
+            'team1_wins' => 2,
+            'team2_wins' => 1,
+            'team1_games' => 5,
+            'team2_games' => 2,
+        ], $reply->imageData['matches'][0]['h2h']);
+    }
+
     public function test_webhook_verification_with_no_events_returns_ok(): void
     {
         Http::fake();
@@ -172,8 +207,7 @@ class LineWebhookTest extends TestCase
         $redeliveryResponse = $this->callWebhook($body, $this->signature($body));
 
         $redeliveryResponse->assertOk()->assertExactJson([]);
-        Bus::assertDispatched(ProcessLineWebhookEvent::class, fn (ProcessLineWebhookEvent $job): bool =>
-            $job->event['webhookEventId'] === 'dispatch-failure-event');
+        Bus::assertDispatched(ProcessLineWebhookEvent::class, fn (ProcessLineWebhookEvent $job): bool => $job->event['webhookEventId'] === 'dispatch-failure-event');
         Http::assertNothingSent();
     }
 
@@ -584,7 +618,7 @@ class LineWebhookTest extends TestCase
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/odds/multi')
             && $request['eventIds'] === '456'
             && $request['bookmakers'] === 'Stake,Bet365');
-        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/api/v1/matches/'));
+        Http::assertNotSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/api/v1/matches/'));
     }
 
     public function test_bo3_moneyline_is_used_when_selected_bookmakers_have_no_odds(): void

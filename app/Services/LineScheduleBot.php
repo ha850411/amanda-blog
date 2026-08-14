@@ -18,6 +18,7 @@ class LineScheduleBot
         private readonly Bo3ScheduleService $schedules,
         private readonly OddsApiService $odds,
         private readonly Bo3OddsService $bo3Odds,
+        private readonly Bo3HeadToHeadService $headToHead,
     ) {}
 
     public function respond(string $message): ?string
@@ -119,6 +120,7 @@ class LineScheduleBot
         }
 
         $visibleMatches = array_slice($allMatches, 0, $command['limit']);
+        $visibleMatches = $this->headToHead->enrich($visibleMatches);
         $visibleMatches = $this->odds->enrich($visibleMatches, $command['date']);
         $visibleMatches = $this->bo3Odds->enrichMissing($visibleMatches);
         $lines = [
@@ -153,6 +155,21 @@ class LineScheduleBot
                     $match['odds']['team2']['bookmaker'],
                 );
             }
+
+            if (($match['h2h'] ?? null) !== null) {
+                $lines[] = sprintf(
+                    "近期交手｜%s %d 勝・%s %d 勝（近 %d 場）\n小局合計｜%s %d：%d %s",
+                    $match['team1'],
+                    $match['h2h']['team1_wins'],
+                    $match['team2'],
+                    $match['h2h']['team2_wins'],
+                    $match['h2h']['sample_size'],
+                    $match['team1'],
+                    $match['h2h']['team1_games'],
+                    $match['h2h']['team2_games'],
+                    $match['team2'],
+                );
+            }
         }
 
         if (count($allMatches) > $command['limit']) {
@@ -177,6 +194,7 @@ class LineScheduleBot
                         'team2' => $match['team2'],
                         'tournament' => $match['tournament'],
                         'odds' => $match['odds'],
+                        'h2h' => $match['h2h'] ?? null,
                     ],
                     $visibleMatches,
                 ),

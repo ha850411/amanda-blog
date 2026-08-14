@@ -48,7 +48,9 @@ return [
 
     'bo3' => [
         'base_url' => env('BO3_BASE_URL', 'https://bo3.gg'),
+        'api_url' => env('BO3_API_URL', 'https://api.bo3.gg/api/v1'),
         'cache_seconds' => (int) env('BO3_CACHE_SECONDS', 300),
+        'h2h_cache_seconds' => (int) env('BO3_H2H_CACHE_SECONDS', 300),
         'timeout_seconds' => (int) env('BO3_TIMEOUT_SECONDS', 10),
         'timezone' => env('BO3_TIMEZONE', 'Asia/Taipei'),
     ],
