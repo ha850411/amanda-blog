@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1040;
 
-    private const CACHE_VERSION = 5;
+    private const CACHE_VERSION = 6;
 
     private const CARD_HEIGHT = 180;
 
@@ -394,8 +394,11 @@ class LineScheduleImageService
         }
 
         $candidates = [
+            public_path("images/games/{$key}.png"),
             resource_path("images/games/{$key}.png"),
+            base_path("public/images/games/{$key}.png"),
             base_path("resources/images/games/{$key}.png"),
+            __DIR__."/../../public/images/games/{$key}.png",
             __DIR__."/../../resources/images/games/{$key}.png",
         ];
 
