@@ -76,7 +76,7 @@ class LineWebhookTest extends TestCase
 
         Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/lol/matches/current')
             && $request['date'] === '2026-08-12'
-            && $request['tiers'] === 's,a');
+            && $request['tiers'] === 's');
 
         Http::assertSent(function ($request): bool {
             if ($request->url() !== 'https://api.line.me/v2/bot/message/reply') {
@@ -95,7 +95,7 @@ class LineWebhookTest extends TestCase
                 ]
                 && $messages[1] === [
                     'type' => 'text',
-                    'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s,a&date=2026-08-12',
+                    'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s&date=2026-08-12',
                 ];
         });
     }
@@ -181,7 +181,7 @@ class LineWebhookTest extends TestCase
 
             return $request['to'] === 'U123'
                 && $request['messages'][0]['type'] === 'text'
-                && str_contains($request['messages'][0]['text'], 'VALORANT｜08/11｜S/A Tier');
+                && str_contains($request['messages'][0]['text'], 'VALORANT｜08/11｜S Tier');
         });
     }
 
@@ -239,7 +239,7 @@ class LineWebhookTest extends TestCase
 
             return $request['messages'][0] === [
                 'type' => 'text',
-                'text' => "指令格式：\n!lol 今天\n!val 明天\n!cs 08/11\n\n預設查 S/A Tier。\n可選參數：tier=s,a｜tier=all｜limit=5｜team=G2",
+                'text' => "指令格式：\n!lol 今天\n!val 明天\n!cs 08/11\n\n預設查 S Tier。\n可選參數：tier=s,a｜tier=all｜limit=5｜team=G2",
             ];
         });
     }
@@ -324,7 +324,7 @@ class LineWebhookTest extends TestCase
             $text = $request['messages'][0]['text'] ?? '';
 
             return $request['messages'][0]['type'] === 'text'
-                && str_contains($text, '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s,a&date=2026-08-12')
+                && str_contains($text, '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s&date=2026-08-12')
                 && substr_count($text, 'https://bo3.gg/') === 1
                 && ! str_contains($text, '/lol/matches/alpha-vs-beta');
         });
@@ -368,7 +368,7 @@ class LineWebhookTest extends TestCase
             && $request['messages'][0]['originalContentUrl'] === 'https://cdn.example.com/line-schedules/test/1040'
             && $request['messages'][1] === [
                 'type' => 'text',
-                'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s,a&period',
+                'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s&period',
             ]);
     }
 
@@ -386,13 +386,13 @@ class LineWebhookTest extends TestCase
 
         $reply = app(LineScheduleBot::class)->respond('!cs 今天');
 
-        $this->assertStringContainsString('CS2｜08/11｜S/A Tier', $reply);
+        $this->assertStringContainsString('CS2｜08/11｜S Tier', $reply);
         $this->assertStringContainsString('Previous Day Match', $reply);
-        $this->assertStringContainsString('完整賽程｜https://bo3.gg/matches/current?tiers=s,a&period', $reply);
+        $this->assertStringContainsString('完整賽程｜https://bo3.gg/matches/current?tiers=s&period', $reply);
         $this->assertSame(1, substr_count($reply, 'https://bo3.gg/'));
 
         Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-11'
-            && $request['tiers'] === 's,a');
+            && $request['tiers'] === 's');
     }
 
     public function test_visually_equivalent_unicode_commands_are_normalized(): void

@@ -220,7 +220,7 @@ class LineScheduleBot
      */
     private function parseOptions(string $input): ?array
     {
-        $options = ['tiers' => ['s', 'a'], 'limit' => 10, 'team' => null];
+        $options = ['tiers' => ['s'], 'limit' => 10, 'team' => null];
 
         if (trim($input) === '') {
             return $options;
@@ -272,6 +272,6 @@ class LineScheduleBot
 
     private function help(): string
     {
-        return "指令格式：\n!lol 今天\n!val 明天\n!cs 08/11\n\n預設查 S/A Tier。\n可選參數：tier=s,a｜tier=all｜limit=5｜team=G2";
+        return "指令格式：\n!lol 今天\n!val 明天\n!cs 08/11\n\n預設查 S Tier。\n可選參數：tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }
