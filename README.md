@@ -54,6 +54,7 @@ Webhook URL 設為 `https://你的網域/api/line/webhook`，並在 `.env` 設�
 ```env
 LINE_CHANNEL_SECRET=你的_Messaging_API_Channel_Secret
 LINE_CHANNEL_ACCESS_TOKEN=你的_Channel_Access_Token
+LINE_REPLY_TOKEN_SAFE_WINDOW_SECONDS=45
 # 圖片必須位於 LINE 可讀取的公開 HTTPS 網址；正式環境建議使用 s3
 LINE_SCHEDULE_IMAGE_DISK=s3
 LINE_SCHEDULE_IMAGE_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
@@ -62,7 +63,7 @@ LINE_SCHEDULE_IMAGE_RETENTION_DAYS=7
 
 輸入 `!help` 才會顯示使用說明；一般訊息與無效指令不會回覆。指令格式為 `!lol 08/11`、`!val 今天`、`!cs 明天`，日期支援 `MM/DD`、今天、明天與後天，預設只查 S/A Tier。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。
 
-LINE webhook 會先快速回傳 HTTP 200，再由 queue worker 處理外部 API、圖片與 LINE 回覆；正式環境需執行 `php artisan migrate --force`，並保持 `php artisan queue:work --tries=3 --backoff=2 --timeout=300` 常駐。queue connection 的 `retry_after` 必須大於 300 秒（預設 330 秒），避免同一工作被重複執行。若背景處理過久導致 LINE reply token 失效，Bot 會自動以事件來源 ID 改用 push message 補送文字結果。
+LINE webhook 會先記錄事件並快速回傳 HTTP 200，再由 queue worker 處理外部 API、圖片與 LINE 回覆；正式環境需執行 `php artisan migrate --force`，並保持 `php artisan queue:work --tries=3 --backoff=2 --timeout=300` 常駐。queue connection 的 `retry_after` 必須大於 300 秒（預設 330 秒），避免同一工作被重複執行。若事件在 queue 等待與背景處理的總時間超過 `LINE_REPLY_TOKEN_SAFE_WINDOW_SECONDS`（預設 45 秒），Bot 會跳過即將失效的 reply token，直接以事件來源 ID 改用 push message；若 Reply API 提早拒絕 token，也會 fallback 成 push。queue dispatch 失敗時 webhook 會回傳 HTTP 500，讓已開啟 webhook redelivery 的 LINE channel 能重新投遞事件。
 
 查到賽程時會回覆一張可點擊放大的賽程圖，並另外用一則文字訊息提供符合遊戲、日期與 Tier 條件的 bo3.gg 總覽連結，不會再為每場賽事附上個別連結。圖片會顯示賽事名稱與 BO 賽制，並以 Odds-API.io 的日期、開賽時間與雙方隊名匹配盤口。設定 `ODDS_API_KEY` 後，會依 `ODDS_API_BOOKMAKER_PRIORITY` 選擇同一家莊家的完整雙邊 ML（預設 Stake 優先、Bet365 備援），不會混搭兩家盤口；`ODDS_API_BOOKMAKERS` 留空時自動使用帳號已選擇的莊家。若所選莊家沒有完整雙邊 ML，會改用 bo3.gg 該場賽事提供的同一家莊家獨贏盤，兩邊都沒有時才顯示「暫無盤口」。圖片會直接寫入 `LINE_SCHEDULE_IMAGE_DISK`（預設固定為 `s3`），不會儲存在主機的 `public/storage`；S3 的 `Storage::url()` 必須產生公開 HTTPS 網址。Scheduler 每天 03:30（台灣時間）只清理 `line-schedules/` 下超過 `LINE_SCHEDULE_IMAGE_RETENTION_DAYS`（預設 7 天）的物件，因此 S3 IAM 除了上傳與讀取外，也需要 `ListBucket` 與 `DeleteObject` 權限。若圖片產生或儲存失敗，Bot 會降級成文字回覆，且只保留一個總覽連結。
 

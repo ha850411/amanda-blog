@@ -135,9 +135,93 @@ class LineWebhookTest extends TestCase
         $response->assertOk()->assertExactJson([]);
         Bus::assertDispatched(ProcessLineWebhookEvent::class, function (ProcessLineWebhookEvent $job): bool {
             return $job->event['webhookEventId'] === 'queue-test-event'
+                && is_int($job->webhookReceivedAtMs)
+                && $job->webhookReceivedAtMs > 0
                 && $job->event['message']['text'] === '!lol 今天 tier=s';
         });
         Http::assertNothingSent();
+    }
+
+    public function test_webhook_returns_an_error_when_the_event_cannot_be_queued(): void
+    {
+        config(['queue.default' => 'missing-connection']);
+        Http::fake();
+
+        $body = json_encode([
+            'events' => [[
+                'webhookEventId' => 'dispatch-failure-event',
+                'type' => 'message',
+                'replyToken' => 'reply-token',
+                'message' => [
+                    'id' => 'dispatch-failure-message',
+                    'type' => 'text',
+                    'text' => '!help',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertStatus(500)->assertExactJson([
+            'message' => 'Unable to queue webhook event.',
+        ]);
+
+        config(['queue.default' => 'sync']);
+        Bus::fake();
+
+        $redeliveryResponse = $this->callWebhook($body, $this->signature($body));
+
+        $redeliveryResponse->assertOk()->assertExactJson([]);
+        Bus::assertDispatched(ProcessLineWebhookEvent::class, fn (ProcessLineWebhookEvent $job): bool =>
+            $job->event['webhookEventId'] === 'dispatch-failure-event');
+        Http::assertNothingSent();
+    }
+
+    public function test_an_event_that_waited_too_long_uses_push_without_trying_reply(): void
+    {
+        config(['services.line.reply_token_safe_window_seconds' => 45]);
+        $this->fakeScheduleImage();
+
+        Http::fake([
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.line.me/v2/bot/message/push' => Http::response(
+                ['sentMessages' => []],
+                200,
+                ['x-line-request-id' => 'push-request-id'],
+            ),
+        ]);
+
+        $job = new ProcessLineWebhookEvent([
+            'webhookEventId' => 'cold-query-event',
+            'type' => 'message',
+            'replyToken' => 'expired-before-delivery',
+            'source' => [
+                'type' => 'user',
+                'userId' => 'U123',
+            ],
+            'message' => [
+                'id' => 'cold-query-message',
+                'type' => 'text',
+                'text' => '!val 08/11',
+            ],
+        ], (int) floor(microtime(true) * 1000) - 46_000);
+
+        $this->app->call([$job, 'handle']);
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.line.me/v2/bot/message/reply');
+        Http::assertSent(function ($request): bool {
+            if ($request->url() !== 'https://api.line.me/v2/bot/message/push') {
+                return false;
+            }
+
+            return $request['to'] === 'U123'
+                && $request['messages'][0] === [
+                    'type' => 'image',
+                    'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1040',
+                    'previewImageUrl' => 'https://cdn.example.com/line-schedules/test/700',
+                ]
+                && $request['messages'][1]['type'] === 'text';
+        });
     }
 
     public function test_val_today_falls_back_to_push_when_the_reply_token_is_unusable(): void
@@ -341,10 +425,10 @@ class LineWebhookTest extends TestCase
 
         $logger = Mockery::mock(LoggerInterface::class);
         $logger->shouldReceive('log')
-            ->twice()
+            ->times(3)
             ->andThrow(new RuntimeException('Permission denied'));
         Log::shouldReceive('channel')
-            ->once()
+            ->twice()
             ->with('webhook')
             ->andReturn($logger);
 

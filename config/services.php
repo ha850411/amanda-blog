@@ -40,6 +40,7 @@ return [
         'channel_access_token' => env('LINE_CHANNEL_ACCESS_TOKEN'),
         'reply_url' => env('LINE_REPLY_URL', 'https://api.line.me/v2/bot/message/reply'),
         'push_url' => env('LINE_PUSH_URL', 'https://api.line.me/v2/bot/message/push'),
+        'reply_token_safe_window_seconds' => (int) env('LINE_REPLY_TOKEN_SAFE_WINDOW_SECONDS', 45),
         'schedule_image_disk' => env('LINE_SCHEDULE_IMAGE_DISK', 's3'),
         'schedule_image_font' => env('LINE_SCHEDULE_IMAGE_FONT', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'),
         'schedule_image_retention_days' => (int) env('LINE_SCHEDULE_IMAGE_RETENTION_DAYS', 7),

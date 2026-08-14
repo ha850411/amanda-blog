@@ -9,10 +9,12 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Throwable;
 
 class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
@@ -34,7 +36,12 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
     /**
      * @param  array<string, mixed>  $event
      */
-    public function __construct(public array $event) {}
+    public function __construct(
+        public array $event,
+        public ?int $webhookReceivedAtMs = null,
+    ) {
+        $this->webhookReceivedAtMs ??= $this->nowMs();
+    }
 
     public function uniqueId(): string
     {
@@ -51,7 +58,9 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
         LineScheduleImageService $images,
     ): void {
         $startedAt = hrtime(true);
-        $webhookLog = Log::channel('webhook');
+        $startedAtMs = $this->nowMs();
+        $queueLatencyMs = max(0, $startedAtMs - (int) $this->webhookReceivedAtMs);
+        $webhookLog = $this->webhookLogger();
         $message = (string) ($this->event['message']['text'] ?? '');
         $loggableMessage = preg_replace('/^\p{Cf}+/u', '', trim($message)) ?? trim($message);
         $command = preg_match('/^[!！﹗]/u', $loggableMessage) === 1
@@ -60,8 +69,12 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
         $messageId = $this->event['message']['id'] ?? null;
 
         $this->writeLog($webhookLog, 'info', 'LINE webhook received.', [
+            'webhook_event_id' => $this->event['webhookEventId'] ?? null,
             'message_id' => $messageId,
             'command' => $command,
+            'queue_latency_ms' => $queueLatencyMs,
+            'event_age_ms' => $this->eventAgeMs($startedAtMs),
+            'is_redelivery' => (bool) ($this->event['deliveryContext']['isRedelivery'] ?? false),
         ]);
 
         try {
@@ -96,35 +109,60 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
                 }
             }
 
-            try {
-                if ($imageUrl !== null) {
-                    $line->replyImageWithLink($replyToken, $imageUrl, $reply->linkUrl);
-                } else {
-                    $line->reply($replyToken, $reply->text);
-                }
-            } catch (Throwable $replyException) {
-                // Queue latency or slow upstream APIs can make LINE's short-lived
-                // reply token expire. A push message does not depend on that token.
-                $target = $this->pushTarget();
+            $deliveryMethod = 'reply';
+            $deliveryResult = null;
+            $replyTokenAgeMs = $this->replyTokenAgeMs();
+            $target = $this->pushTarget();
 
-                $this->writeLog($webhookLog, 'warning', 'LINE reply failed; falling back to push.', [
+            if ($this->replyTokenWindowExceeded($replyTokenAgeMs) && $target !== null) {
+                $this->writeLog($webhookLog, 'warning', 'LINE reply token window exceeded; sending push.', [
                     'message_id' => $messageId,
-                    'type' => $replyException::class,
-                    'has_push_target' => $target !== null,
+                    'reply_token_age_ms' => $replyTokenAgeMs,
+                    'has_push_target' => true,
                 ]);
 
-                if ($target === null) {
-                    throw $replyException;
-                }
+                $deliveryMethod = 'push_expired_reply_token';
+                $deliveryResult = $imageUrl !== null
+                    ? $line->pushImageWithLink($target, $imageUrl, $reply->linkUrl)
+                    : $line->push($target, $reply->text);
+            } else {
+                try {
+                    if ($imageUrl !== null) {
+                        $deliveryResult = $line->replyImageWithLink($replyToken, $imageUrl, $reply->linkUrl);
+                    } else {
+                        $deliveryResult = $line->reply($replyToken, $reply->text);
+                    }
+                } catch (Throwable $replyException) {
+                    // Queue latency or slow upstream APIs can make LINE's short-lived
+                    // reply token expire. A push message does not depend on that token.
+                    $this->writeLog($webhookLog, 'warning', 'LINE reply failed; falling back to push.', [
+                        'message_id' => $messageId,
+                        'type' => $replyException::class,
+                        'status' => $this->exceptionStatus($replyException),
+                        'line_error' => $this->lineError($replyException),
+                        'reply_token_age_ms' => $replyTokenAgeMs,
+                        'has_push_target' => $target !== null,
+                    ]);
 
-                // Use text for the recovery path. If LINE rejected the image URL,
-                // retrying the same image as a push would fail for the same reason.
-                $line->push($target, $reply->text);
+                    if ($target === null) {
+                        throw $replyException;
+                    }
+
+                    // Use text for the recovery path. If LINE rejected the image URL,
+                    // retrying the same image as a push would fail for the same reason.
+                    $deliveryMethod = 'push_after_reply_failure';
+                    $deliveryResult = $line->push($target, $reply->text);
+                }
             }
 
             $this->writeLog($webhookLog, 'info', 'LINE webhook replied.', [
                 'message_id' => $messageId,
                 'command' => $command,
+                'delivery_method' => $deliveryMethod,
+                'line_status' => $deliveryResult['status'] ?? null,
+                'line_request_id' => $deliveryResult['request_id'] ?? null,
+                'queue_latency_ms' => $queueLatencyMs,
+                'reply_token_age_ms' => $this->replyTokenAgeMs(),
                 'duration_ms' => $this->durationMs($startedAt),
             ]);
         } catch (Throwable $exception) {
@@ -154,6 +192,48 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
         return (int) round((hrtime(true) - $startedAt) / 1_000_000);
     }
 
+    private function nowMs(): int
+    {
+        return (int) floor(microtime(true) * 1000);
+    }
+
+    private function replyTokenAgeMs(): int
+    {
+        return max(0, $this->nowMs() - (int) $this->webhookReceivedAtMs);
+    }
+
+    private function replyTokenWindowExceeded(int $ageMs): bool
+    {
+        $safeWindowSeconds = max(1, (int) config('services.line.reply_token_safe_window_seconds', 45));
+
+        return $ageMs >= $safeWindowSeconds * 1000;
+    }
+
+    private function eventAgeMs(int $nowMs): ?int
+    {
+        $timestamp = $this->event['timestamp'] ?? null;
+
+        return is_numeric($timestamp) ? max(0, $nowMs - (int) $timestamp) : null;
+    }
+
+    private function exceptionStatus(Throwable $exception): ?int
+    {
+        return $exception instanceof RequestException
+            ? $exception->response->status()
+            : null;
+    }
+
+    private function lineError(Throwable $exception): ?string
+    {
+        if (! $exception instanceof RequestException) {
+            return null;
+        }
+
+        $message = $exception->response->json('message');
+
+        return is_string($message) ? mb_substr($message, 0, 500) : null;
+    }
+
     private function pushTarget(): ?string
     {
         $source = $this->event['source'] ?? null;
@@ -174,6 +254,17 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
         }
 
         return $source[$key];
+    }
+
+    private function webhookLogger(): LoggerInterface
+    {
+        try {
+            return Log::channel('webhook');
+        } catch (Throwable $exception) {
+            error_log(sprintf('Unable to create webhook logger: %s', $exception->getMessage()));
+
+            return new NullLogger;
+        }
     }
 
     /**
