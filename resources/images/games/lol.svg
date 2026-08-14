@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="lolGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fae2a0"/>
+      <stop offset="50%" stop-color="#c89b3c"/>
+      <stop offset="100%" stop-color="#785a28"/>
+    </linearGradient>
+    <linearGradient id="lolBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#091428"/>
+      <stop offset="100%" stop-color="#040914"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#lolBg)" stroke="#c89b3c" stroke-width="4"/>
+  <!-- Official stylized LoL "L" shape -->
+  <path fill="url(#lolGold)" d="M42 26h20v50h32v18H42V26z"/>
+  <path fill="#0ac8b9" d="M62 76h32v4H62z" opacity="0.8"/>
+</svg>

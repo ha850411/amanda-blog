@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="valBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2a0812"/>
+      <stop offset="100%" stop-color="#120308"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#valBg)" stroke="#ff4655" stroke-width="4"/>
+  <!-- Official VALORANT V Shape -->
+  <path fill="#ff4655" d="M38 24h22.8l12.4 54.2-17.6 36.2L38 24z"/>
+  <path fill="#ffffff" d="M88.5 24H65.5l-7.8 34h18.8L88.5 24z"/>
+</svg>

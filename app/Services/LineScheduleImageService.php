@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1040;
 
-    private const CACHE_VERSION = 4;
+    private const CACHE_VERSION = 5;
 
     private const CARD_HEIGHT = 180;
 
@@ -149,11 +149,13 @@ class LineScheduleImageService
 
         $cardWidth = 952;
         $left = 44;
+        $iconsToDraw = [];
 
         foreach ($matches as $index => $match) {
             $x = $left;
             $y = self::CARDS_TOP + ($index * (self::CARD_HEIGHT + self::CARD_GAP));
-            $theme = $this->themeForGame($match['game'] ?? $data['game'] ?? null);
+            $matchGame = $match['game'] ?? $data['game'] ?? null;
+            $theme = $this->themeForGame($matchGame);
 
             // Card Container Background & Border
             $draw->setFillColor('#131b2e');
@@ -167,11 +169,20 @@ class LineScheduleImageService
             $draw->setStrokeWidth(0);
             $draw->roundRectangle($x + 2, $y + 14, $x + 6, $y + self::CARD_HEIGHT - 14, 2, 2);
 
-            // Card Top Row: Game Badge / Time / Format / Tournament
-            $matchGame = $match['game'] ?? null;
+            // Card Top Row: Game Icon / Badge / Time / Format / Tournament
+            $iconPath = $this->iconPathForGame($matchGame);
             $timeX = $x + 24;
 
-            if ($matchGame !== null) {
+            if ($iconPath !== null) {
+                $iconSize = 28;
+                $iconsToDraw[] = [
+                    'path' => $iconPath,
+                    'x' => $x + 22,
+                    'y' => $y + 13,
+                    'size' => $iconSize,
+                ];
+                $timeX = $x + 22 + $iconSize + 12;
+            } elseif ($matchGame !== null) {
                 $badgeWidth = 52;
                 $draw->setFillColor($theme['badge_bg']);
                 $draw->setStrokeColor($theme['accent']);
@@ -309,6 +320,18 @@ class LineScheduleImageService
         }
 
         $image->drawImage($draw);
+
+        foreach ($iconsToDraw as $iconData) {
+            try {
+                $icon = new Imagick($iconData['path']);
+                $icon->resizeImage($iconData['size'], $iconData['size'], Imagick::FILTER_LANCZOS, 1);
+                $image->compositeImage($icon, Imagick::COMPOSITE_OVER, $iconData['x'], $iconData['y']);
+                $icon->clear();
+            } catch (\Throwable) {
+                // If icon cannot be loaded, gracefully continue.
+            }
+        }
+
         $image->stripImage();
 
         return $image;
@@ -347,6 +370,42 @@ class LineScheduleImageService
         }
 
         return rtrim($text).'…';
+    }
+
+    private function iconPathForGame(?string $game): ?string
+    {
+        if ($game === null) {
+            return null;
+        }
+
+        $normalized = mb_strtolower(trim($game));
+        $aliases = [
+            'cs' => 'cs',
+            'cs2' => 'cs',
+            'valorant' => 'valorant',
+            'val' => 'valorant',
+            'lol' => 'lol',
+        ];
+
+        $key = $aliases[$normalized] ?? null;
+
+        if ($key === null) {
+            return null;
+        }
+
+        $candidates = [
+            resource_path("images/games/{$key}.png"),
+            base_path("resources/images/games/{$key}.png"),
+            __DIR__."/../../resources/images/games/{$key}.png",
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_readable($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**
