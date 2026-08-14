@@ -239,7 +239,7 @@ class LineWebhookTest extends TestCase
 
             return $request['messages'][0] === [
                 'type' => 'text',
-                'text' => "指令格式：\n!lol 今天\n!val 明天\n!cs 08/11\n\n預設查 S Tier。\n可選參數：tier=s,a｜tier=all｜limit=5｜team=G2",
+                'text' => "指令格式：\n!賽程 今天\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2",
             ];
         });
     }
@@ -554,6 +554,96 @@ class LineWebhookTest extends TestCase
         $this->assertStringContainsString('Titan Esports Club　2.30（1xbit）', $reply);
         Http::assertSent(fn ($request): bool => $request->url()
             === 'https://bo3.gg/api/v1/matches/all-gamers-vs-tec-esports-12-08-2026');
+    }
+
+    public function test_schedule_command_queries_all_three_games_by_default(): void
+    {
+        $this->fakeScheduleImage();
+
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
+        ]);
+
+        $body = json_encode([
+            'events' => [[
+                'type' => 'message',
+                'replyToken' => 'reply-token',
+                'message' => [
+                    'id' => '123',
+                    'type' => 'text',
+                    'text' => '!賽程 明天',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/lol/matches/current')
+            && $request['date'] === '2026-08-12'
+            && $request['tiers'] === 's');
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/valorant/matches/current')
+            && $request['date'] === '2026-08-12'
+            && $request['tiers'] === 's');
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/matches/current')
+            && $request['date'] === '2026-08-12'
+            && $request['tiers'] === 's');
+
+        Http::assertSent(function ($request): bool {
+            if ($request->url() !== 'https://api.line.me/v2/bot/message/reply') {
+                return false;
+            }
+
+            $messages = $request['messages'];
+
+            return $request->hasHeader('Authorization', 'Bearer test-token')
+                && $request['replyToken'] === 'reply-token'
+                && count($messages) === 2
+                && $messages[0]['type'] === 'image'
+                && $messages[1]['type'] === 'text'
+                && str_contains($messages[1]['text'], '完整賽程｜https://bo3.gg/matches/current?tiers=s&date=2026-08-12');
+        });
+    }
+
+    public function test_schedule_command_supports_game_parameter_filter(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!賽程 08/12 game=lol/cs');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('綜合賽程（LoL/CS2）｜08/12｜S Tier', $reply->text);
+        $this->assertSame('綜合賽程｜08/12｜S Tier', $reply->imageData['title']);
+        $this->assertSame('all', $reply->imageData['game']);
+
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/lol/matches/current'));
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/matches/current'));
+        Http::assertNotSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/valorant/matches/current'));
+    }
+
+    public function test_match_alias_is_equivalent_to_schedule_command(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!match 今天');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('綜合賽程（LoL/VALORANT/CS2）｜08/11｜S Tier', $reply->text);
+        $this->assertSame('綜合賽程｜08/11｜S Tier', $reply->imageData['title']);
     }
 
     private function callWebhook(string $body, string $signature)

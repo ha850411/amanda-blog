@@ -59,12 +59,12 @@ class LineScheduleImageServiceTest extends TestCase
         $preview->readImageBlob(Storage::disk('schedule-images')->get($previewPath));
 
         $this->assertSame(1040, $original->getImageWidth());
-        $this->assertSame(674, $original->getImageHeight());
+        $this->assertSame(750, $original->getImageHeight());
         $this->assertSame(700, $preview->getImageWidth());
-        $this->assertSame(454, $preview->getImageHeight());
+        $this->assertSame(505, $preview->getImageHeight());
         $this->assertSame(
-            ['r' => 22, 'g' => 32, 'b' => 51, 'a' => 1],
-            $original->getImagePixelColor(520, 140)->getColor(),
+            ['r' => 19, 'g' => 27, 'b' => 46, 'a' => 1],
+            $original->getImagePixelColor(520, 145)->getColor(),
         );
 
         $original->clear();

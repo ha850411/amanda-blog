@@ -39,12 +39,22 @@ class LineScheduleBot
             return null;
         }
 
+        $allMatches = [];
+
         try {
-            $matches = $this->schedules->forDate(
-                $command['game'],
-                $command['date'],
-                $command['tiers'],
-            );
+            foreach ($command['games'] as $game) {
+                $gameMatches = $this->schedules->forDate(
+                    $game,
+                    $command['date'],
+                    $command['tiers'],
+                );
+
+                foreach ($gameMatches as $match) {
+                    $match['game'] = $game;
+                    $match['game_label'] = self::GAME_LABELS[$game] ?? mb_strtoupper($game);
+                    $allMatches[] = $match;
+                }
+            }
         } catch (Throwable $exception) {
             report($exception);
 
@@ -52,8 +62,8 @@ class LineScheduleBot
         }
 
         if ($command['team'] !== null) {
-            $matches = array_values(array_filter(
-                $matches,
+            $allMatches = array_values(array_filter(
+                $allMatches,
                 fn (array $match): bool => str_contains(
                     mb_strtolower($match['name']),
                     mb_strtolower($command['team']),
@@ -61,25 +71,54 @@ class LineScheduleBot
             ));
         }
 
-        $label = self::GAME_LABELS[$command['game']];
+        if (count($command['games']) > 1) {
+            $gamePriority = array_flip($command['games']);
+            usort($allMatches, function (array $a, array $b) use ($gamePriority): int {
+                $cmp = $a['start_at'] <=> $b['start_at'];
+
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+
+                return ($gamePriority[$a['game'] ?? ''] ?? 99) <=> ($gamePriority[$b['game'] ?? ''] ?? 99);
+            });
+        }
+
+        $isMultiGame = count($command['games']) > 1;
         $dateLabel = $command['date']->format('m/d');
         $tierLabel = $command['tiers'] === []
             ? '全部 Tier'
             : implode('/', array_map('mb_strtoupper', $command['tiers'])).' Tier';
-        $filteredUrl = $this->schedules->filteredUrl(
-            $command['game'],
-            $command['date'],
-            $command['tiers'],
-        );
 
-        if ($matches === []) {
+        if ($isMultiGame) {
+            $gameNames = implode('/', array_map(
+                fn (string $g): string => self::GAME_LABELS[$g] ?? mb_strtoupper($g),
+                $command['games'],
+            ));
+            $label = "綜合賽程（{$gameNames}）";
+            $imageTitle = "綜合賽程｜{$dateLabel}｜{$tierLabel}";
+            $filteredUrl = $this->multiGameFilteredUrl($command['date'], $command['tiers']);
+        } else {
+            $singleGame = $command['games'][0];
+            $label = self::GAME_LABELS[$singleGame];
+            $imageTitle = "{$label}｜{$dateLabel}｜{$tierLabel}";
+            $filteredUrl = $this->schedules->filteredUrl(
+                $singleGame,
+                $command['date'],
+                $command['tiers'],
+            );
+        }
+
+        if ($allMatches === []) {
+            $noMatchLabel = $isMultiGame ? '綜合賽程' : $label;
+
             return new LineBotReply(
-                "{$label} {$dateLabel} 查無賽程。\n完整賽程｜{$filteredUrl}",
+                "{$noMatchLabel} {$dateLabel} 查無賽程。\n完整賽程｜{$filteredUrl}",
                 $filteredUrl,
             );
         }
 
-        $visibleMatches = array_slice($matches, 0, $command['limit']);
+        $visibleMatches = array_slice($allMatches, 0, $command['limit']);
         $visibleMatches = $this->odds->enrich($visibleMatches, $command['date']);
         $visibleMatches = $this->bo3Odds->enrichMissing($visibleMatches);
         $lines = [
@@ -89,9 +128,11 @@ class LineScheduleBot
 
         foreach ($visibleMatches as $index => $match) {
             $lines[] = "\n──────────";
+            $gameTag = $isMultiGame ? sprintf('【%s】', $match['game_label'] ?? '') : '';
             $lines[] = sprintf(
-                "第 %d 場｜%s｜%s\n%s\nvs\n%s\n\n賽事｜%s",
+                "第 %d 場%s｜%s｜%s\n%s\nvs\n%s\n\n賽事｜%s",
                 $index + 1,
+                $gameTag,
                 $match['start_at']->format('H:i'),
                 $match['format'],
                 $match['team1'],
@@ -114,8 +155,8 @@ class LineScheduleBot
             }
         }
 
-        if (count($matches) > $command['limit']) {
-            $lines[] = sprintf("\n另有 %d 場，請至 bo3.gg 查看。", count($matches) - $command['limit']);
+        if (count($allMatches) > $command['limit']) {
+            $lines[] = sprintf("\n另有 %d 場，請至 bo3.gg 查看。", count($allMatches) - $command['limit']);
         }
 
         $lines[] = "\n完整賽程｜{$filteredUrl}";
@@ -124,10 +165,12 @@ class LineScheduleBot
             implode("\n", $lines),
             $filteredUrl,
             [
-                'title' => "{$label}｜{$dateLabel}｜{$tierLabel}",
+                'title' => $imageTitle,
                 'subtitle' => '台灣時間｜'.count($visibleMatches).' 場賽程',
+                'game' => $isMultiGame ? 'all' : $command['games'][0],
                 'matches' => array_map(
                     fn (array $match): array => [
+                        'game' => $match['game'] ?? ($command['games'][0] ?? null),
                         'start_time' => $match['start_at']->format('H:i'),
                         'format' => $match['format'],
                         'team1' => $match['team1'],
@@ -142,11 +185,11 @@ class LineScheduleBot
     }
 
     /**
-     * @return array{game: string, date: CarbonImmutable, tiers: array<int, string>, limit: int, team: ?string}|null
+     * @return array{games: array<int, string>, date: CarbonImmutable, tiers: array<int, string>, limit: int, team: ?string}|null
      */
     private function parseCommand(string $message): ?array
     {
-        if (! preg_match('/^!(lol|val|cs)\s+(今天|明天|後天|\d{1,2}\/\d{1,2})(?:\s+(.*))?$/iu', $message, $matches)) {
+        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs)\s+(今天|明天|後天|\d{1,2}\/\d{1,2})(?:\s+(.*))?$/iu', $message, $matches)) {
             return null;
         }
 
@@ -163,10 +206,21 @@ class LineScheduleBot
             return null;
         }
 
+        $commandKey = mb_strtolower($matches[1]);
+
+        if (in_array($commandKey, ['賽程', 'schedule', 'match', 'matches'], true)) {
+            $games = $options['games'] ?? ['lol', 'valorant', 'cs'];
+        } else {
+            $defaultGame = ['lol' => 'lol', 'val' => 'valorant', 'cs' => 'cs'][$commandKey];
+            $games = $options['games'] ?? [$defaultGame];
+        }
+
         return [
-            'game' => ['lol' => 'lol', 'val' => 'valorant', 'cs' => 'cs'][mb_strtolower($matches[1])],
+            'games' => $games,
             'date' => $date,
-            ...$options,
+            'tiers' => $options['tiers'],
+            'limit' => $options['limit'],
+            'team' => $options['team'],
         ];
     }
 
@@ -216,7 +270,7 @@ class LineScheduleBot
     }
 
     /**
-     * @return array{tiers: array<int, string>, limit: int, team: ?string}|null
+     * @return array{games?: array<int, string>, tiers: array<int, string>, limit: int, team: ?string}|null
      */
     private function parseOptions(string $input): ?array
     {
@@ -226,8 +280,8 @@ class LineScheduleBot
             return $options;
         }
 
-        preg_match_all('/(tier|limit|team)=(?:"([^"]+)"|(\S+))/iu', $input, $optionMatches, PREG_SET_ORDER);
-        $consumed = trim((string) preg_replace('/(tier|limit|team)=(?:"[^"]+"|\S+)/iu', '', $input));
+        preg_match_all('/(game|tier|limit|team)=(?:"([^"]+)"|(\S+))/iu', $input, $optionMatches, PREG_SET_ORDER);
+        $consumed = trim((string) preg_replace('/(game|tier|limit|team)=(?:"[^"]+"|\S+)/iu', '', $input));
 
         if ($consumed !== '') {
             return null;
@@ -237,7 +291,34 @@ class LineScheduleBot
             $key = mb_strtolower($option[1]);
             $value = trim($option[2] !== '' ? $option[2] : $option[3]);
 
-            if ($key === 'tier') {
+            if ($key === 'game') {
+                $rawGames = array_values(array_filter(preg_split('/[,\\/]+/', mb_strtolower($value)) ?: []));
+                $gameMap = [
+                    'lol' => 'lol',
+                    'val' => 'valorant',
+                    'valorant' => 'valorant',
+                    'cs' => 'cs',
+                    'cs2' => 'cs',
+                ];
+
+                $games = [];
+
+                foreach ($rawGames as $rawGame) {
+                    if (! isset($gameMap[$rawGame])) {
+                        return null;
+                    }
+
+                    $games[] = $gameMap[$rawGame];
+                }
+
+                $games = array_values(array_unique($games));
+
+                if ($games === []) {
+                    return null;
+                }
+
+                $options['games'] = $games;
+            } elseif ($key === 'tier') {
                 if (mb_strtolower($value) === 'all') {
                     $options['tiers'] = [];
 
@@ -270,8 +351,28 @@ class LineScheduleBot
         return $options;
     }
 
+    private function multiGameFilteredUrl(CarbonImmutable $date, array $tiers): string
+    {
+        $url = rtrim((string) config('services.bo3.base_url', 'https://bo3.gg'), '/').'/matches/current?';
+        $query = [];
+
+        if ($tiers !== []) {
+            $query[] = 'tiers='.implode(',', array_map('rawurlencode', $tiers));
+        }
+
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+
+        if ($date->isSameDay(CarbonImmutable::now($timezone))) {
+            $query[] = 'period';
+        } else {
+            $query[] = 'date='.$date->format('Y-m-d');
+        }
+
+        return $url.implode('&', $query);
+    }
+
     private function help(): string
     {
-        return "指令格式：\n!lol 今天\n!val 明天\n!cs 08/11\n\n預設查 S Tier。\n可選參數：tier=s,a｜tier=all｜limit=5｜team=G2";
+        return "指令格式：\n!賽程 今天\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }

@@ -74,6 +74,12 @@ return [
         ],
 
         'webhook' => [
+            'driver' => 'stack',
+            'channels' => explode(',', (string) env('WEBHOOK_LOG_STACK', 'webhook_daily')),
+            'ignore_exceptions' => false,
+        ],
+
+        'webhook_daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/webhook.log'),
             'level' => env('WEBHOOK_LOG_LEVEL', 'info'),
