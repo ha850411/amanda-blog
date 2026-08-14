@@ -147,4 +147,27 @@ class LineScheduleImageServiceTest extends TestCase
         $this->assertSame(2334, $image->getImageHeight());
         $image->clear();
     }
+
+    public function test_it_provides_distinct_themes_for_bo1_bo2_bo3_and_bo5(): void
+    {
+        $service = app(LineScheduleImageService::class);
+
+        $bo1 = $service->formatTheme('BO1');
+        $bo2 = $service->formatTheme('BO2');
+        $bo3 = $service->formatTheme('BO3');
+        $bo5 = $service->formatTheme('BO5');
+        $default = $service->formatTheme('未知');
+
+        $this->assertSame('BO1', $bo1['label']);
+        $this->assertSame('BO2', $bo2['label']);
+        $this->assertSame('BO3', $bo3['label']);
+        $this->assertSame('BO5', $bo5['label']);
+
+        // Confirm distinct background and border color sets
+        $bgColors = [$bo1['bg'], $bo2['bg'], $bo3['bg'], $bo5['bg'], $default['bg']];
+        $borderColors = [$bo1['border'], $bo2['border'], $bo3['border'], $bo5['border'], $default['border']];
+
+        $this->assertCount(5, array_unique($bgColors));
+        $this->assertCount(5, array_unique($borderColors));
+    }
 }

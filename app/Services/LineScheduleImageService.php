@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 12;
+    private const CACHE_VERSION = 13;
 
     private const CARD_HEIGHT = 180;
 
@@ -24,6 +24,39 @@ class LineScheduleImageService
 
     /** @var array<int, int> */
     private const IMAGE_WIDTHS = [700, 1440];
+
+    private const FORMAT_THEMES = [
+        1 => [
+            'bg' => '#082f49',
+            'border' => '#0284c7',
+            'text' => '#38bdf8',
+        ],
+        2 => [
+            'bg' => '#042f2e',
+            'border' => '#0d9488',
+            'text' => '#2dd4bf',
+        ],
+        3 => [
+            'bg' => '#451a03',
+            'border' => '#f59e0b',
+            'text' => '#fde68a',
+        ],
+        5 => [
+            'bg' => '#3b0764',
+            'border' => '#c084fc',
+            'text' => '#f5d0fe',
+        ],
+        7 => [
+            'bg' => '#4c0519',
+            'border' => '#f43f5e',
+            'text' => '#fecdd3',
+        ],
+        'default' => [
+            'bg' => '#1e293b',
+            'border' => '#475569',
+            'text' => '#94a3b8',
+        ],
+    ];
 
     private const GAME_THEMES = [
         'cs' => [
@@ -225,13 +258,39 @@ class LineScheduleImageService
             $draw->annotation($timeX, $y + 34, $match['start_time']);
 
             $timeMetrics = $image->queryFontMetrics($draw, $match['start_time']);
-            $formatX = $timeX + (int) round($timeMetrics['textWidth']) + 8;
+            $timeWidth = (int) round($timeMetrics['textWidth']);
 
-            // Format (e.g. · BO3)
-            $draw->setFillColor('#94a3b8');
-            $draw->setFontSize(17);
-            $draw->setFontWeight(400);
-            $draw->annotation($formatX, $y + 34, '· '.$match['format']);
+            // Format Badge (e.g. BO1 / BO2 / BO3 / BO5)
+            $formatTheme = $this->formatTheme($match['format'] ?? null);
+            $formatBadgeX = $timeX + $timeWidth + 12;
+            $formatBadgeWidth = 56;
+            $formatBadgeHeight = 24;
+            $formatBadgeY = $y + 14;
+
+            $draw->setFillColor($formatTheme['bg']);
+            $draw->setStrokeColor($formatTheme['border']);
+            $draw->setStrokeWidth(1.2);
+            $draw->roundRectangle(
+                $formatBadgeX,
+                $formatBadgeY,
+                $formatBadgeX + $formatBadgeWidth,
+                $formatBadgeY + $formatBadgeHeight,
+                6,
+                6
+            );
+
+            $draw->setFillColor($formatTheme['text']);
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->setFontSize(13);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation(
+                $formatBadgeX + (int) round($formatBadgeWidth / 2),
+                $formatBadgeY + 17,
+                $formatTheme['label']
+            );
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
             // Tournament Name (Top Right)
             $draw->setFillColor('#94a3b8');
@@ -492,17 +551,19 @@ class LineScheduleImageService
             $draw->setFontWeight(500);
             $draw->annotation($x, $rowY + 16, (string) ($result['date'] ?? '—'));
 
-            // 2. Format Badge (e.g. BO3 / BO5)
-            $draw->setFillColor('#1e293b');
-            $draw->setStrokeColor('#334155');
+            // 2. Format Badge (e.g. BO1 / BO2 / BO3 / BO5)
+            $formatTheme = $this->formatTheme($result['format'] ?? null);
+            $draw->setFillColor($formatTheme['bg']);
+            $draw->setStrokeColor($formatTheme['border']);
             $draw->setStrokeWidth(1);
             $draw->roundRectangle($x + 72, $rowY + 2, $x + 104, $rowY + 20, 3, 3);
-            $draw->setFillColor('#cbd5e1');
+            $draw->setFillColor($formatTheme['text']);
             $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
             $draw->setFontSize(10);
             $draw->setFontWeight(700);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + 88, $rowY + 15, (string) ($result['format'] ?? 'BO?'));
+            $draw->annotation($x + 88, $rowY + 15, $formatTheme['label']);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
             // 3. Team 1 Name (Right-aligned to score pill, Green if won, Red if lost)
@@ -706,6 +767,26 @@ class LineScheduleImageService
         $normalized = mb_strtolower(trim((string) $game));
 
         return self::GAME_THEMES[$normalized] ?? self::GAME_THEMES['default'];
+    }
+
+    /**
+     * @return array{bg: string, border: string, text: string, label: string}
+     */
+    public function formatTheme(mixed $format): array
+    {
+        $raw = trim((string) $format);
+        $text = mb_strtoupper($raw);
+        preg_match('/(?:BO)?(\d+)/i', $text, $matches);
+        $number = isset($matches[1]) ? (int) $matches[1] : null;
+
+        $theme = self::FORMAT_THEMES[$number] ?? self::FORMAT_THEMES['default'];
+
+        return [
+            'bg' => $theme['bg'],
+            'border' => $theme['border'],
+            'text' => $theme['text'],
+            'label' => $text !== '' ? $text : 'BO?',
+        ];
     }
 
     private function fontPath(): string
