@@ -99,4 +99,52 @@ class LineScheduleImageServiceTest extends TestCase
         $this->assertSame('SEN', $service->teamAbbreviation('Sentinels'));
         $this->assertSame('PRX', $service->teamAbbreviation('Paper Rex'));
     }
+
+    public function test_it_renders_more_than_ten_matches_without_truncating_the_canvas(): void
+    {
+        if (! extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick is required to verify schedule image layout.');
+        }
+
+        $font = collect([
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        ])->first(fn (string $path): bool => is_readable($path));
+
+        if ($font === null) {
+            $this->markTestSkipped('A readable font is required to verify schedule image layout.');
+        }
+
+        config([
+            'services.line.schedule_image_disk' => 'schedule-images',
+            'services.line.schedule_image_font' => $font,
+        ]);
+        Storage::fake('schedule-images');
+
+        $matches = array_map(fn (int $number): array => [
+            'start_time' => sprintf('%02d:00', $number),
+            'format' => 'BO3',
+            'team1' => "Team {$number} Alpha",
+            'team2' => "Team {$number} Beta",
+            'tournament' => 'VCT 2026: Test Stage',
+            'odds' => null,
+            'h2h' => null,
+        ], range(1, 11));
+
+        app(LineScheduleImageService::class)->create([
+            'title' => 'VALORANT｜08/12｜S Tier',
+            'subtitle' => '台灣時間｜11 場賽程',
+            'matches' => $matches,
+        ], 'https://bo3.gg/valorant/matches/current');
+
+        $originalPath = collect(Storage::disk('schedule-images')->allFiles('line-schedules'))
+            ->first(fn (string $path): bool => str_ends_with($path, '/1440'));
+        $this->assertNotNull($originalPath);
+
+        $image = new Imagick;
+        $image->readImageBlob(Storage::disk('schedule-images')->get($originalPath));
+        $this->assertSame(2334, $image->getImageHeight());
+        $image->clear();
+    }
 }

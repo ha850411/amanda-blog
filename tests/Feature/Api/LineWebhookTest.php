@@ -222,6 +222,7 @@ class LineWebhookTest extends TestCase
 
         Http::fake([
             'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.line.me/v2/bot/message/push' => Http::response(
                 ['sentMessages' => []],
                 200,
@@ -268,6 +269,7 @@ class LineWebhookTest extends TestCase
 
         Http::fake([
             'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.line.me/v2/bot/message/reply' => Http::response([
                 'message' => 'Invalid reply token',
             ], 400),
@@ -537,6 +539,7 @@ class LineWebhookTest extends TestCase
     {
         Http::fake([
             'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
         ]);
 
         $reply = app(LineScheduleBot::class)->respond('!val 明天 tier=all limit=1 team="Team Alpha"');
@@ -547,14 +550,32 @@ class LineWebhookTest extends TestCase
         $this->assertStringContainsString('完整賽程｜https://bo3.gg/valorant/matches/current?date=2026-08-12', $reply);
         $this->assertStringNotContainsString('/lol/matches/alpha-vs-beta', $reply);
 
-        Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-12'
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/valorant/matches/current')
+            && $request['date'] === '2026-08-12'
             && ! isset($request['tiers']));
+    }
+
+    public function test_default_limit_keeps_more_than_ten_valorant_matches(): void
+    {
+        Http::fake([
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3HtmlWithManyMatches(11), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!val 明天');
+
+        $this->assertNotNull($reply);
+        $this->assertCount(11, $reply->imageData['matches']);
+        $this->assertSame('台灣時間｜11 場賽程', $reply->imageData['subtitle']);
+        $this->assertStringContainsString('第 11 場｜19:00｜BO3', $reply->text);
+        $this->assertStringNotContainsString('另有 1 場', $reply->text);
     }
 
     public function test_tbd_match_missing_from_structured_data_is_included_from_the_visible_table(): void
     {
         Http::fake([
             'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3HtmlWithTbdMatch(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
         ]);
 
         $reply = app(LineScheduleBot::class)->reply('!val 明天');
@@ -631,6 +652,7 @@ class LineWebhookTest extends TestCase
 
         Http::fake([
             'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3HtmlWithTbdMatch(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.odds-api.io/v3/events*' => Http::response([[
                 'id' => 6539993323,
                 'home' => 'All Gamers',
@@ -683,6 +705,7 @@ class LineWebhookTest extends TestCase
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
             'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
             'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
         ]);
 
@@ -732,6 +755,7 @@ class LineWebhookTest extends TestCase
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
             'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
             'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
         ]);
 
@@ -753,6 +777,7 @@ class LineWebhookTest extends TestCase
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
             'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
             'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
         ]);
 
@@ -851,6 +876,36 @@ class LineWebhookTest extends TestCase
             .'</div>';
 
         return '<html>'.$knownRow.$tbdRow
+            .'<script id="micro-markup" type="application/ld+json">'
+            .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+            .'</script></html>';
+    }
+
+    private function bo3HtmlWithManyMatches(int $count): string
+    {
+        $events = [];
+        $rows = [];
+
+        foreach (range(1, $count) as $number) {
+            $slug = "team-{$number}-alpha-vs-team-{$number}-beta-12-08-2026";
+            $hour = $number;
+            $events[] = [
+                '@context' => 'https://schema.org',
+                '@type' => 'SportsEvent',
+                'name' => "Team {$number} Alpha vs Team {$number} Beta",
+                'url' => "https://bo3.gg/valorant/matches/{$slug}",
+                'startDate' => sprintf('2026-08-12T%02d:00:00.000+00:00', $hour),
+            ];
+            $rows[] = '<div class="table-row table-row--upcoming">'
+                ."<a href=\"/valorant/matches/{$slug}\">"
+                .sprintf('<span class="time">%02d:00</span>', $hour)
+                ."<div class=\"team-name\">Team {$number} Alpha</div>"
+                .'<span class="bo-type">Bo3</span>'
+                ."<div class=\"team-name\">Team {$number} Beta</div></a>"
+                .'<p class="tournament-name">VCT 2026: Test Stage</p></div>';
+        }
+
+        return '<html>'.implode('', $rows)
             .'<script id="micro-markup" type="application/ld+json">'
             .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
             .'</script></html>';

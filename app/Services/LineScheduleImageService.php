@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 11;
+    private const CACHE_VERSION = 12;
 
     private const CARD_HEIGHT = 180;
 
@@ -127,7 +127,7 @@ class LineScheduleImageService
      */
     private function render(array $data): Imagick
     {
-        $matches = array_slice($data['matches'], 0, 10);
+        $matches = $data['matches'];
         $canvasHeight = $this->canvasHeight($matches);
         $image = new Imagick;
         $image->newImage(self::CANVAS_WIDTH, $canvasHeight, '#090d16', 'png');

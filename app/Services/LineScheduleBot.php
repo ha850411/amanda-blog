@@ -159,7 +159,7 @@ class LineScheduleBot
             if (($match['h2h'] ?? null) !== null) {
                 $h2h = $match['h2h'];
                 $lines[] = sprintf(
-                    "近期交手｜%s %d 勝・%s %d 勝（近 %d 場，小局 %d：%d）",
+                    '近期交手｜%s %d 勝・%s %d 勝（近 %d 場，小局 %d：%d）',
                     $match['team1'],
                     $h2h['team1_wins'],
                     $match['team2'],
@@ -307,7 +307,10 @@ class LineScheduleBot
      */
     private function parseOptions(string $input): ?array
     {
-        $options = ['tiers' => ['s'], 'limit' => 10, 'team' => null];
+        // A typical combined S-tier day can exceed ten matches. Keep the
+        // default large enough for the full image while retaining an explicit
+        // limit option for callers that want a shorter response.
+        $options = ['tiers' => ['s'], 'limit' => 19, 'team' => null];
 
         if (trim($input) === '') {
             return $options;
@@ -369,7 +372,7 @@ class LineScheduleBot
 
                 $options['tiers'] = $tiers;
             } elseif ($key === 'limit') {
-                if (! ctype_digit($value) || (int) $value < 1 || (int) $value > 10) {
+                if (! ctype_digit($value) || (int) $value < 1 || (int) $value > 19) {
                     return null;
                 }
 

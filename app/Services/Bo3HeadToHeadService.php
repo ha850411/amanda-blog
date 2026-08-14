@@ -15,7 +15,7 @@ class Bo3HeadToHeadService
     private const LIMIT = 5;
 
     /**
-     * Add bo3.gg's latest head-to-head summary to visible LoL matches.
+     * Add bo3.gg's latest head-to-head summary to supported matches.
      * A missing or unavailable H2H response is optional and never removes a match.
      *
      * @param  array<int, array<string, mixed>>  $matches
@@ -28,7 +28,7 @@ class Bo3HeadToHeadService
         foreach ($matches as $index => $match) {
             $matches[$index]['h2h'] = null;
 
-            if (($match['game'] ?? null) !== 'lol') {
+            if (! in_array(($match['game'] ?? null), ['lol', 'valorant'], true)) {
                 continue;
             }
 

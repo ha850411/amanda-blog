@@ -87,7 +87,45 @@ class Bo3HeadToHeadServiceTest extends TestCase
         });
     }
 
-    public function test_it_leaves_non_lol_and_unavailable_head_to_head_data_optional(): void
+    public function test_it_enriches_valorant_head_to_head_results(): void
+    {
+        Http::fake([
+            'https://api.bo3.gg/api/v1/matches/drx-vs-zeta-division-15-08-2026' => Http::response([
+                'team1_id' => 6916,
+                'team2_id' => 7030,
+                'discipline_id' => 2,
+            ]),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response([
+                'total' => ['count' => 4],
+                'results' => [
+                    $this->h2hResult(6916, 7030, 2, 1, '2026-02-07T08:00:00+00:00', 3),
+                    $this->h2hResult(7030, 6916, 0, 2, '2024-12-19T12:10:00+00:00', 3),
+                    $this->h2hResult(7030, 6916, 1, 2, '2024-06-15T08:00:00+00:00', 3),
+                    $this->h2hResult(7030, 6916, 0, 2, '2023-03-25T09:00:00+00:00', 3),
+                ],
+            ]),
+        ]);
+
+        $matches = app(Bo3HeadToHeadService::class)->enrich([[
+            'game' => 'valorant',
+            'team1' => 'KIWOOM DRX',
+            'team2' => 'ZETA DIVISION',
+            'url' => 'https://bo3.gg/valorant/matches/drx-vs-zeta-division-15-08-2026',
+        ]]);
+
+        $this->assertSame(4, $matches[0]['h2h']['sample_size']);
+        $this->assertSame(4, $matches[0]['h2h']['team1_wins']);
+        $this->assertSame(0, $matches[0]['h2h']['team2_wins']);
+        $this->assertSame(8, $matches[0]['h2h']['team1_games']);
+        $this->assertSame(2, $matches[0]['h2h']['team2_games']);
+        $this->assertCount(4, $matches[0]['h2h']['series']);
+
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://api.bo3.gg/api/v1/matches?')
+            && $request['filter']['matches.discipline_id']['eq'] === 2
+            && $request['filter']['matches.team_ids']['contains'] === '6916,7030');
+    }
+
+    public function test_it_leaves_unsupported_and_unavailable_head_to_head_data_optional(): void
     {
         Http::fake([
             'https://api.bo3.gg/api/v1/matches/lol-without-detail' => Http::response([], 503),
@@ -95,8 +133,8 @@ class Bo3HeadToHeadServiceTest extends TestCase
 
         $matches = app(Bo3HeadToHeadService::class)->enrich([
             [
-                'game' => 'valorant',
-                'url' => 'https://bo3.gg/valorant/matches/valorant-match',
+                'game' => 'cs',
+                'url' => 'https://bo3.gg/matches/cs-match',
             ],
             [
                 'game' => 'lol',

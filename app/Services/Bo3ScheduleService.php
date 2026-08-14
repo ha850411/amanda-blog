@@ -13,6 +13,10 @@ use Throwable;
 
 class Bo3ScheduleService
 {
+    private const DISCIPLINE_IDS = [
+        'valorant' => 2,
+    ];
+
     private const PATHS = [
         'cs' => '/matches/current',
         'valorant' => '/valorant/matches/current',
@@ -31,7 +35,7 @@ class Bo3ScheduleService
         $tiers = $this->normalizeTiers($tiers);
         $dateString = $date->format('Y-m-d');
         $tierKey = $tiers === [] ? 'all' : implode(',', $tiers);
-        $cacheKey = "bo3-schedule:v4:{$game}:{$dateString}:{$tierKey}";
+        $cacheKey = "bo3-schedule:v5:{$game}:{$dateString}:{$tierKey}";
 
         try {
             $cached = Cache::get($cacheKey);
@@ -150,12 +154,116 @@ class Bo3ScheduleService
             }
         }
 
+        // The current schedule page is paginated and can omit matches that
+        // started earlier in the same local day. This is especially visible
+        // on busy VALORANT days. Merge the date-bounded API result so the
+        // daily schedule does not depend on whichever page rows were SSR'd.
+        foreach ($this->extractApiMatches($game, $date, $timezone, $tiers) as $match) {
+            $key = $this->matchKey($match);
+
+            if (! isset($knownMatches[$key])) {
+                $structuredMatches[] = $match;
+                $knownMatches[$key] = true;
+            }
+        }
+
         $structuredMatches = $this->enrichMissingFormats($structuredMatches);
 
         return collect($structuredMatches)
             ->sortBy('start_at')
             ->values()
             ->all();
+    }
+
+    /**
+     * @return array<int, array{name: string, team1: string, team2: string, tournament: string, format: string, start_at: CarbonImmutable, url: string}>
+     */
+    private function extractApiMatches(string $game, string $date, string $timezone, array $tiers): array
+    {
+        $disciplineId = self::DISCIPLINE_IDS[$game] ?? null;
+
+        if ($disciplineId === null) {
+            return [];
+        }
+
+        $start = CarbonImmutable::parse($date, $timezone)->startOfDay()->utc();
+        $query = [
+            'page' => ['offset' => 0, 'limit' => 100],
+            'sort' => 'start_date',
+            'with' => 'teams,tournament',
+            'filter' => [
+                'matches.discipline_id' => ['eq' => $disciplineId],
+                // bo3.gg supports gt/lt but not gte/lte. Subtract one second
+                // so a match scheduled exactly at local midnight is included.
+                'matches.start_date' => [
+                    'gt' => $start->subSecond()->toIso8601String(),
+                    'lt' => $start->addDay()->toIso8601String(),
+                ],
+            ],
+        ];
+
+        if ($tiers !== []) {
+            $query['filter']['matches.tier'] = ['in' => implode(',', $tiers)];
+        }
+
+        try {
+            $response = Http::acceptJson()
+                ->withUserAgent('AmandaBlogLineBot/1.0')
+                ->timeout((int) config('services.bo3.timeout_seconds', 10))
+                ->retry(2, 200)
+                ->get($this->apiUrl().'/matches', $query);
+
+            if (! $response->successful()) {
+                Log::warning('bo3.gg complete daily schedule request failed.', [
+                    'game' => $game,
+                    'date' => $date,
+                    'status' => $response->status(),
+                ]);
+
+                return [];
+            }
+
+            $results = $response->json('results');
+
+            if (! is_array($results)) {
+                return [];
+            }
+
+            return collect($results)
+                ->filter(fn (mixed $match): bool => is_array($match)
+                    && is_string($match['slug'] ?? null)
+                    && is_string($match['start_date'] ?? null)
+                    && is_string($match['team1']['name'] ?? null)
+                    && is_string($match['team2']['name'] ?? null))
+                ->map(function (array $match) use ($game, $timezone): array {
+                    $team1 = $this->normalizeText($match['team1']['name']);
+                    $team2 = $this->normalizeText($match['team2']['name']);
+                    $boType = is_numeric($match['bo_type'] ?? null) && (int) $match['bo_type'] > 0
+                        ? 'BO'.(int) $match['bo_type']
+                        : '未知';
+
+                    $matchesPath = preg_replace('~/current$~', '', self::PATHS[$game]) ?? self::PATHS[$game];
+
+                    return [
+                        'name' => "{$team1} vs {$team2}",
+                        'team1' => $team1,
+                        'team2' => $team2,
+                        'tournament' => $this->normalizeText((string) ($match['tournament']['name'] ?? '')) ?: '未知賽事',
+                        'format' => $boType,
+                        'start_at' => CarbonImmutable::parse($match['start_date'])->setTimezone($timezone),
+                        'url' => $this->baseUrl().$matchesPath.'/'.rawurlencode($match['slug']),
+                    ];
+                })
+                ->all();
+        } catch (Throwable $exception) {
+            Log::warning('bo3.gg complete daily schedule connection failed.', [
+                'game' => $game,
+                'date' => $date,
+                'type' => $exception::class,
+            ]);
+
+            return [];
+        }
     }
 
     /**
@@ -233,6 +341,11 @@ class Bo3ScheduleService
     private function baseUrl(): string
     {
         return rtrim((string) config('services.bo3.base_url'), '/');
+    }
+
+    private function apiUrl(): string
+    {
+        return rtrim((string) config('services.bo3.api_url', 'https://api.bo3.gg/api/v1'), '/');
     }
 
     /**
