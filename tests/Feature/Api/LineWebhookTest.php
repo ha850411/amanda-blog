@@ -88,15 +88,11 @@ class LineWebhookTest extends TestCase
 
             return $request->hasHeader('Authorization', 'Bearer test-token')
                 && $request['replyToken'] === 'reply-token'
-                && count($messages) === 2
+                && count($messages) === 1
                 && $messages[0] === [
                     'type' => 'image',
                     'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1440',
                     'previewImageUrl' => 'https://cdn.example.com/line-schedules/test/700',
-                ]
-                && $messages[1] === [
-                    'type' => 'text',
-                    'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s&date=2026-08-12',
                 ];
         });
     }
@@ -257,12 +253,12 @@ class LineWebhookTest extends TestCase
             }
 
             return $request['to'] === 'U123'
+                && count($request['messages']) === 1
                 && $request['messages'][0] === [
                     'type' => 'image',
                     'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1440',
                     'previewImageUrl' => 'https://cdn.example.com/line-schedules/test/700',
-                ]
-                && $request['messages'][1]['type'] === 'text';
+                ];
         });
     }
 
@@ -490,12 +486,9 @@ class LineWebhookTest extends TestCase
 
         $response->assertOk()->assertExactJson([]);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.line.me/v2/bot/message/reply'
+            && count($request['messages']) === 1
             && $request['messages'][0]['type'] === 'image'
-            && $request['messages'][0]['originalContentUrl'] === 'https://cdn.example.com/line-schedules/test/1440'
-            && $request['messages'][1] === [
-                'type' => 'text',
-                'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s&period',
-            ]);
+            && $request['messages'][0]['originalContentUrl'] === 'https://cdn.example.com/line-schedules/test/1440');
     }
 
     public function test_log_viewer_requires_admin_authentication(): void
@@ -728,10 +721,8 @@ class LineWebhookTest extends TestCase
 
             return $request->hasHeader('Authorization', 'Bearer test-token')
                 && $request['replyToken'] === 'reply-token'
-                && count($messages) === 2
-                && $messages[0]['type'] === 'image'
-                && $messages[1]['type'] === 'text'
-                && str_contains($messages[1]['text'], '完整賽程｜https://bo3.gg/matches/current?tiers=s&date=2026-08-12');
+                && count($messages) === 1
+                && $messages[0]['type'] === 'image';
         });
     }
 

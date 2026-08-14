@@ -30,7 +30,7 @@ class LineMessagingService
     public function replyImageWithLink(
         string $replyToken,
         string $baseUrl,
-        string $linkUrl,
+        ?string $linkUrl = null,
     ): array {
         return $this->sendReply($replyToken, $this->imageMessages($baseUrl, $linkUrl));
     }
@@ -45,7 +45,7 @@ class LineMessagingService
     public function pushImageWithLink(
         string $to,
         string $baseUrl,
-        string $linkUrl,
+        ?string $linkUrl = null,
     ): array {
         return $this->sendPush($to, $this->imageMessages($baseUrl, $linkUrl));
     }
@@ -60,7 +60,7 @@ class LineMessagingService
     }
 
     /** @return array<int, array<string, mixed>> */
-    private function imageMessages(string $baseUrl, string $linkUrl): array
+    private function imageMessages(string $baseUrl, ?string $linkUrl = null): array
     {
         $baseUrl = rtrim($baseUrl, '/');
 
@@ -69,10 +69,6 @@ class LineMessagingService
                 'type' => 'image',
                 'originalContentUrl' => $baseUrl.'/1440',
                 'previewImageUrl' => $baseUrl.'/700',
-            ],
-            [
-                'type' => 'text',
-                'text' => mb_substr('完整賽程｜'.$linkUrl, 0, 5000),
             ],
         ];
     }
