@@ -3,8 +3,11 @@
 namespace App\Services;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
@@ -28,7 +31,7 @@ class Bo3ScheduleService
         $tiers = $this->normalizeTiers($tiers);
         $dateString = $date->format('Y-m-d');
         $tierKey = $tiers === [] ? 'all' : implode(',', $tiers);
-        $cacheKey = "bo3-schedule:v3:{$game}:{$dateString}:{$tierKey}";
+        $cacheKey = "bo3-schedule:v4:{$game}:{$dateString}:{$tierKey}";
 
         try {
             $cached = Cache::get($cacheKey);
@@ -147,10 +150,89 @@ class Bo3ScheduleService
             }
         }
 
+        $structuredMatches = $this->enrichMissingFormats($structuredMatches);
+
         return collect($structuredMatches)
             ->sortBy('start_at')
             ->values()
             ->all();
+    }
+
+    /**
+     * Live rows replace the visible BO type with the current score. The match
+     * detail endpoint keeps exposing bo_type for both upcoming and live games,
+     * so use it only for rows whose format could not be read from the page.
+     *
+     * @param  array<int, array<string, mixed>>  $matches
+     * @return array<int, array<string, mixed>>
+     */
+    private function enrichMissingFormats(array $matches): array
+    {
+        $slugs = [];
+
+        foreach ($matches as $index => $match) {
+            if (preg_match('/^BO\d+$/i', trim((string) ($match['format'] ?? ''))) === 1) {
+                continue;
+            }
+
+            $slug = $this->matchSlug((string) ($match['url'] ?? ''));
+
+            if ($slug !== null) {
+                $slugs[$index] = $slug;
+            }
+        }
+
+        if ($slugs === []) {
+            return $matches;
+        }
+
+        $uniqueSlugs = array_values(array_unique($slugs));
+        $responses = Http::pool(function (Pool $pool) use ($uniqueSlugs): void {
+            foreach ($uniqueSlugs as $slug) {
+                $pool->as($slug)
+                    ->acceptJson()
+                    ->withUserAgent('AmandaBlogLineBot/1.0')
+                    ->timeout((int) config('services.bo3.timeout_seconds', 10))
+                    ->get($this->baseUrl().'/api/v1/matches/'.rawurlencode($slug));
+            }
+        }, 5);
+
+        foreach ($slugs as $index => $slug) {
+            $response = $responses[$slug] ?? null;
+
+            if (! $response instanceof Response || ! $response->successful()) {
+                Log::warning('bo3.gg match format request failed.', [
+                    'slug' => $slug,
+                    'status' => $response instanceof Response ? $response->status() : null,
+                ]);
+
+                continue;
+            }
+
+            $boType = $response->json('bo_type');
+
+            if (is_numeric($boType) && (int) $boType > 0) {
+                $matches[$index]['format'] = 'BO'.(int) $boType;
+            }
+        }
+
+        return $matches;
+    }
+
+    private function matchSlug(string $url): ?string
+    {
+        $path = (string) parse_url($url, PHP_URL_PATH);
+
+        if (! preg_match('~/matches/([^/]+)$~', rtrim($path, '/'), $matches)) {
+            return null;
+        }
+
+        return rawurldecode($matches[1]);
+    }
+
+    private function baseUrl(): string
+    {
+        return rtrim((string) config('services.bo3.base_url'), '/');
     }
 
     /**
