@@ -125,9 +125,9 @@ class LineWebhookTest extends TestCase
         $this->assertNotNull($reply);
         $this->assertStringContainsString('近期交手｜Team Alpha 2 勝・Team Beta 1 勝（近 3 場，小局 5：2）', $reply->text);
         $this->assertStringContainsString('交手明細｜', $reply->text);
-        $this->assertStringContainsString('・08/01 BO3  2：0（Team Alpha 勝）', $reply->text);
-        $this->assertStringContainsString('・07/01 BO3  1：2（Team Beta 勝）', $reply->text);
-        $this->assertStringContainsString('・06/01 BO3  2：0（Team Alpha 勝）', $reply->text);
+        $this->assertStringContainsString('・2026/08/01 BO3  2：0（Team Alpha 勝）', $reply->text);
+        $this->assertStringContainsString('・2026/07/01 BO3  1：2（Team Beta 勝）', $reply->text);
+        $this->assertStringContainsString('・2026/06/01 BO3  2：0（Team Alpha 勝）', $reply->text);
         $this->assertSame([
             'sample_size' => 3,
             'history_total' => 9,
@@ -136,9 +136,9 @@ class LineWebhookTest extends TestCase
             'team1_games' => 5,
             'team2_games' => 2,
             'series' => [
-                ['date' => '08/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
-                ['date' => '07/01', 'format' => 'BO3', 'team1_score' => 1, 'team2_score' => 2, 'winner' => 'team2'],
-                ['date' => '06/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                ['date' => '2026/08/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                ['date' => '2026/07/01', 'format' => 'BO3', 'team1_score' => 1, 'team2_score' => 2, 'winner' => 'team2'],
+                ['date' => '2026/06/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
             ],
         ], $reply->imageData['matches'][0]['h2h']);
     }

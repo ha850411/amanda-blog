@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 9;
+    private const CACHE_VERSION = 10;
 
     private const CARD_HEIGHT = 180;
 
@@ -470,13 +470,13 @@ class LineScheduleImageService
             return;
         }
 
-        $t1Abbr = $this->teamAbbreviation((string) $match['team1']);
-        $t2Abbr = $this->teamAbbreviation((string) $match['team2']);
+        $winColor = '#4ade80';
+        $loseColor = '#f87171';
+        $centerX = $x + 242;
 
         foreach ($series as $index => $result) {
             $rowY = $y + 40 + ($index * 25);
             $team1Won = ($result['winner'] ?? null) === 'team1';
-            $winnerAbbr = $team1Won ? $t1Abbr : $t2Abbr;
 
             if ($index % 2 === 0) {
                 $draw->setFillColor('#0f172a');
@@ -484,7 +484,7 @@ class LineScheduleImageService
                 $draw->roundRectangle($x - 4, $rowY, $x + $width + 4, $rowY + 22, 4, 4);
             }
 
-            // Date
+            // 1. Date with Western Year (e.g. 2026/08/01)
             $draw->setFillColor('#94a3b8');
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
@@ -492,66 +492,55 @@ class LineScheduleImageService
             $draw->setFontWeight(500);
             $draw->annotation($x, $rowY + 16, (string) ($result['date'] ?? '—'));
 
-            // Format Badge
+            // 2. Format Badge (e.g. BO3 / BO5)
             $draw->setFillColor('#1e293b');
             $draw->setStrokeColor('#334155');
             $draw->setStrokeWidth(1);
-            $draw->roundRectangle($x + 38, $rowY + 2, $x + 72, $rowY + 20, 3, 3);
+            $draw->roundRectangle($x + 72, $rowY + 2, $x + 104, $rowY + 20, 3, 3);
             $draw->setFillColor('#cbd5e1');
             $draw->setStrokeColor('none');
             $draw->setFontSize(10);
             $draw->setFontWeight(700);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + 55, $rowY + 15, (string) ($result['format'] ?? 'BO?'));
+            $draw->annotation($x + 88, $rowY + 15, (string) ($result['format'] ?? 'BO?'));
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
-            // Team 1 Abbreviation (Right-aligned)
-            $draw->setFillColor($team1Won ? '#38bdf8' : '#64748b');
+            // 3. Team 1 Name (Right-aligned to score, Green if won, Red if lost)
+            $draw->setFillColor($team1Won ? $winColor : $loseColor);
             $draw->setFontSize(12);
-            $draw->setFontWeight($team1Won ? 700 : 400);
-            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-            $draw->annotation($x + 138, $rowY + 16, $t1Abbr);
-
-            // Team 1 Score (Right-aligned)
-            $draw->setFillColor($team1Won ? '#38bdf8' : '#94a3b8');
-            $draw->setFontSize(13);
             $draw->setFontWeight($team1Won ? 700 : 500);
             $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-            $draw->annotation($x + 166, $rowY + 16, (string) ($result['team1_score'] ?? 0));
+            $team1Text = $this->fitText($image, $draw, (string) $match['team1'], 96, 9);
+            $draw->annotation($centerX - 28, $rowY + 16, $team1Text);
 
-            // Colon separator
-            $draw->setFillColor('#475569');
+            // 4. Team 1 Score (Right-aligned)
+            $draw->setFillColor($team1Won ? $winColor : $loseColor);
+            $draw->setFontSize(13);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+            $draw->annotation($centerX - 8, $rowY + 16, (string) ($result['team1_score'] ?? 0));
+
+            // 5. Colon separator
+            $draw->setFillColor('#64748b');
             $draw->setFontSize(12);
             $draw->setFontWeight(400);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + 178, $rowY + 16, ':');
+            $draw->annotation($centerX, $rowY + 16, ':');
 
-            // Team 2 Score (Left-aligned)
-            $draw->setFillColor(! $team1Won ? '#38bdf8' : '#94a3b8');
+            // 6. Team 2 Score (Left-aligned)
+            $draw->setFillColor(! $team1Won ? $winColor : $loseColor);
             $draw->setFontSize(13);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            $draw->annotation($centerX + 8, $rowY + 16, (string) ($result['team2_score'] ?? 0));
+
+            // 7. Team 2 Name (Left-aligned to score, Green if won, Red if lost)
+            $draw->setFillColor(! $team1Won ? $winColor : $loseColor);
+            $draw->setFontSize(12);
             $draw->setFontWeight(! $team1Won ? 700 : 500);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-            $draw->annotation($x + 190, $rowY + 16, (string) ($result['team2_score'] ?? 0));
-
-            // Team 2 Abbreviation (Left-aligned)
-            $draw->setFillColor(! $team1Won ? '#38bdf8' : '#64748b');
-            $draw->setFontSize(12);
-            $draw->setFontWeight(! $team1Won ? 700 : 400);
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-            $draw->annotation($x + 218, $rowY + 16, $t2Abbr);
-
-            // Winner Badge
-            $draw->setFillColor($theme['badge_bg']);
-            $draw->setStrokeColor($theme['accent']);
-            $draw->setStrokeWidth(1);
-            $draw->roundRectangle($x + $width - 62, $rowY + 2, $x + $width, $rowY + 20, 4, 4);
-            $draw->setFillColor($theme['badge_text']);
-            $draw->setStrokeColor('none');
-            $draw->setFontSize(10);
-            $draw->setFontWeight(700);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + $width - 31, $rowY + 15, $winnerAbbr.' 勝');
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            $team2Text = $this->fitText($image, $draw, (string) $match['team2'], 96, 9);
+            $draw->annotation($centerX + 28, $rowY + 16, $team2Text);
         }
     }
 

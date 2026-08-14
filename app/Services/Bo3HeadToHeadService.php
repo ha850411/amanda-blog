@@ -336,7 +336,7 @@ class Bo3HeadToHeadService
         try {
             return CarbonImmutable::parse($value)
                 ->setTimezone((string) config('services.bo3.timezone', 'Asia/Taipei'))
-                ->format('m/d');
+                ->format('Y/m/d');
         } catch (Throwable) {
             return '日期不明';
         }

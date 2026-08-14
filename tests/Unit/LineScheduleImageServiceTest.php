@@ -46,11 +46,11 @@ class LineScheduleImageServiceTest extends TestCase
                 'team1_games' => 7,
                 'team2_games' => 5,
                 'series' => [
-                    ['date' => '08/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
-                    ['date' => '07/15', 'format' => 'BO5', 'team1_score' => 2, 'team2_score' => 3, 'winner' => 'team2'],
-                    ['date' => '06/20', 'format' => 'BO1', 'team1_score' => 1, 'team2_score' => 0, 'winner' => 'team1'],
-                    ['date' => '05/09', 'format' => 'BO3', 'team1_score' => 1, 'team2_score' => 2, 'winner' => 'team2'],
-                    ['date' => '04/18', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                    ['date' => '2026/08/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                    ['date' => '2026/07/15', 'format' => 'BO5', 'team1_score' => 2, 'team2_score' => 3, 'winner' => 'team2'],
+                    ['date' => '2026/06/20', 'format' => 'BO1', 'team1_score' => 1, 'team2_score' => 0, 'winner' => 'team1'],
+                    ['date' => '2026/05/09', 'format' => 'BO3', 'team1_score' => 1, 'team2_score' => 2, 'winner' => 'team2'],
+                    ['date' => '2026/04/18', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
                 ],
             ],
         ], range(1, 3));
