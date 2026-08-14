@@ -67,7 +67,7 @@ class LineMessagingService
         return [
             [
                 'type' => 'image',
-                'originalContentUrl' => $baseUrl.'/1040',
+                'originalContentUrl' => $baseUrl.'/1440',
                 'previewImageUrl' => $baseUrl.'/700',
             ],
             [

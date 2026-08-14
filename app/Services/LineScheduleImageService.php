@@ -10,9 +10,9 @@ use RuntimeException;
 
 class LineScheduleImageService
 {
-    private const CANVAS_WIDTH = 1040;
+    private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 7;
+    private const CACHE_VERSION = 8;
 
     private const CARD_HEIGHT = 180;
 
@@ -23,7 +23,7 @@ class LineScheduleImageService
     private const CANVAS_BOTTOM_PADDING = 34;
 
     /** @var array<int, int> */
-    private const IMAGE_WIDTHS = [700, 1040];
+    private const IMAGE_WIDTHS = [700, 1440];
 
     private const GAME_THEMES = [
         'cs' => [
@@ -76,7 +76,14 @@ class LineScheduleImageService
      *             team1_wins: int,
      *             team2_wins: int,
      *             team1_games: int,
-     *             team2_games: int
+     *             team2_games: int,
+     *             series?: array<int, array{
+     *                 date: string,
+     *                 format: string,
+     *                 team1_score: int,
+     *                 team2_score: int,
+     *                 winner: 'team1'|'team2'
+     *             }>
      *         }
      *     }>
      * }  $data
@@ -91,7 +98,7 @@ class LineScheduleImageService
         $hash = hash('sha256', json_encode([self::CACHE_VERSION, $data, $linkUrl], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
         $directory = 'line-schedules/'.$hash;
 
-        if (! $disk->exists($directory.'/1040')) {
+        if (! $disk->exists($directory.'/1440')) {
             $image = $this->render($data);
 
             foreach (self::IMAGE_WIDTHS as $width) {
@@ -121,7 +128,7 @@ class LineScheduleImageService
     private function render(array $data): Imagick
     {
         $matches = array_slice($data['matches'], 0, 10);
-        $canvasHeight = $this->canvasHeight(count($matches));
+        $canvasHeight = $this->canvasHeight($matches);
         $image = new Imagick;
         $image->newImage(self::CANVAS_WIDTH, $canvasHeight, '#090d16', 'png');
         $image->setImageColorspace(Imagick::COLORSPACE_SRGB);
@@ -135,33 +142,35 @@ class LineScheduleImageService
         $draw->setFillColor('#f8fafc');
         $draw->setFontSize(40);
         $draw->setFontWeight(700);
-        $draw->annotation(46, 64, $this->fitText($image, $draw, $data['title'], 760, 32));
+        $draw->annotation(46, 64, $this->fitText($image, $draw, $data['title'], 1120, 32));
 
         // Header Subtitle
         $draw->setFillColor('#94a3b8');
         $draw->setFontSize(21);
         $draw->setFontWeight(400);
-        $draw->annotation(48, 104, $this->fitText($image, $draw, $data['subtitle'], 760, 17));
+        $draw->annotation(48, 104, $this->fitText($image, $draw, $data['subtitle'], 1120, 17));
 
         // Top Right Count Badge
         $count = count($matches);
         $headerTheme = $this->themeForGame($data['game'] ?? null);
         $draw->setFillColor($headerTheme['accent']);
-        $draw->roundRectangle(852, 36, 994, 92, 28, 28);
+        $draw->roundRectangle(1252, 36, 1394, 92, 28, 28);
         $draw->setFillColor('#ffffff');
         $draw->setFontSize(22);
         $draw->setFontWeight(700);
         $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-        $draw->annotation(923, 72, $count.' 場');
+        $draw->annotation(1323, 72, $count.' 場');
         $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
-        $cardWidth = 952;
+        $mainWidth = 952;
+        $cardWidth = 1352;
         $left = 44;
         $iconsToDraw = [];
 
-        foreach ($matches as $index => $match) {
+        $y = self::CARDS_TOP;
+
+        foreach ($matches as $match) {
             $x = $left;
-            $y = self::CARDS_TOP + ($index * (self::CARD_HEIGHT + self::CARD_GAP));
             $matchGame = $match['game'] ?? $data['game'] ?? null;
             $theme = $this->themeForGame($matchGame);
 
@@ -230,7 +239,7 @@ class LineScheduleImageService
             $draw->setFontWeight(400);
             $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
             $tournamentText = $this->fitText($image, $draw, (string) $match['tournament'], 440, 13);
-            $draw->annotation($x + $cardWidth - 22, $y + 34, $tournamentText);
+            $draw->annotation($x + $mainWidth - 22, $y + 34, $tournamentText);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
             // Card Middle Row: Symmetrical Team 1 & Team 2 Boxes
@@ -326,24 +335,22 @@ class LineScheduleImageService
             $draw->setFontWeight(400);
             $draw->annotation($x + 24, $y + 154, $statusText);
 
-            $h2h = $match['h2h'] ?? null;
+            // Right-side H2H panel keeps historical series separate from the
+            // current matchup and uses the same left/right team order.
+            $draw->setStrokeColor('#263650');
+            $draw->setStrokeWidth(1);
+            $draw->line($x + $mainWidth, $y + 14, $x + $mainWidth, $y + self::CARD_HEIGHT - 14);
+            $this->drawH2hPanel(
+                $image,
+                $draw,
+                $x + $mainWidth + 18,
+                $y,
+                $cardWidth - $mainWidth - 36,
+                $match,
+                $theme,
+            );
 
-            if (is_array($h2h)) {
-                $h2hText = sprintf(
-                    'H2H 近%d場 · %d勝–%d勝 · 小局%d:%d',
-                    $h2h['sample_size'],
-                    $h2h['team1_wins'],
-                    $h2h['team2_wins'],
-                    $h2h['team1_games'],
-                    $h2h['team2_games'],
-                );
-                $draw->setFillColor('#94a3b8');
-                $draw->setFontSize(14);
-                $draw->setFontWeight(500);
-                $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-                $draw->annotation($x + $cardWidth - 24, $y + 154, $h2hText);
-                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-            }
+            $y += self::CARD_HEIGHT + self::CARD_GAP;
         }
 
         $image->drawImage($draw);
@@ -364,12 +371,128 @@ class LineScheduleImageService
         return $image;
     }
 
-    private function canvasHeight(int $matchCount): int
+    /** @param array<int, array<string, mixed>> $matches */
+    private function canvasHeight(array $matches): int
     {
         return self::CARDS_TOP
-            + ($matchCount * self::CARD_HEIGHT)
-            + (max(0, $matchCount - 1) * self::CARD_GAP)
+            + (count($matches) * self::CARD_HEIGHT)
+            + (max(0, count($matches) - 1) * self::CARD_GAP)
             + self::CANVAS_BOTTOM_PADDING;
+    }
+
+    /**
+     * @param  array<string, mixed>  $match
+     * @param  array{accent: string, badge_bg: string, badge_text: string, label: string}  $theme
+     */
+    private function drawH2hPanel(
+        Imagick $image,
+        ImagickDraw $draw,
+        int $x,
+        int $y,
+        int $width,
+        array $match,
+        array $theme,
+    ): void {
+        $h2h = $match['h2h'] ?? null;
+
+        $draw->setFillColor('#cbd5e1');
+        $draw->setStrokeColor('none');
+        $draw->setStrokeWidth(0);
+        $draw->setFontSize(14);
+        $draw->setFontWeight(700);
+        $draw->annotation($x, $y + 29, is_array($h2h) ? 'H2H 近'.$h2h['sample_size'].'場' : 'H2H');
+
+        if (! is_array($h2h)) {
+            $draw->setFillColor('#64748b');
+            $draw->setFontSize(14);
+            $draw->setFontWeight(400);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation($x + (int) round($width / 2), $y + 100, '暫無近期交手資料');
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            return;
+        }
+
+        $summary = sprintf(
+            '%d勝–%d勝 · 小局 %d:%d',
+            $h2h['team1_wins'],
+            $h2h['team2_wins'],
+            $h2h['team1_games'],
+            $h2h['team2_games'],
+        );
+        $draw->setFillColor('#94a3b8');
+        $draw->setFontSize(12);
+        $draw->setFontWeight(500);
+        $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+        $draw->annotation($x + $width, $y + 28, $summary);
+        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+        $series = array_slice(is_array($h2h['series'] ?? null) ? $h2h['series'] : [], 0, 5);
+
+        if ($series === []) {
+            $draw->setFillColor('#64748b');
+            $draw->setFontSize(14);
+            $draw->setFontWeight(400);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation($x + (int) round($width / 2), $y + 100, '暫無逐場明細');
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            return;
+        }
+
+        foreach ($series as $index => $result) {
+            $rowY = $y + 41 + ($index * 26);
+            $team1Won = ($result['winner'] ?? null) === 'team1';
+            $resultLabel = $team1Won ? '左勝' : '右勝';
+
+            if ($index % 2 === 0) {
+                $draw->setFillColor('#101827');
+                $draw->setStrokeColor('none');
+                $draw->roundRectangle($x - 6, $rowY, $x + $width + 6, $rowY + 24, 5, 5);
+            }
+
+            $draw->setFillColor('#94a3b8');
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->setFontSize(12);
+            $draw->setFontWeight(500);
+            $draw->annotation($x, $rowY + 17, (string) ($result['date'] ?? '—'));
+            $draw->annotation($x + 48, $rowY + 17, (string) ($result['format'] ?? 'BO?'));
+
+            $draw->setFillColor($team1Won ? $theme['accent'] : '#94a3b8');
+            $draw->setFontSize(12);
+            $draw->setFontWeight($team1Won ? 700 : 400);
+            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+            $draw->annotation($x + 184, $rowY + 17, $this->fitText($image, $draw, (string) $match['team1'], 88, 10));
+
+            $draw->setFillColor('#e2e8f0');
+            $draw->setFontSize(13);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation(
+                $x + 207,
+                $rowY + 17,
+                (int) ($result['team1_score'] ?? 0).'–'.(int) ($result['team2_score'] ?? 0),
+            );
+
+            $draw->setFillColor(! $team1Won ? $theme['accent'] : '#94a3b8');
+            $draw->setFontSize(12);
+            $draw->setFontWeight(! $team1Won ? 700 : 400);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            $draw->annotation($x + 230, $rowY + 17, $this->fitText($image, $draw, (string) $match['team2'], 82, 10));
+
+            $draw->setFillColor($theme['badge_bg']);
+            $draw->setStrokeColor($theme['accent']);
+            $draw->setStrokeWidth(1);
+            $draw->roundRectangle($x + $width - 40, $rowY + 4, $x + $width, $rowY + 21, 8, 8);
+            $draw->setFillColor($theme['badge_text']);
+            $draw->setStrokeColor('none');
+            $draw->setFontSize(10);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation($x + $width - 20, $rowY + 16, $resultLabel);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+        }
     }
 
     private function fitText(Imagick $image, ImagickDraw $draw, string $text, int $maxWidth, int $minimumFontSize): string

@@ -24,7 +24,14 @@ final readonly class LineBotReply
      *             team1_wins: int,
      *             team2_wins: int,
      *             team1_games: int,
-     *             team2_games: int
+     *             team2_games: int,
+     *             series?: array<int, array{
+     *                 date: string,
+     *                 format: string,
+     *                 team1_score: int,
+     *                 team2_score: int,
+     *                 winner: 'team1'|'team2'
+     *             }>
      *         }
      *     }>
      * }|null  $imageData

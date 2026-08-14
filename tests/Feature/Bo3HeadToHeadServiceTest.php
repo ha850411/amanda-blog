@@ -40,11 +40,11 @@ class Bo3HeadToHeadServiceTest extends TestCase
             'https://api.bo3.gg/api/v1/matches*' => Http::response([
                 'total' => ['count' => 15],
                 'results' => [
-                    $this->h2hResult(17801, 17842, 0, 2),
-                    $this->h2hResult(17801, 17842, 2, 3),
-                    $this->h2hResult(17842, 17801, 1, 3),
-                    $this->h2hResult(17801, 17842, 0, 2),
-                    $this->h2hResult(17801, 17842, 0, 2),
+                    $this->h2hResult(17801, 17842, 0, 2, '2026-08-10T12:00:00+00:00', 3),
+                    $this->h2hResult(17801, 17842, 2, 3, '2026-07-20T12:00:00+00:00', 5),
+                    $this->h2hResult(17842, 17801, 1, 3, '2026-06-03T12:00:00+00:00', 5),
+                    $this->h2hResult(17801, 17842, 0, 2, '2026-05-18T12:00:00+00:00', 3),
+                    $this->h2hResult(17801, 17842, 0, 2, '2026-04-02T12:00:00+00:00', 3),
                 ],
             ]),
         ]);
@@ -63,6 +63,13 @@ class Bo3HeadToHeadServiceTest extends TestCase
             'team2_wins' => 1,
             'team1_games' => 10,
             'team2_games' => 5,
+            'series' => [
+                ['date' => '08/10', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                ['date' => '07/20', 'format' => 'BO5', 'team1_score' => 3, 'team2_score' => 2, 'winner' => 'team1'],
+                ['date' => '06/03', 'format' => 'BO5', 'team1_score' => 1, 'team2_score' => 3, 'winner' => 'team2'],
+                ['date' => '05/18', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                ['date' => '04/02', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+            ],
         ], $matches[0]['h2h']);
 
         Http::assertSent(function ($request): bool {
@@ -103,14 +110,22 @@ class Bo3HeadToHeadServiceTest extends TestCase
     }
 
     /** @return array<string, int|string> */
-    private function h2hResult(int $team1Id, int $team2Id, int $team1Score, int $team2Score): array
-    {
+    private function h2hResult(
+        int $team1Id,
+        int $team2Id,
+        int $team1Score,
+        int $team2Score,
+        string $startDate,
+        int $boType,
+    ): array {
         return [
             'status' => 'finished',
             'team1_id' => $team1Id,
             'team2_id' => $team2Id,
             'team1_score' => $team1Score,
             'team2_score' => $team2Score,
+            'start_date' => $startDate,
+            'bo_type' => $boType,
         ];
     }
 }

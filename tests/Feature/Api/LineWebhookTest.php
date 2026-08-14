@@ -91,7 +91,7 @@ class LineWebhookTest extends TestCase
                 && count($messages) === 2
                 && $messages[0] === [
                     'type' => 'image',
-                    'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1040',
+                    'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1440',
                     'previewImageUrl' => 'https://cdn.example.com/line-schedules/test/700',
                 ]
                 && $messages[1] === [
@@ -113,9 +113,9 @@ class LineWebhookTest extends TestCase
             'https://api.bo3.gg/api/v1/matches*' => Http::response([
                 'total' => ['count' => 9],
                 'results' => [
-                    ['team1_id' => 20, 'team2_id' => 10, 'team1_score' => 0, 'team2_score' => 2],
-                    ['team1_id' => 10, 'team2_id' => 20, 'team1_score' => 1, 'team2_score' => 2],
-                    ['team1_id' => 10, 'team2_id' => 20, 'team1_score' => 2, 'team2_score' => 0],
+                    ['team1_id' => 20, 'team2_id' => 10, 'team1_score' => 0, 'team2_score' => 2, 'start_date' => '2026-08-01T12:00:00+00:00', 'bo_type' => 3],
+                    ['team1_id' => 10, 'team2_id' => 20, 'team1_score' => 1, 'team2_score' => 2, 'start_date' => '2026-07-01T12:00:00+00:00', 'bo_type' => 3],
+                    ['team1_id' => 10, 'team2_id' => 20, 'team1_score' => 2, 'team2_score' => 0, 'start_date' => '2026-06-01T12:00:00+00:00', 'bo_type' => 3],
                 ],
             ]),
         ]);
@@ -132,6 +132,11 @@ class LineWebhookTest extends TestCase
             'team2_wins' => 1,
             'team1_games' => 5,
             'team2_games' => 2,
+            'series' => [
+                ['date' => '08/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                ['date' => '07/01', 'format' => 'BO3', 'team1_score' => 1, 'team2_score' => 2, 'winner' => 'team2'],
+                ['date' => '06/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+            ],
         ], $reply->imageData['matches'][0]['h2h']);
     }
 
@@ -251,7 +256,7 @@ class LineWebhookTest extends TestCase
             return $request['to'] === 'U123'
                 && $request['messages'][0] === [
                     'type' => 'image',
-                    'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1040',
+                    'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1440',
                     'previewImageUrl' => 'https://cdn.example.com/line-schedules/test/700',
                 ]
                 && $request['messages'][1]['type'] === 'text';
@@ -483,7 +488,7 @@ class LineWebhookTest extends TestCase
         $response->assertOk()->assertExactJson([]);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.line.me/v2/bot/message/reply'
             && $request['messages'][0]['type'] === 'image'
-            && $request['messages'][0]['originalContentUrl'] === 'https://cdn.example.com/line-schedules/test/1040'
+            && $request['messages'][0]['originalContentUrl'] === 'https://cdn.example.com/line-schedules/test/1440'
             && $request['messages'][1] === [
                 'type' => 'text',
                 'text' => '完整賽程｜https://bo3.gg/lol/matches/current?tiers=s&period',

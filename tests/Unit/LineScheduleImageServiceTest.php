@@ -45,6 +45,13 @@ class LineScheduleImageServiceTest extends TestCase
                 'team2_wins' => 2,
                 'team1_games' => 7,
                 'team2_games' => 5,
+                'series' => [
+                    ['date' => '08/01', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                    ['date' => '07/15', 'format' => 'BO5', 'team1_score' => 2, 'team2_score' => 3, 'winner' => 'team2'],
+                    ['date' => '06/20', 'format' => 'BO1', 'team1_score' => 1, 'team2_score' => 0, 'winner' => 'team1'],
+                    ['date' => '05/09', 'format' => 'BO3', 'team1_score' => 1, 'team2_score' => 2, 'winner' => 'team2'],
+                    ['date' => '04/18', 'format' => 'BO3', 'team1_score' => 2, 'team2_score' => 0, 'winner' => 'team1'],
+                ],
             ],
         ], range(1, 3));
 
@@ -55,7 +62,7 @@ class LineScheduleImageServiceTest extends TestCase
         ], 'https://bo3.gg/valorant/matches/current');
 
         $files = Storage::disk('schedule-images')->allFiles('line-schedules');
-        $originalPath = collect($files)->first(fn (string $path): bool => str_ends_with($path, '/1040'));
+        $originalPath = collect($files)->first(fn (string $path): bool => str_ends_with($path, '/1440'));
         $previewPath = collect($files)->first(fn (string $path): bool => str_ends_with($path, '/700'));
 
         $this->assertNotNull($originalPath);
@@ -66,10 +73,10 @@ class LineScheduleImageServiceTest extends TestCase
         $preview = new Imagick;
         $preview->readImageBlob(Storage::disk('schedule-images')->get($previewPath));
 
-        $this->assertSame(1040, $original->getImageWidth());
+        $this->assertSame(1440, $original->getImageWidth());
         $this->assertSame(750, $original->getImageHeight());
         $this->assertSame(700, $preview->getImageWidth());
-        $this->assertSame(505, $preview->getImageHeight());
+        $this->assertSame(365, $preview->getImageHeight());
         $this->assertSame(
             ['r' => 19, 'g' => 27, 'b' => 46, 'a' => 1],
             $original->getImagePixelColor(520, 145)->getColor(),

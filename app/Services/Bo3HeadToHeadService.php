@@ -68,7 +68,7 @@ class Bo3HeadToHeadService
                 ->format('Y-m-d');
             // Keep the scheduled team order in the key because the summary is
             // expressed as team1 versus team2, even when a past row is reversed.
-            $cacheKey = sprintf('bo3-h2h:v1:%d:%d-%d:%s', $disciplineId, $team1Id, $team2Id, $cutoff);
+            $cacheKey = sprintf('bo3-h2h:v2:%d:%d-%d:%s', $disciplineId, $team1Id, $team2Id, $cutoff);
 
             try {
                 $cached = Cache::get($cacheKey);
@@ -240,7 +240,15 @@ class Bo3HeadToHeadService
     }
 
     /**
-     * @return array{sample_size: int, history_total: int, team1_wins: int, team2_wins: int, team1_games: int, team2_games: int}|null
+     * @return array{
+     *     sample_size: int,
+     *     history_total: int,
+     *     team1_wins: int,
+     *     team2_wins: int,
+     *     team1_games: int,
+     *     team2_games: int,
+     *     series: array<int, array{date: string, format: string, team1_score: int, team2_score: int, winner: 'team1'|'team2'}>
+     * }|null
      */
     private function summarize(mixed $payload, int $team1Id, int $team2Id): ?array
     {
@@ -253,6 +261,7 @@ class Bo3HeadToHeadService
         $team2Wins = 0;
         $team1Games = 0;
         $team2Games = 0;
+        $series = [];
 
         foreach ($payload['results'] as $result) {
             if (! is_array($result)
@@ -284,9 +293,21 @@ class Bo3HeadToHeadService
 
             if ($score1 > $score2) {
                 $team1Wins++;
+                $winner = 'team1';
             } elseif ($score2 > $score1) {
                 $team2Wins++;
+                $winner = 'team2';
+            } else {
+                continue;
             }
+
+            $series[] = [
+                'date' => $this->formatMatchDate($result['start_date'] ?? null),
+                'format' => $this->formatBestOf($result['bo_type'] ?? null, $score1, $score2),
+                'team1_score' => $score1,
+                'team2_score' => $score2,
+                'winner' => $winner,
+            ];
         }
 
         if ($sampleSize === 0) {
@@ -302,7 +323,34 @@ class Bo3HeadToHeadService
             'team2_wins' => $team2Wins,
             'team1_games' => $team1Games,
             'team2_games' => $team2Games,
+            'series' => $series,
         ];
+    }
+
+    private function formatMatchDate(mixed $value): string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return '日期不明';
+        }
+
+        try {
+            return CarbonImmutable::parse($value)
+                ->setTimezone((string) config('services.bo3.timezone', 'Asia/Taipei'))
+                ->format('m/d');
+        } catch (Throwable) {
+            return '日期不明';
+        }
+    }
+
+    private function formatBestOf(mixed $value, int $team1Score, int $team2Score): string
+    {
+        if (is_numeric($value) && (int) $value > 0) {
+            return 'BO'.(int) $value;
+        }
+
+        $winningScore = max($team1Score, $team2Score);
+
+        return $winningScore > 0 ? 'BO'.(($winningScore * 2) - 1) : 'BO?';
     }
 
     private function matchSlug(string $url): ?string
