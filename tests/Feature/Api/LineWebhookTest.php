@@ -161,11 +161,14 @@ class LineWebhookTest extends TestCase
 
         $this->assertNotNull($reply);
         $this->assertStringContainsString('近期交手｜Future Team 1 勝・Next Team 1 勝（近 2 場，小局 2：3）', $reply->text);
-        $this->assertSame(2, $reply->imageData['matches'][0]['h2h']['sample_size']);
-        $this->assertSame(1, $reply->imageData['matches'][0]['h2h']['team1_wins']);
-        $this->assertSame(1, $reply->imageData['matches'][0]['h2h']['team2_wins']);
-        $this->assertSame(2, $reply->imageData['matches'][0]['h2h']['team1_games']);
-        $this->assertSame(3, $reply->imageData['matches'][0]['h2h']['team2_games']);
+        $futureMatch = collect($reply->imageData['matches'])
+            ->firstWhere('team1', 'Future Team');
+        $this->assertNotNull($futureMatch);
+        $this->assertSame(2, $futureMatch['h2h']['sample_size']);
+        $this->assertSame(1, $futureMatch['h2h']['team1_wins']);
+        $this->assertSame(1, $futureMatch['h2h']['team2_wins']);
+        $this->assertSame(2, $futureMatch['h2h']['team1_games']);
+        $this->assertSame(3, $futureMatch['h2h']['team2_games']);
     }
 
     public function test_webhook_verification_with_no_events_returns_ok(): void
@@ -392,7 +395,7 @@ class LineWebhookTest extends TestCase
 
             return $request['messages'][0] === [
                 'type' => 'text',
-                'text' => "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n查今天只顯示尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2",
+                'text' => "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n查今天顯示滾球中和尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2",
             ];
         });
     }
@@ -835,7 +838,7 @@ class LineWebhookTest extends TestCase
         }
     }
 
-    public function test_today_schedule_excludes_matches_that_have_already_started(): void
+    public function test_today_schedule_keeps_live_matches_and_excludes_finished_matches(): void
     {
         Http::fake([
             'https://bo3.gg/matches/current*' => Http::response($this->todayHtmlWithStartedAndUpcomingMatches(), 200),
@@ -845,10 +848,17 @@ class LineWebhookTest extends TestCase
 
         $this->assertNotNull($reply);
         $this->assertStringNotContainsString('Past Team', $reply->text);
-        $this->assertStringNotContainsString('Current Team', $reply->text);
+        $this->assertStringContainsString('Current Team', $reply->text);
+        $this->assertStringContainsString('【滾球】', $reply->text);
+        $this->assertStringContainsString('目前比分｜6：14', $reply->text);
         $this->assertStringContainsString('Future Team', $reply->text);
-        $this->assertCount(1, $reply->imageData['matches']);
-        $this->assertSame('10:00', $reply->imageData['matches'][0]['start_time']);
+        $this->assertCount(2, $reply->imageData['matches']);
+        $this->assertSame('09:00', $reply->imageData['matches'][0]['start_time']);
+        $this->assertTrue($reply->imageData['matches'][0]['is_live']);
+        $this->assertSame('6：14', $reply->imageData['matches'][0]['score']);
+        $this->assertSame('10:00', $reply->imageData['matches'][1]['start_time']);
+        $this->assertFalse($reply->imageData['matches'][1]['is_live']);
+        $this->assertNull($reply->imageData['matches'][1]['score']);
     }
 
     private function callWebhook(string $body, string $signature)
@@ -932,7 +942,14 @@ class LineWebhookTest extends TestCase
             ],
         ];
 
-        return '<html><script id="micro-markup" type="application/ld+json">'
+        return '<html><div class="table-row table-row--current">'
+            .'<a href="/matches/current-team-vs-live-team">'
+            .'<div class="team-name">Current Team</div>'
+            .'<div class="c-match-score">6 - 14</div>'
+            .'<div class="team-name">Live Team</div>'
+            .'<span class="bo-type">Bo3</span>'
+            .'</a><p class="tournament-name">Live Test League</p></div>'
+            .'<script id="micro-markup" type="application/ld+json">'
             .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
             .'</script></html>';
     }

@@ -11,6 +11,8 @@ final readonly class LineBotReply
      *     matches: array<int, array{
      *         start_time: string,
      *         format: string,
+     *         is_live?: bool,
+     *         score?: ?string,
      *         team1: string,
      *         team2: string,
      *         tournament: string,

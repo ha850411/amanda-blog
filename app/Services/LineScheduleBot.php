@@ -68,7 +68,8 @@ class LineScheduleBot
         if ($command['date']->isSameDay($now)) {
             $allMatches = array_values(array_filter(
                 $allMatches,
-                fn (array $match): bool => $match['start_at']->greaterThan($now),
+                fn (array $match): bool => ($match['is_live'] ?? false)
+                    || $match['start_at']->greaterThan($now),
             ));
         }
 
@@ -141,16 +142,22 @@ class LineScheduleBot
         foreach ($visibleMatches as $index => $match) {
             $lines[] = "\n──────────";
             $gameTag = $isMultiGame ? sprintf('【%s】', $match['game_label'] ?? '') : '';
+            $liveTag = ($match['is_live'] ?? false) ? '【滾球】' : '';
             $lines[] = sprintf(
-                "第 %d 場%s｜%s｜%s\n%s\nvs\n%s\n\n賽事｜%s",
+                "第 %d 場%s%s｜%s｜%s\n%s\nvs\n%s\n\n賽事｜%s",
                 $index + 1,
                 $gameTag,
+                $liveTag,
                 $match['start_at']->format('H:i'),
                 $match['format'],
                 $match['team1'],
                 $match['team2'],
                 $match['tournament'],
             );
+
+            if (($match['is_live'] ?? false) && ($match['score'] ?? null) !== null) {
+                $lines[] = '目前比分｜'.$match['score'];
+            }
 
             if ($match['odds'] === null) {
                 $lines[] = '獨贏賠率｜暫無盤口';
@@ -215,6 +222,8 @@ class LineScheduleBot
                         'game' => $match['game'] ?? ($command['games'][0] ?? null),
                         'start_time' => $match['start_at']->format('H:i'),
                         'format' => $match['format'],
+                        'is_live' => $match['is_live'] ?? false,
+                        'score' => $match['score'] ?? null,
                         'team1' => $match['team1'],
                         'team2' => $match['team2'],
                         'tournament' => $match['tournament'],
@@ -421,6 +430,6 @@ class LineScheduleBot
 
     private function help(): string
     {
-        return "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n查今天只顯示尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2";
+        return "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n查今天顯示滾球中和尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }

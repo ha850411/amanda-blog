@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 14;
+    private const CACHE_VERSION = 15;
 
     private const CARD_HEIGHT = 180;
 
@@ -95,6 +95,8 @@ class LineScheduleImageService
      *     matches: array<int, array{
      *         start_time: string,
      *         format: string,
+     *         is_live?: bool,
+     *         score?: ?string,
      *         team1: string,
      *         team2: string,
      *         tournament: string,
@@ -292,6 +294,36 @@ class LineScheduleImageService
             );
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
+            if ($match['is_live'] ?? false) {
+                $liveBadgeX = $formatBadgeX + $formatBadgeWidth + 10;
+                $liveBadgeWidth = 64;
+
+                $draw->setFillColor('#450a0a');
+                $draw->setStrokeColor('#ef4444');
+                $draw->setStrokeWidth(1.2);
+                $draw->roundRectangle(
+                    $liveBadgeX,
+                    $formatBadgeY,
+                    $liveBadgeX + $liveBadgeWidth,
+                    $formatBadgeY + $formatBadgeHeight,
+                    12,
+                    12,
+                );
+
+                $draw->setFillColor('#fca5a5');
+                $draw->setStrokeColor('none');
+                $draw->setStrokeWidth(0);
+                $draw->setFontSize(13);
+                $draw->setFontWeight(700);
+                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                $draw->annotation(
+                    $liveBadgeX + (int) round($liveBadgeWidth / 2),
+                    $formatBadgeY + 17,
+                    '滾球',
+                );
+                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            }
+
             // Tournament Name (Top Right)
             $draw->setFillColor('#94a3b8');
             $draw->setFontSize(16);
@@ -337,19 +369,24 @@ class LineScheduleImageService
             $draw->annotation($x + 377, $boxY + 44, $team1Odds);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
-            // Center VS Badge
-            $draw->setFillColor('#0d1524');
-            $draw->setStrokeColor('#293852');
+            // Center VS Badge / live score
+            $liveScore = ($match['is_live'] ?? false) && is_string($match['score'] ?? null)
+                ? $match['score']
+                : null;
+            $centerBadgeLeft = $liveScore !== null ? $x + 440 : $x + 452;
+            $centerBadgeRight = $liveScore !== null ? $x + 504 : $x + 492;
+            $draw->setFillColor($liveScore !== null ? '#450a0a' : '#0d1524');
+            $draw->setStrokeColor($liveScore !== null ? '#ef4444' : '#293852');
             $draw->setStrokeWidth(1);
-            $draw->roundRectangle($x + 452, $boxY + 17, $x + 492, $boxY + 57, 20, 20);
+            $draw->roundRectangle($centerBadgeLeft, $boxY + 17, $centerBadgeRight, $boxY + 57, 20, 20);
 
-            $draw->setFillColor('#94a3b8');
+            $draw->setFillColor($liveScore !== null ? '#fecaca' : '#94a3b8');
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->setFontSize(14);
+            $draw->setFontSize($liveScore !== null ? 15 : 14);
             $draw->setFontWeight(700);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + 472, $boxY + 42, 'VS');
+            $draw->annotation($x + 472, $boxY + 42, $liveScore ?? 'VS');
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
             // Team 2 Box (Right)

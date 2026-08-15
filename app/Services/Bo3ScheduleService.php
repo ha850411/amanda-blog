@@ -35,7 +35,7 @@ class Bo3ScheduleService
         $tiers = $this->normalizeTiers($tiers);
         $dateString = $date->format('Y-m-d');
         $tierKey = $tiers === [] ? 'all' : implode(',', $tiers);
-        $cacheKey = "bo3-schedule:v5:{$game}:{$dateString}:{$tierKey}";
+        $cacheKey = "bo3-schedule:v6:{$game}:{$dateString}:{$tierKey}";
 
         try {
             $cached = Cache::get($cacheKey);
@@ -130,6 +130,8 @@ class Bo3ScheduleService
                     'team2' => trim($teams[1] ?? ''),
                     'tournament' => $metadata[$path]['tournament'] ?? '未知賽事',
                     'format' => $metadata[$path]['format'] ?? '未知',
+                    'is_live' => $metadata[$path]['is_live'] ?? false,
+                    'score' => $metadata[$path]['score'] ?? null,
                     'start_at' => CarbonImmutable::parse($event['startDate'])->setTimezone($timezone),
                     'url' => (string) $event['url'],
                 ];
@@ -142,15 +144,15 @@ class Bo3ScheduleService
         // schedule table still contains those rows, so merge it in as a fallback.
         $tableMatches = $this->extractTableMatches($response->body(), $game, $date, $timezone);
         $knownMatches = collect($structuredMatches)
-            ->mapWithKeys(fn (array $match): array => [$this->matchKey($match) => true])
+            ->mapWithKeys(fn (array $match, int $index): array => [$this->matchKey($match) => $index])
             ->all();
 
         foreach ($tableMatches as $match) {
             $key = $this->matchKey($match);
 
-            if (! isset($knownMatches[$key])) {
+            if (! array_key_exists($key, $knownMatches)) {
                 $structuredMatches[] = $match;
-                $knownMatches[$key] = true;
+                $knownMatches[$key] = array_key_last($structuredMatches);
             }
         }
 
@@ -161,10 +163,17 @@ class Bo3ScheduleService
         foreach ($this->extractApiMatches($game, $date, $timezone, $tiers) as $match) {
             $key = $this->matchKey($match);
 
-            if (! isset($knownMatches[$key])) {
+            if (! array_key_exists($key, $knownMatches)) {
                 $structuredMatches[] = $match;
-                $knownMatches[$key] = true;
+                $knownMatches[$key] = array_key_last($structuredMatches);
+
+                continue;
             }
+
+            $index = $knownMatches[$key];
+            $structuredMatches[$index]['is_live'] = ($structuredMatches[$index]['is_live'] ?? false)
+                || ($match['is_live'] ?? false);
+            $structuredMatches[$index]['score'] ??= $match['score'] ?? null;
         }
 
         $structuredMatches = $this->enrichMissingFormats($structuredMatches);
@@ -250,6 +259,11 @@ class Bo3ScheduleService
                         'team2' => $team2,
                         'tournament' => $this->normalizeText((string) ($match['tournament']['name'] ?? '')) ?: '未知賽事',
                         'format' => $boType,
+                        'is_live' => $this->isLiveStatus($match['status'] ?? null),
+                        'score' => $this->scoreFromValues(
+                            $match['team1_score'] ?? null,
+                            $match['team2_score'] ?? null,
+                        ),
                         'start_at' => CarbonImmutable::parse($match['start_date'])->setTimezone($timezone),
                         'url' => $this->baseUrl().$matchesPath.'/'.rawurlencode($match['slug']),
                     ];
@@ -321,6 +335,19 @@ class Bo3ScheduleService
 
             if (is_numeric($boType) && (int) $boType > 0) {
                 $matches[$index]['format'] = 'BO'.(int) $boType;
+            }
+
+            if ($this->isLiveStatus($response->json('status'))) {
+                $matches[$index]['is_live'] = true;
+            }
+
+            $score = $this->scoreFromValues(
+                $response->json('team1_score'),
+                $response->json('team2_score'),
+            );
+
+            if ($score !== null && ($matches[$index]['score'] ?? null) === null) {
+                $matches[$index]['score'] = $score;
             }
         }
 
@@ -412,6 +439,8 @@ class Bo3ScheduleService
                 'team2' => $team2,
                 'tournament' => $this->normalizeText($tournament?->textContent ?? '') ?: '未知賽事',
                 'format' => mb_strtoupper($this->normalizeText($format?->textContent ?? '')) ?: '未知',
+                'is_live' => false,
+                'score' => null,
                 'start_at' => $startAt,
                 'url' => $url,
             ];
@@ -438,7 +467,7 @@ class Bo3ScheduleService
     }
 
     /**
-     * @return array<string, array{tournament: string, format: string}>
+     * @return array<string, array{tournament: string, format: string, is_live: bool, score: ?string}>
      */
     private function extractMatchMetadata(string $html): array
     {
@@ -463,16 +492,51 @@ class Bo3ScheduleService
             $path = (string) parse_url($matchLink->getAttribute('href'), PHP_URL_PATH);
             $name = preg_replace('/\s+/u', ' ', $tournament->textContent);
             preg_match('/Bo([1-5])/i', $row->textContent, $formatMatch);
+            $rowClasses = ' '.$this->normalizeText($row->getAttribute('class')).' ';
+            $isLive = str_contains($rowClasses, ' table-row--current ')
+                || str_contains($rowClasses, ' table-row--live ');
+            $scoreNode = $xpath->query(
+                './/*[contains(concat(" ", normalize-space(@class), " "), " c-match-score ")]',
+                $row,
+            )?->item(0);
 
             if ($path !== '' && trim($name ?? '') !== '') {
                 $result[$path] = [
                     'tournament' => trim($name),
                     'format' => isset($formatMatch[1]) ? 'BO'.$formatMatch[1] : '未知',
+                    'is_live' => $isLive,
+                    'score' => $isLive ? $this->normalizeScore($scoreNode?->textContent ?? '') : null,
                 ];
             }
         }
 
         return $result;
+    }
+
+    private function isLiveStatus(mixed $status): bool
+    {
+        return is_string($status)
+            && in_array(mb_strtolower(trim($status)), ['current', 'live', 'in_progress'], true);
+    }
+
+    private function scoreFromValues(mixed $team1Score, mixed $team2Score): ?string
+    {
+        if (! is_numeric($team1Score) || ! is_numeric($team2Score)) {
+            return null;
+        }
+
+        return (int) $team1Score.'：'.(int) $team2Score;
+    }
+
+    private function normalizeScore(string $score): ?string
+    {
+        $score = $this->normalizeText($score);
+
+        if (preg_match('/(\d+)\s*[-:：]\s*(\d+)/u', $score, $matches) !== 1) {
+            return null;
+        }
+
+        return (int) $matches[1].'：'.(int) $matches[2];
     }
 
     /**
