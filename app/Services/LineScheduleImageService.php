@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 16;
+    private const CACHE_VERSION = 17;
 
     private const CARD_HEIGHT = 180;
 
@@ -370,94 +370,8 @@ class LineScheduleImageService
             $draw->annotation($x + 377, $boxY + 44, $team1Odds);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
-            // Center VS Badge / Live Scores
-            $isLive = (bool) ($match['is_live'] ?? false);
-            $seriesScore = is_string($match['series_score'] ?? null) && trim($match['series_score']) !== ''
-                ? trim($match['series_score'])
-                : null;
-            $mapScore = is_string($match['score'] ?? null) && trim($match['score']) !== ''
-                ? trim($match['score'])
-                : null;
-
-            if ($isLive && ($seriesScore !== null || $mapScore !== null)) {
-                $hasBothScores = $seriesScore !== null && $mapScore !== null && $seriesScore !== $mapScore;
-
-                if ($hasBothScores) {
-                    $badgeLeft = $x + 437;
-                    $badgeRight = $x + 507;
-                    $badgeTop = $boxY + 11;
-                    $badgeBottom = $boxY + 63;
-
-                    $draw->setFillColor('#450a0a');
-                    $draw->setStrokeColor('#ef4444');
-                    $draw->setStrokeWidth(1.2);
-                    $draw->roundRectangle($badgeLeft, $badgeTop, $badgeRight, $badgeBottom, 8, 8);
-
-                    // Line 1: 大場比分
-                    $draw->setFillColor('#ffffff');
-                    $draw->setStrokeColor('none');
-                    $draw->setStrokeWidth(0);
-                    $draw->setFontSize(12);
-                    $draw->setFontWeight(700);
-                    $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-                    $draw->annotation($x + 472, $boxY + 31, '大場 '.$seriesScore);
-
-                    // Line 2: 小場比分
-                    $draw->setFillColor('#fca5a5');
-                    $draw->setFontSize(11);
-                    $draw->setFontWeight(700);
-                    $draw->annotation($x + 472, $boxY + 51, '小場 '.$mapScore);
-                    $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-                } else {
-                    $singleScore = $seriesScore !== null ? '大場 '.$seriesScore : '小場 '.$mapScore;
-                    $badgeLeft = $x + 438;
-                    $badgeRight = $x + 506;
-                    $badgeTop = $boxY + 17;
-                    $badgeBottom = $boxY + 57;
-
-                    $draw->setFillColor('#450a0a');
-                    $draw->setStrokeColor('#ef4444');
-                    $draw->setStrokeWidth(1.2);
-                    $draw->roundRectangle($badgeLeft, $badgeTop, $badgeRight, $badgeBottom, 10, 10);
-
-                    $draw->setFillColor('#fecaca');
-                    $draw->setStrokeColor('none');
-                    $draw->setStrokeWidth(0);
-                    $draw->setFontSize(13);
-                    $draw->setFontWeight(700);
-                    $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-                    $draw->annotation($x + 472, $boxY + 42, $singleScore);
-                    $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-                }
-            } elseif ($isLive) {
-                $draw->setFillColor('#450a0a');
-                $draw->setStrokeColor('#ef4444');
-                $draw->setStrokeWidth(1);
-                $draw->roundRectangle($x + 446, $boxY + 17, $x + 498, $boxY + 57, 10, 10);
-
-                $draw->setFillColor('#fca5a5');
-                $draw->setStrokeColor('none');
-                $draw->setStrokeWidth(0);
-                $draw->setFontSize(13);
-                $draw->setFontWeight(700);
-                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-                $draw->annotation($x + 472, $boxY + 42, 'LIVE');
-                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-            } else {
-                $draw->setFillColor('#0d1524');
-                $draw->setStrokeColor('#293852');
-                $draw->setStrokeWidth(1);
-                $draw->roundRectangle($x + 452, $boxY + 17, $x + 492, $boxY + 57, 20, 20);
-
-                $draw->setFillColor('#94a3b8');
-                $draw->setStrokeColor('none');
-                $draw->setStrokeWidth(0);
-                $draw->setFontSize(14);
-                $draw->setFontWeight(700);
-                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-                $draw->annotation($x + 472, $boxY + 42, 'VS');
-                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-            }
+            // Center VS Badge / Live Match Scoreboard Hub
+            $this->drawCenterMatchBadge($draw, $x, $boxY, $match);
 
             // Team 2 Box (Right)
             $team2BoxX = $x + 508;
@@ -969,6 +883,241 @@ class LineScheduleImageService
         }
 
         throw new RuntimeException('A Traditional Chinese font is required for LINE schedule images.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $match
+     */
+    private function drawCenterMatchBadge(
+        ImagickDraw $draw,
+        int $x,
+        int $boxY,
+        array $match,
+    ): void {
+        $isLive = (bool) ($match['is_live'] ?? false);
+        $seriesScore = is_string($match['series_score'] ?? null) && trim($match['series_score']) !== ''
+            ? trim($match['series_score'])
+            : null;
+        $mapScore = is_string($match['score'] ?? null) && trim($match['score']) !== ''
+            ? trim($match['score'])
+            : null;
+
+        $centerX = $x + 472;
+
+        if (! $isLive) {
+            // Not live: Standard VS badge
+            $draw->setFillColor('#0d1524');
+            $draw->setStrokeColor('#293852');
+            $draw->setStrokeWidth(1);
+            $draw->roundRectangle($centerX - 20, $boxY + 17, $centerX + 20, $boxY + 57, 20, 20);
+
+            $draw->setFillColor('#94a3b8');
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->setFontSize(14);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation($centerX, $boxY + 42, 'VS');
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            return;
+        }
+
+        // Live Match Hub Container
+        $hubLeft = $centerX - 38;
+        $hubRight = $centerX + 38;
+        $hubTop = $boxY + 8;
+        $hubBottom = $boxY + 66;
+
+        $draw->setFillColor('#220707');
+        $draw->setStrokeColor('#dc2626');
+        $draw->setStrokeWidth(1.2);
+        $draw->roundRectangle($hubLeft, $hubTop, $hubRight, $hubBottom, 10, 10);
+
+        // Parse series score digits if available
+        $parsedSeries = $this->parseScorePair($seriesScore);
+
+        $hasBoth = $seriesScore !== null && $mapScore !== null && $seriesScore !== $mapScore;
+
+        if ($hasBoth && $parsedSeries !== null) {
+            [$team1Wins, $team2Wins] = $parsedSeries;
+            $reqWins = $this->bestOfWinsRequired($match['format'] ?? null);
+
+            // 1. Draw Map Win Indicator Pips above score digits
+            $this->drawMapPips($draw, $centerX - 16, $boxY + 15, $team1Wins, $reqWins);
+            $this->drawMapPips($draw, $centerX + 16, $boxY + 15, $team2Wins, $reqWins);
+
+            // 2. Scoreboard Digits (Series Score)
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->setFontSize(19);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+
+            // Team 1 score digit
+            $draw->setFillColor($team1Wins > $team2Wins ? '#ffffff' : ($team1Wins < $team2Wins ? '#94a3b8' : '#e2e8f0'));
+            $draw->annotation($centerX - 16, $boxY + 36, (string) $team1Wins);
+
+            // Colon separator
+            $draw->setFillColor('#ef4444');
+            $draw->setFontSize(14);
+            $draw->annotation($centerX, $boxY + 35, ':');
+
+            // Team 2 score digit
+            $draw->setFontSize(19);
+            $draw->setFillColor($team2Wins > $team1Wins ? '#ffffff' : ($team2Wins < $team1Wins ? '#94a3b8' : '#e2e8f0'));
+            $draw->annotation($centerX + 16, $boxY + 36, (string) $team2Wins);
+
+            // 3. Live Round / Map Capsule (Mini Pill with glowing live dot)
+            $pillLeft = $centerX - 31;
+            $pillRight = $centerX + 31;
+            $pillTop = $boxY + 44;
+            $pillBottom = $boxY + 60;
+
+            $draw->setFillColor('#3d0d0d');
+            $draw->setStrokeColor('#991b1b');
+            $draw->setStrokeWidth(0.8);
+            $draw->roundRectangle($pillLeft, $pillTop, $pillRight, $pillBottom, 8, 8);
+
+            // Live dot
+            $draw->setFillColor('#ef4444');
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->circle($centerX - 18, $boxY + 52, $centerX - 18 + 2.5, $boxY + 52);
+
+            // Map round score text
+            $draw->setFillColor('#fca5a5');
+            $draw->setFontSize(11);
+            $draw->setFontWeight(700);
+            $draw->annotation($centerX + 5, $boxY + 56, $mapScore);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            return;
+        }
+
+        // Single score fallback
+        $primaryScore = $seriesScore ?? $mapScore;
+        $scoreLabel = $seriesScore !== null ? 'SERIES' : 'LIVE';
+
+        if ($primaryScore !== null) {
+            $parsed = $this->parseScorePair($primaryScore);
+            if ($parsed !== null) {
+                [$s1, $s2] = $parsed;
+                $draw->setStrokeColor('none');
+                $draw->setStrokeWidth(0);
+                $draw->setFontSize(19);
+                $draw->setFontWeight(700);
+                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+
+                $draw->setFillColor($s1 > $s2 ? '#ffffff' : ($s1 < $s2 ? '#94a3b8' : '#e2e8f0'));
+                $draw->annotation($centerX - 16, $boxY + 36, (string) $s1);
+
+                $draw->setFillColor('#ef4444');
+                $draw->setFontSize(14);
+                $draw->annotation($centerX, $boxY + 35, ':');
+
+                $draw->setFontSize(19);
+                $draw->setFillColor($s2 > $s1 ? '#ffffff' : ($s2 < $s1 ? '#94a3b8' : '#e2e8f0'));
+                $draw->annotation($centerX + 16, $boxY + 36, (string) $s2);
+            } else {
+                $draw->setFillColor('#ffffff');
+                $draw->setStrokeColor('none');
+                $draw->setFontSize(14);
+                $draw->setFontWeight(700);
+                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                $draw->annotation($centerX, $boxY + 36, $primaryScore);
+            }
+
+            // Live tag pill
+            $pillLeft = $centerX - 24;
+            $pillRight = $centerX + 24;
+            $pillTop = $boxY + 44;
+            $pillBottom = $boxY + 60;
+
+            $draw->setFillColor('#3d0d0d');
+            $draw->setStrokeColor('#991b1b');
+            $draw->setStrokeWidth(0.8);
+            $draw->roundRectangle($pillLeft, $pillTop, $pillRight, $pillBottom, 8, 8);
+
+            $draw->setFillColor('#ef4444');
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->circle($centerX - 13, $boxY + 52, $centerX - 13 + 2, $boxY + 52);
+
+            $draw->setFillColor('#fca5a5');
+            $draw->setFontSize(9);
+            $draw->setFontWeight(700);
+            $draw->annotation($centerX + 5, $boxY + 55, $scoreLabel);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            return;
+        }
+
+        // Live with no scores
+        $draw->setFillColor('#fca5a5');
+        $draw->setStrokeColor('none');
+        $draw->setStrokeWidth(0);
+        $draw->setFontSize(14);
+        $draw->setFontWeight(700);
+        $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+        $draw->annotation($centerX, $boxY + 42, 'LIVE');
+        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+    }
+
+    /** @return array{0: int, 1: int}|null */
+    private function parseScorePair(?string $score): ?array
+    {
+        if (! is_string($score)) {
+            return null;
+        }
+
+        if (preg_match('/(\d+)\s*[-:：]\s*(\d+)/u', $score, $matches) !== 1) {
+            return null;
+        }
+
+        return [(int) $matches[1], (int) $matches[2]];
+    }
+
+    private function bestOfWinsRequired(?string $format): int
+    {
+        if (is_string($format) && preg_match('/BO(\d+)/i', $format, $matches) === 1) {
+            $bo = (int) $matches[1];
+            if ($bo === 5) {
+                return 3;
+            }
+            if ($bo === 7) {
+                return 4;
+            }
+            if ($bo === 1) {
+                return 1;
+            }
+        }
+
+        return 2; // Default for BO3 or unknown
+    }
+
+    private function drawMapPips(
+        ImagickDraw $draw,
+        int $centerX,
+        int $y,
+        int $wins,
+        int $totalRequired,
+    ): void {
+        $pipWidth = 5;
+        $pipHeight = 3;
+        $gap = 2;
+        $totalWidth = ($totalRequired * $pipWidth) + (($totalRequired - 1) * $gap);
+        $startX = $centerX - (int) round($totalWidth / 2);
+
+        for ($i = 0; $i < $totalRequired; $i++) {
+            $left = $startX + ($i * ($pipWidth + $gap));
+            $isWon = $i < $wins;
+
+            $draw->setFillColor($isWon ? '#ef4444' : '#334155');
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->roundRectangle($left, $y, $left + $pipWidth, $y + $pipHeight, 1.5, 1.5);
+        }
     }
 
     private function store(FilesystemAdapter $disk, string $path, string $contents): void

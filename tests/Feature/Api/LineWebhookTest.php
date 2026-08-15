@@ -850,7 +850,7 @@ class LineWebhookTest extends TestCase
         $this->assertStringNotContainsString('Past Team', $reply->text);
         $this->assertStringContainsString('Current Team', $reply->text);
         $this->assertStringContainsString('【滾球】', $reply->text);
-        $this->assertStringContainsString('目前比分｜大場 1：0｜小場 6：14', $reply->text);
+        $this->assertStringContainsString('目前比分｜1：0（當局 6：14）', $reply->text);
         $this->assertStringContainsString('Future Team', $reply->text);
         $this->assertCount(2, $reply->imageData['matches']);
         $this->assertSame('09:00', $reply->imageData['matches'][0]['start_time']);
