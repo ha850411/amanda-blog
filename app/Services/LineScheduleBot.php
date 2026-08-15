@@ -62,6 +62,16 @@ class LineScheduleBot
             return new LineBotReply('目前無法取得 bo3.gg 賽程，請稍後再試。');
         }
 
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+        $now = CarbonImmutable::now($timezone);
+
+        if ($command['date']->isSameDay($now)) {
+            $allMatches = array_values(array_filter(
+                $allMatches,
+                fn (array $match): bool => $match['start_at']->greaterThan($now),
+            ));
+        }
+
         if ($command['team'] !== null) {
             $allMatches = array_values(array_filter(
                 $allMatches,
@@ -222,12 +232,14 @@ class LineScheduleBot
      */
     private function parseCommand(string $message): ?array
     {
-        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs)\s+(今天|明天|後天|\d{1,2}\/\d{1,2})(?:\s+(.*))?$/iu', $message, $matches)) {
+        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs)(?:\s+(今天|明天|後天|\d{1,2}\/\d{1,2}))?(?:\s+(.*))?$/iu', $message, $matches)) {
             return null;
         }
 
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
-        $date = $this->parseDate($matches[2], $timezone);
+        $date = isset($matches[2]) && $matches[2] !== ''
+            ? $this->parseDate($matches[2], $timezone)
+            : CarbonImmutable::now($timezone)->startOfDay();
 
         if ($date === null) {
             return null;
@@ -409,6 +421,6 @@ class LineScheduleBot
 
     private function help(): string
     {
-        return "指令格式：\n!賽程 今天\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2";
+        return "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n查今天只顯示尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }

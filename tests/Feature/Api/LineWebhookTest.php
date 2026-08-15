@@ -363,7 +363,7 @@ class LineWebhookTest extends TestCase
 
             return $request['messages'][0] === [
                 'type' => 'text',
-                'text' => "指令格式：\n!賽程 今天\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2",
+                'text' => "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n查今天只顯示尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2",
             ];
         });
     }
@@ -788,6 +788,39 @@ class LineWebhookTest extends TestCase
         $this->assertSame('綜合賽程｜08/11｜S Tier', $reply->imageData['title']);
     }
 
+    public function test_bare_schedule_commands_default_to_today(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
+        ]);
+
+        foreach (['!match', '!lol', '!val', '!cs'] as $command) {
+            $reply = app(LineScheduleBot::class)->reply($command);
+
+            $this->assertNotNull($reply, "{$command} should be recognized.");
+            $this->assertStringContainsString('｜08/11｜S Tier', $reply->text);
+        }
+    }
+
+    public function test_today_schedule_excludes_matches_that_have_already_started(): void
+    {
+        Http::fake([
+            'https://bo3.gg/matches/current*' => Http::response($this->todayHtmlWithStartedAndUpcomingMatches(), 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!cs 08/11');
+
+        $this->assertNotNull($reply);
+        $this->assertStringNotContainsString('Past Team', $reply->text);
+        $this->assertStringNotContainsString('Current Team', $reply->text);
+        $this->assertStringContainsString('Future Team', $reply->text);
+        $this->assertCount(1, $reply->imageData['matches']);
+        $this->assertSame('10:00', $reply->imageData['matches'][0]['start_time']);
+    }
+
     private function callWebhook(string $body, string $signature)
     {
         return $this->call(
@@ -839,6 +872,37 @@ class LineWebhookTest extends TestCase
             .'<div class="table-row table-row--upcoming">'
             .'<a href="/lol/matches/alpha-vs-beta">Team AlphaBo3Team Beta</a><p class="tournament-name">LCK 2026 Summer</p></div>'
             .'<script id="micro-markup" type="application/ld+json">'
+            .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+            .'</script></html>';
+    }
+
+    private function todayHtmlWithStartedAndUpcomingMatches(): string
+    {
+        $events = [
+            [
+                '@context' => 'https://schema.org',
+                '@type' => 'SportsEvent',
+                'name' => 'Past Team vs Old Team',
+                'url' => 'https://bo3.gg/matches/past-team-vs-old-team',
+                'startDate' => '2026-08-11T00:00:00.000+00:00',
+            ],
+            [
+                '@context' => 'https://schema.org',
+                '@type' => 'SportsEvent',
+                'name' => 'Current Team vs Live Team',
+                'url' => 'https://bo3.gg/matches/current-team-vs-live-team',
+                'startDate' => '2026-08-11T01:00:00.000+00:00',
+            ],
+            [
+                '@context' => 'https://schema.org',
+                '@type' => 'SportsEvent',
+                'name' => 'Future Team vs Next Team',
+                'url' => 'https://bo3.gg/matches/future-team-vs-next-team',
+                'startDate' => '2026-08-11T02:00:00.000+00:00',
+            ],
+        ];
+
+        return '<html><script id="micro-markup" type="application/ld+json">'
             .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
             .'</script></html>';
     }
