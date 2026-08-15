@@ -139,6 +139,35 @@ class LineWebhookTest extends TestCase
         ], $reply->imageData['matches'][0]['h2h']);
     }
 
+    public function test_cs_schedule_reply_includes_head_to_head_api_summary(): void
+    {
+        Http::fake([
+            'https://bo3.gg/matches/current*' => Http::response($this->todayHtmlWithStartedAndUpcomingMatches(), 200),
+            'https://api.bo3.gg/api/v1/matches/future-team-vs-next-team' => Http::response([
+                'team1_id' => 30,
+                'team2_id' => 40,
+                'discipline_id' => 1,
+            ]),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response([
+                'total' => ['count' => 2],
+                'results' => [
+                    ['team1_id' => 30, 'team2_id' => 40, 'team1_score' => 2, 'team2_score' => 1, 'start_date' => '2026-05-01T12:00:00+00:00', 'bo_type' => 3],
+                    ['team1_id' => 40, 'team2_id' => 30, 'team1_score' => 2, 'team2_score' => 0, 'start_date' => '2026-03-01T12:00:00+00:00', 'bo_type' => 3],
+                ],
+            ]),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!cs 08/11');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('近期交手｜Future Team 1 勝・Next Team 1 勝（近 2 場，小局 2：3）', $reply->text);
+        $this->assertSame(2, $reply->imageData['matches'][0]['h2h']['sample_size']);
+        $this->assertSame(1, $reply->imageData['matches'][0]['h2h']['team1_wins']);
+        $this->assertSame(1, $reply->imageData['matches'][0]['h2h']['team2_wins']);
+        $this->assertSame(2, $reply->imageData['matches'][0]['h2h']['team1_games']);
+        $this->assertSame(3, $reply->imageData['matches'][0]['h2h']['team2_games']);
+    }
+
     public function test_webhook_verification_with_no_events_returns_ok(): void
     {
         Http::fake();
@@ -512,7 +541,8 @@ class LineWebhookTest extends TestCase
         $this->assertStringContainsString('完整賽程｜https://bo3.gg/matches/current?tiers=s&period', $reply);
         $this->assertSame(1, substr_count($reply, 'https://bo3.gg/'));
 
-        Http::assertSent(fn ($request): bool => $request['date'] === '2026-08-11'
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/matches/current')
+            && $request['date'] === '2026-08-11'
             && $request['tiers'] === 's');
     }
 

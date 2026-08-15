@@ -125,6 +125,47 @@ class Bo3HeadToHeadServiceTest extends TestCase
             && $request['filter']['matches.team_ids']['contains'] === '6916,7030');
     }
 
+    public function test_it_enriches_cs_head_to_head_results(): void
+    {
+        Http::fake([
+            'https://api.bo3.gg/api/v1/matches/the-mongolz-vs-natus-vincere-15-08-2026' => Http::response([
+                'team1_id' => 1234,
+                'team2_id' => 5678,
+                'discipline_id' => 1,
+            ]),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response([
+                'total' => ['count' => 3],
+                'results' => [
+                    $this->h2hResult(1234, 5678, 2, 1, '2026-03-10T12:00:00+00:00', 3),
+                    $this->h2hResult(5678, 1234, 2, 0, '2025-11-20T12:00:00+00:00', 3),
+                    $this->h2hResult(1234, 5678, 2, 0, '2025-08-01T12:00:00+00:00', 3),
+                ],
+            ]),
+        ]);
+
+        $matches = app(Bo3HeadToHeadService::class)->enrich([[
+            'game' => 'cs',
+            'team1' => 'The MongolZ',
+            'team2' => 'Natus Vincere',
+            'url' => 'https://bo3.gg/matches/the-mongolz-vs-natus-vincere-15-08-2026',
+        ]]);
+
+        $this->assertSame(3, $matches[0]['h2h']['sample_size']);
+        $this->assertSame(3, $matches[0]['h2h']['history_total']);
+        $this->assertSame(2, $matches[0]['h2h']['team1_wins']);
+        $this->assertSame(1, $matches[0]['h2h']['team2_wins']);
+        $this->assertSame(4, $matches[0]['h2h']['team1_games']);
+        $this->assertSame(3, $matches[0]['h2h']['team2_games']);
+        $this->assertCount(3, $matches[0]['h2h']['series']);
+        $this->assertSame('2026/03/10', $matches[0]['h2h']['series'][0]['date']);
+        $this->assertSame('BO3', $matches[0]['h2h']['series'][0]['format']);
+        $this->assertSame('team1', $matches[0]['h2h']['series'][0]['winner']);
+
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://api.bo3.gg/api/v1/matches?')
+            && $request['filter']['matches.discipline_id']['eq'] === 1
+            && $request['filter']['matches.team_ids']['contains'] === '1234,5678');
+    }
+
     public function test_it_leaves_unsupported_and_unavailable_head_to_head_data_optional(): void
     {
         Http::fake([
@@ -133,8 +174,8 @@ class Bo3HeadToHeadServiceTest extends TestCase
 
         $matches = app(Bo3HeadToHeadService::class)->enrich([
             [
-                'game' => 'cs',
-                'url' => 'https://bo3.gg/matches/cs-match',
+                'game' => 'dota',
+                'url' => 'https://bo3.gg/dota/matches/dota-match',
             ],
             [
                 'game' => 'lol',

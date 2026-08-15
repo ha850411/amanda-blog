@@ -28,7 +28,7 @@ class Bo3HeadToHeadService
         foreach ($matches as $index => $match) {
             $matches[$index]['h2h'] = null;
 
-            if (! in_array(($match['game'] ?? null), ['lol', 'valorant'], true)) {
+            if (! in_array(($match['game'] ?? null), ['lol', 'valorant', 'cs', 'cs2'], true)) {
                 continue;
             }
 
