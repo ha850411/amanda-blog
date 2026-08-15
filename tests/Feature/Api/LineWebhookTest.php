@@ -850,14 +850,16 @@ class LineWebhookTest extends TestCase
         $this->assertStringNotContainsString('Past Team', $reply->text);
         $this->assertStringContainsString('Current Team', $reply->text);
         $this->assertStringContainsString('【滾球】', $reply->text);
-        $this->assertStringContainsString('目前比分｜6：14', $reply->text);
+        $this->assertStringContainsString('目前比分｜大場 1：0｜小場 6：14', $reply->text);
         $this->assertStringContainsString('Future Team', $reply->text);
         $this->assertCount(2, $reply->imageData['matches']);
         $this->assertSame('09:00', $reply->imageData['matches'][0]['start_time']);
         $this->assertTrue($reply->imageData['matches'][0]['is_live']);
+        $this->assertSame('1：0', $reply->imageData['matches'][0]['series_score']);
         $this->assertSame('6：14', $reply->imageData['matches'][0]['score']);
         $this->assertSame('10:00', $reply->imageData['matches'][1]['start_time']);
         $this->assertFalse($reply->imageData['matches'][1]['is_live']);
+        $this->assertNull($reply->imageData['matches'][1]['series_score']);
         $this->assertNull($reply->imageData['matches'][1]['score']);
     }
 
@@ -945,6 +947,7 @@ class LineWebhookTest extends TestCase
         return '<html><div class="table-row table-row--current">'
             .'<a href="/matches/current-team-vs-live-team">'
             .'<div class="team-name">Current Team</div>'
+            .'<div class="c-match-series-score">1 - 0</div>'
             .'<div class="c-match-score">6 - 14</div>'
             .'<div class="team-name">Live Team</div>'
             .'<span class="bo-type">Bo3</span>'

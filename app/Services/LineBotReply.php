@@ -12,6 +12,7 @@ final readonly class LineBotReply
      *         start_time: string,
      *         format: string,
      *         is_live?: bool,
+     *         series_score?: ?string,
      *         score?: ?string,
      *         team1: string,
      *         team2: string,

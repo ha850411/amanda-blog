@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 15;
+    private const CACHE_VERSION = 16;
 
     private const CARD_HEIGHT = 180;
 
@@ -96,6 +96,7 @@ class LineScheduleImageService
      *         start_time: string,
      *         format: string,
      *         is_live?: bool,
+     *         series_score?: ?string,
      *         score?: ?string,
      *         team1: string,
      *         team2: string,
@@ -369,25 +370,94 @@ class LineScheduleImageService
             $draw->annotation($x + 377, $boxY + 44, $team1Odds);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
-            // Center VS Badge / live score
-            $liveScore = ($match['is_live'] ?? false) && is_string($match['score'] ?? null)
-                ? $match['score']
+            // Center VS Badge / Live Scores
+            $isLive = (bool) ($match['is_live'] ?? false);
+            $seriesScore = is_string($match['series_score'] ?? null) && trim($match['series_score']) !== ''
+                ? trim($match['series_score'])
                 : null;
-            $centerBadgeLeft = $liveScore !== null ? $x + 440 : $x + 452;
-            $centerBadgeRight = $liveScore !== null ? $x + 504 : $x + 492;
-            $draw->setFillColor($liveScore !== null ? '#450a0a' : '#0d1524');
-            $draw->setStrokeColor($liveScore !== null ? '#ef4444' : '#293852');
-            $draw->setStrokeWidth(1);
-            $draw->roundRectangle($centerBadgeLeft, $boxY + 17, $centerBadgeRight, $boxY + 57, 20, 20);
+            $mapScore = is_string($match['score'] ?? null) && trim($match['score']) !== ''
+                ? trim($match['score'])
+                : null;
 
-            $draw->setFillColor($liveScore !== null ? '#fecaca' : '#94a3b8');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize($liveScore !== null ? 15 : 14);
-            $draw->setFontWeight(700);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + 472, $boxY + 42, $liveScore ?? 'VS');
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            if ($isLive && ($seriesScore !== null || $mapScore !== null)) {
+                $hasBothScores = $seriesScore !== null && $mapScore !== null && $seriesScore !== $mapScore;
+
+                if ($hasBothScores) {
+                    $badgeLeft = $x + 437;
+                    $badgeRight = $x + 507;
+                    $badgeTop = $boxY + 11;
+                    $badgeBottom = $boxY + 63;
+
+                    $draw->setFillColor('#450a0a');
+                    $draw->setStrokeColor('#ef4444');
+                    $draw->setStrokeWidth(1.2);
+                    $draw->roundRectangle($badgeLeft, $badgeTop, $badgeRight, $badgeBottom, 8, 8);
+
+                    // Line 1: 大場比分
+                    $draw->setFillColor('#ffffff');
+                    $draw->setStrokeColor('none');
+                    $draw->setStrokeWidth(0);
+                    $draw->setFontSize(12);
+                    $draw->setFontWeight(700);
+                    $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                    $draw->annotation($x + 472, $boxY + 31, '大場 '.$seriesScore);
+
+                    // Line 2: 小場比分
+                    $draw->setFillColor('#fca5a5');
+                    $draw->setFontSize(11);
+                    $draw->setFontWeight(700);
+                    $draw->annotation($x + 472, $boxY + 51, '小場 '.$mapScore);
+                    $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+                } else {
+                    $singleScore = $seriesScore !== null ? '大場 '.$seriesScore : '小場 '.$mapScore;
+                    $badgeLeft = $x + 438;
+                    $badgeRight = $x + 506;
+                    $badgeTop = $boxY + 17;
+                    $badgeBottom = $boxY + 57;
+
+                    $draw->setFillColor('#450a0a');
+                    $draw->setStrokeColor('#ef4444');
+                    $draw->setStrokeWidth(1.2);
+                    $draw->roundRectangle($badgeLeft, $badgeTop, $badgeRight, $badgeBottom, 10, 10);
+
+                    $draw->setFillColor('#fecaca');
+                    $draw->setStrokeColor('none');
+                    $draw->setStrokeWidth(0);
+                    $draw->setFontSize(13);
+                    $draw->setFontWeight(700);
+                    $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                    $draw->annotation($x + 472, $boxY + 42, $singleScore);
+                    $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+                }
+            } elseif ($isLive) {
+                $draw->setFillColor('#450a0a');
+                $draw->setStrokeColor('#ef4444');
+                $draw->setStrokeWidth(1);
+                $draw->roundRectangle($x + 446, $boxY + 17, $x + 498, $boxY + 57, 10, 10);
+
+                $draw->setFillColor('#fca5a5');
+                $draw->setStrokeColor('none');
+                $draw->setStrokeWidth(0);
+                $draw->setFontSize(13);
+                $draw->setFontWeight(700);
+                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                $draw->annotation($x + 472, $boxY + 42, 'LIVE');
+                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            } else {
+                $draw->setFillColor('#0d1524');
+                $draw->setStrokeColor('#293852');
+                $draw->setStrokeWidth(1);
+                $draw->roundRectangle($x + 452, $boxY + 17, $x + 492, $boxY + 57, 20, 20);
+
+                $draw->setFillColor('#94a3b8');
+                $draw->setStrokeColor('none');
+                $draw->setStrokeWidth(0);
+                $draw->setFontSize(14);
+                $draw->setFontWeight(700);
+                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                $draw->annotation($x + 472, $boxY + 42, 'VS');
+                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            }
 
             // Team 2 Box (Right)
             $team2BoxX = $x + 508;

@@ -155,8 +155,17 @@ class LineScheduleBot
                 $match['tournament'],
             );
 
-            if (($match['is_live'] ?? false) && ($match['score'] ?? null) !== null) {
-                $lines[] = '目前比分｜'.$match['score'];
+            if ($match['is_live'] ?? false) {
+                $seriesScore = $match['series_score'] ?? null;
+                $mapScore = $match['score'] ?? null;
+
+                if ($seriesScore !== null && $mapScore !== null && $seriesScore !== $mapScore) {
+                    $lines[] = sprintf('目前比分｜大場 %s｜小場 %s', $seriesScore, $mapScore);
+                } elseif ($seriesScore !== null) {
+                    $lines[] = '目前比分｜大場 '.$seriesScore;
+                } elseif ($mapScore !== null) {
+                    $lines[] = '目前比分｜小場 '.$mapScore;
+                }
             }
 
             if ($match['odds'] === null) {
@@ -223,6 +232,7 @@ class LineScheduleBot
                         'start_time' => $match['start_at']->format('H:i'),
                         'format' => $match['format'],
                         'is_live' => $match['is_live'] ?? false,
+                        'series_score' => $match['series_score'] ?? null,
                         'score' => $match['score'] ?? null,
                         'team1' => $match['team1'],
                         'team2' => $match['team2'],

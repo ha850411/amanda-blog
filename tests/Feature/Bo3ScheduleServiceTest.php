@@ -24,7 +24,7 @@ class Bo3ScheduleServiceTest extends TestCase
                 'results' => [
                     $this->valorantApiMatch('joblife-vs-fnatic-1-14-08-2026', '2026-08-14T18:00:00.000+00:00', 'Joblife', 'Fnatic', 'VCT 2026: EMEA Stage 2'),
                     $this->valorantApiMatch('furia-esports-vs-2game-esports-14-08-2026', '2026-08-14T21:00:00.000+00:00', 'FURIA', '2GAME Esports', 'VCT 2026: Americas Stage 2'),
-                    $this->valorantApiMatch('cloud9-vs-fluxo-15-08-2026', '2026-08-15T00:00:00.000+00:00', 'Cloud9', 'Fluxo W7M', 'VCT 2026: Americas Stage 2', 'current', 6, 14),
+                    $this->valorantApiMatch('cloud9-vs-fluxo-15-08-2026', '2026-08-15T00:00:00.000+00:00', 'Cloud9', 'Fluxo W7M', 'VCT 2026: Americas Stage 2', 'current', 1, 0, '6：14'),
                 ],
             ], 200),
         ]);
@@ -43,6 +43,7 @@ class Bo3ScheduleServiceTest extends TestCase
         $this->assertSame(['Joblife', 'FURIA', 'Cloud9'], array_column($matches, 'team1'));
         $this->assertFalse($matches[0]['is_live']);
         $this->assertTrue($matches[2]['is_live']);
+        $this->assertSame('1：0', $matches[2]['series_score']);
         $this->assertSame('6：14', $matches[2]['score']);
         $this->assertSame(
             'https://bo3.gg/valorant/matches/joblife-vs-fnatic-1-14-08-2026',
@@ -92,6 +93,7 @@ class Bo3ScheduleServiceTest extends TestCase
         $this->assertSame('LEC 2026 Summer', $matches[0]['tournament']);
         $this->assertSame('BO3', $matches[0]['format']);
         $this->assertTrue($matches[0]['is_live']);
+        $this->assertSame('1：0', $matches[0]['series_score']);
         $this->assertSame('6：14', $matches[0]['score']);
 
         Http::assertSent(fn ($request): bool => $request->url()
@@ -152,6 +154,7 @@ class Bo3ScheduleServiceTest extends TestCase
         ?string $status = null,
         ?int $team1Score = null,
         ?int $team2Score = null,
+        ?string $roundScore = null,
     ): array {
         return [
             'slug' => $slug,
@@ -161,6 +164,7 @@ class Bo3ScheduleServiceTest extends TestCase
             'status' => $status,
             'team1_score' => $team1Score,
             'team2_score' => $team2Score,
+            'round_score' => $roundScore,
             'team1' => ['name' => $team1],
             'team2' => ['name' => $team2],
             'tournament' => ['name' => $tournament],

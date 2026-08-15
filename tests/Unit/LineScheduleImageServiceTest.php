@@ -35,6 +35,7 @@ class LineScheduleImageServiceTest extends TestCase
             'start_time' => sprintf('%02d:00', 14 + $number),
             'format' => 'BO3',
             'is_live' => $number === 1,
+            'series_score' => $number === 1 ? '1：0' : null,
             'score' => $number === 1 ? '6：14' : null,
             'team1' => 'Team '.$number.' Alpha',
             'team2' => 'Team '.$number.' Beta',
