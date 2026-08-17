@@ -56,6 +56,7 @@ class LineWebhookTest extends TestCase
 
         Http::fake([
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
         ]);
 
@@ -454,6 +455,7 @@ class LineWebhookTest extends TestCase
 
         Http::fake([
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
         ]);
 
@@ -492,6 +494,7 @@ class LineWebhookTest extends TestCase
 
         Http::fake([
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
         ]);
 
@@ -535,6 +538,7 @@ class LineWebhookTest extends TestCase
     {
         Http::fake([
             'https://bo3.gg/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
         ]);
 
         $reply = app(LineScheduleBot::class)->respond('!cs 今天');
@@ -553,6 +557,7 @@ class LineWebhookTest extends TestCase
     {
         Http::fake([
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
         ]);
 
         $messages = [
@@ -631,6 +636,7 @@ class LineWebhookTest extends TestCase
 
         Http::fake([
             'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
             'https://api.odds-api.io/v3/events*' => Http::response([[
                 'id' => 456,
                 'home' => 'Team Alpha',

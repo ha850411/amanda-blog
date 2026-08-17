@@ -80,6 +80,7 @@ class Bo3ScheduleServiceTest extends TestCase
                 'team1_score' => 1,
                 'team2_score' => 0,
             ], 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
         ]);
 
         $matches = app(Bo3ScheduleService::class)->forDate(
