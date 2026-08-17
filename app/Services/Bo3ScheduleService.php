@@ -5,7 +5,6 @@ namespace App\Services;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -14,7 +13,9 @@ use Throwable;
 class Bo3ScheduleService
 {
     private const DISCIPLINE_IDS = [
+        'cs' => 1,
         'valorant' => 2,
+        'lol' => 3,
     ];
 
     private const PATHS = [
@@ -34,32 +35,8 @@ class Bo3ScheduleService
 
         $tiers = $this->normalizeTiers($tiers);
         $dateString = $date->format('Y-m-d');
-        $tierKey = $tiers === [] ? 'all' : implode(',', $tiers);
-        $cacheKey = "bo3-schedule:v7:{$game}:{$dateString}:{$tierKey}";
 
-        try {
-            $cached = Cache::get($cacheKey);
-
-            if (is_array($cached)) {
-                return $cached;
-            }
-        } catch (Throwable $exception) {
-            report($exception);
-        }
-
-        $matches = $this->fetch($game, $dateString, $tiers);
-
-        try {
-            Cache::put(
-                $cacheKey,
-                $matches,
-                (int) config('services.bo3.cache_seconds', 300),
-            );
-        } catch (Throwable $exception) {
-            report($exception);
-        }
-
-        return $matches;
+        return $this->fetch($game, $dateString, $tiers);
     }
 
     public function filteredUrl(string $game, CarbonImmutable $date, array $tiers = ['s', 'a']): string

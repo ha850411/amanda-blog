@@ -100,6 +100,45 @@ class Bo3ScheduleServiceTest extends TestCase
             === 'https://bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026');
     }
 
+    public function test_lol_schedule_merges_the_complete_local_day_from_the_api(): void
+    {
+        config([
+            'services.bo3.base_url' => 'https://bo3.gg',
+            'services.bo3.api_url' => 'https://api.bo3.gg/api/v1',
+            'services.bo3.timezone' => 'Asia/Taipei',
+        ]);
+
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response('<html><script id="micro-markup" type="application/ld+json">[]</script></html>', 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response([
+                'total' => ['count' => 1],
+                'results' => [
+                    $this->valorantApiMatch('giantx-lol-vs-karmine-corp-lol-17-08-2026', '2026-08-17T17:15:00.000+00:00', 'GIANTX', 'Karmine Corp', 'LEC 2026 Summer'),
+                ],
+            ], 200),
+        ]);
+
+        $matches = app(Bo3ScheduleService::class)->forDate(
+            'lol',
+            CarbonImmutable::parse('2026-08-18', 'Asia/Taipei'),
+            ['s'],
+        );
+
+        $this->assertCount(1, $matches);
+        $this->assertSame('01:15', $matches[0]['start_at']->format('H:i'));
+        $this->assertSame('GIANTX', $matches[0]['team1']);
+        $this->assertSame('Karmine Corp', $matches[0]['team2']);
+        $this->assertSame('LEC 2026 Summer', $matches[0]['tournament']);
+
+        Http::assertSent(function ($request): bool {
+            if (! str_starts_with($request->url(), 'https://api.bo3.gg/api/v1/matches?')) {
+                return false;
+            }
+
+            return $request['filter']['matches.discipline_id']['eq'] === 3;
+        });
+    }
+
     private function liveScheduleHtml(): string
     {
         $events = [[
