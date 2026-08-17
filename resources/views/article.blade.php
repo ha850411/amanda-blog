@@ -40,9 +40,9 @@
                 <div class="col-md-8 col-12">
                     <article class="post my-4" itemscope itemtype="https://schema.org/BlogPosting">
                         <header class="title_area">
-                            <div class="title d-flex justify-content-between align-items-center">
-                                <h1 class="h4 m-0 py-3" itemprop="headline">{{ $article->title }}</h1>
-                                <time class="time py-2 text-secondary" datetime="{{ $article->created_at?->toIso8601String() }}" itemprop="datePublished">{{ $article->created_at?->format('Y/m/d') }}</time>
+                            <time class="time text-secondary" datetime="{{ $article->created_at?->toIso8601String() }}" itemprop="datePublished">{{ $article->created_at?->format('Y/m/d') }}</time>
+                            <div class="title">
+                                <h1 class="h4 m-0 py-2" itemprop="headline">{{ $article->title }}</h1>
                             </div>
                             @if ($article->tags && $article->tags->count() > 0)
                                 <div class="tag py-2 mb-4">
@@ -75,9 +75,9 @@
                     
                     <div class="post my-4">
                         <div class="title_area">
-                            <div class="title d-flex justify-content-between align-items-center">
-                                <h4 class="m-0 py-3">@{{ article.title }}</h4>
-                                <div class="time py-2 text-secondary">@{{ formatDate(article.created_at) }}</div>
+                            <div class="time text-secondary">@{{ formatDate(article.created_at) }}</div>
+                            <div class="title">
+                                <h4 class="m-0 py-2">@{{ article.title }}</h4>
                             </div>
                             <div class="tag py-2 mb-4" v-if="article.tags && article.tags.length > 0">
                                 <template v-for="(tag, tagIndex) in article.tags" :key="tagIndex">

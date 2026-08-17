@@ -43,9 +43,9 @@
                 <template v-if="articles.data.length > 0">
                     <div class="post my-4" v-for="(item, index) in articles.data" :key="index">
                         <div class="title_area">
-                            <div class="title d-flex justify-content-between align-items-center">
-                                <h4 class="m-0 py-3">@{{ item.title }}</h4>
-                                <div class="time py-2 text-secondary">@{{ formatDate(item.updated_at) }}</div>
+                            <div class="time text-secondary">@{{ formatDate(item.updated_at) }}</div>
+                            <div class="title">
+                                <h4 class="m-0 py-2">@{{ item.title }}</h4>
                             </div>
                             <div class="tag py-2 mb-4" v-if="item.tags && item.tags.length > 0">
                                 <template v-for="(tag, tagIndex) in item.tags" :key="tagIndex">
