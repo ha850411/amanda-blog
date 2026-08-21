@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 18;
+    private const CACHE_VERSION = 19;
 
     private const CARD_HEIGHT = 180;
 
@@ -937,15 +937,13 @@ class LineScheduleImageService
         // Parse series score digits if available
         $parsedSeries = $this->parseScorePair($seriesScore);
 
-        $hasBoth = $seriesScore !== null && $mapScore !== null && $seriesScore !== $mapScore;
-
-        if ($hasBoth && $parsedSeries !== null) {
+        if ($parsedSeries !== null) {
             [$team1Wins, $team2Wins] = $parsedSeries;
-            $reqWins = $this->bestOfWinsRequired($match['format'] ?? null);
+            $reqWins = $this->seriesWinSlots($match['format'] ?? null);
 
             // 1. Draw Map Win Indicator Pips above score digits
-            $this->drawMapPips($draw, $centerX - 18, $boxY + 13, $team1Wins, $reqWins);
-            $this->drawMapPips($draw, $centerX + 18, $boxY + 13, $team2Wins, $reqWins);
+            $this->drawMapPips($draw, $centerX - 18, $boxY + 13, $team1Wins, $reqWins, '#38bdf8');
+            $this->drawMapPips($draw, $centerX + 18, $boxY + 13, $team2Wins, $reqWins, '#fb7185');
 
             // 2. Scoreboard Digits (Series Score)
             $draw->setStrokeColor('none');
@@ -968,9 +966,12 @@ class LineScheduleImageService
             $draw->setFillColor($team2Wins > $team1Wins ? '#ffffff' : ($team2Wins < $team1Wins ? '#94a3b8' : '#e2e8f0'));
             $draw->annotation($centerX + 18, $boxY + 34, (string) $team2Wins);
 
-            // 3. Live Round / Map Capsule (Mini Pill with glowing live dot)
-            $pillLeft = $centerX - 35;
-            $pillRight = $centerX + 35;
+            // 3. Current-game score, or a series label while the next game
+            // has not started. The BO win indicators stay visible in both
+            // states so BO1 / BO3 / BO5 remain visually distinct.
+            $hasCurrentGameScore = $mapScore !== null;
+            $pillLeft = $centerX - ($hasCurrentGameScore ? 35 : 26);
+            $pillRight = $centerX + ($hasCurrentGameScore ? 35 : 26);
             $pillTop = $boxY + 44;
             $pillBottom = $boxY + 62;
 
@@ -983,13 +984,19 @@ class LineScheduleImageService
             $draw->setFillColor('#ef4444');
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->circle($centerX - 20, $boxY + 53, $centerX - 20 + 2.5, $boxY + 53);
+            $dotX = $centerX - ($hasCurrentGameScore ? 20 : 14);
+            $draw->circle($dotX, $boxY + 53, $dotX + 2.5, $boxY + 53);
 
-            // Map round score text
+            // Current-game score text. Keep this distinct from the series
+            // score above so LoL viewers can read both at a glance.
             $draw->setFillColor('#fca5a5');
-            $draw->setFontSize(11);
+            $draw->setFontSize(10);
             $draw->setFontWeight(700);
-            $draw->annotation($centerX + 5, $boxY + 57, $mapScore);
+            $draw->annotation(
+                $centerX + ($hasCurrentGameScore ? 7 : 5),
+                $boxY + 57,
+                $hasCurrentGameScore ? '局 '.$mapScore : 'SERIES',
+            );
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
             return;
@@ -1078,19 +1085,12 @@ class LineScheduleImageService
         return [(int) $matches[1], (int) $matches[2]];
     }
 
-    private function bestOfWinsRequired(?string $format): int
+    public function seriesWinSlots(mixed $format): int
     {
-        if (is_string($format) && preg_match('/BO(\d+)/i', $format, $matches) === 1) {
+        if (preg_match('/BO(\d+)/i', trim((string) $format), $matches) === 1) {
             $bo = (int) $matches[1];
-            if ($bo === 5) {
-                return 3;
-            }
-            if ($bo === 7) {
-                return 4;
-            }
-            if ($bo === 1) {
-                return 1;
-            }
+
+            return max(1, intdiv($bo, 2) + 1);
         }
 
         return 2; // Default for BO3 or unknown
@@ -1102,6 +1102,7 @@ class LineScheduleImageService
         int $y,
         int $wins,
         int $totalRequired,
+        string $wonColor,
     ): void {
         $pipWidth = 5;
         $pipHeight = 3;
@@ -1111,11 +1112,11 @@ class LineScheduleImageService
 
         for ($i = 0; $i < $totalRequired; $i++) {
             $left = $startX + ($i * ($pipWidth + $gap));
-            $isWon = $i < $wins;
+            $isWon = $i < min($wins, $totalRequired);
 
-            $draw->setFillColor($isWon ? '#ef4444' : '#334155');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
+            $draw->setFillColor($isWon ? $wonColor : '#1e293b');
+            $draw->setStrokeColor($isWon ? $wonColor : '#475569');
+            $draw->setStrokeWidth(0.7);
             $draw->roundRectangle($left, $y, $left + $pipWidth, $y + $pipHeight, 1.5, 1.5);
         }
     }

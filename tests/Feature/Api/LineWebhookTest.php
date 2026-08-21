@@ -869,6 +869,23 @@ class LineWebhookTest extends TestCase
         $this->assertNull($reply->imageData['matches'][1]['score']);
     }
 
+    public function test_live_reply_keeps_series_and_current_game_scores_when_the_numbers_match(): void
+    {
+        Http::fake([
+            'https://bo3.gg/matches/current*' => Http::response(
+                str_replace('6 - 14', '1 - 0', $this->todayHtmlWithStartedAndUpcomingMatches()),
+                200,
+            ),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!cs 08/11');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('目前比分｜1：0（當局 1：0）', $reply->text);
+        $this->assertSame('1：0', $reply->imageData['matches'][0]['series_score']);
+        $this->assertSame('1：0', $reply->imageData['matches'][0]['score']);
+    }
+
     private function callWebhook(string $body, string $signature)
     {
         return $this->call(

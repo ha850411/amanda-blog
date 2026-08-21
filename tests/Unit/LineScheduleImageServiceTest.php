@@ -173,4 +173,15 @@ class LineScheduleImageServiceTest extends TestCase
         $this->assertCount(5, array_unique($bgColors));
         $this->assertCount(5, array_unique($borderColors));
     }
+
+    public function test_series_score_uses_the_correct_number_of_win_slots_for_each_format(): void
+    {
+        $service = app(LineScheduleImageService::class);
+
+        $this->assertSame(1, $service->seriesWinSlots('BO1'));
+        $this->assertSame(2, $service->seriesWinSlots('BO3'));
+        $this->assertSame(3, $service->seriesWinSlots('BO5'));
+        $this->assertSame(4, $service->seriesWinSlots('BO7'));
+        $this->assertSame(2, $service->seriesWinSlots('未知'));
+    }
 }

@@ -159,7 +159,7 @@ class LineScheduleBot
                 $seriesScore = $match['series_score'] ?? null;
                 $mapScore = $match['score'] ?? null;
 
-                if ($seriesScore !== null && $mapScore !== null && $seriesScore !== $mapScore) {
+                if ($seriesScore !== null && $mapScore !== null) {
                     $lines[] = sprintf('目前比分｜%s（當局 %s）', $seriesScore, $mapScore);
                 } elseif ($seriesScore !== null) {
                     $lines[] = '目前比分｜'.$seriesScore;

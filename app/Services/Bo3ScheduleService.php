@@ -155,7 +155,7 @@ class Bo3ScheduleService
             $structuredMatches[$index]['score'] ??= $match['score'] ?? null;
         }
 
-        $structuredMatches = $this->enrichMissingFormats($structuredMatches);
+        $structuredMatches = $this->enrichLiveDetailsAndMissingFormats($structuredMatches);
 
         return collect($structuredMatches)
             ->sortBy('start_at')
@@ -231,10 +231,7 @@ class Bo3ScheduleService
                         : '未知';
 
                     $isLive = $this->isLiveStatus($match['status'] ?? null);
-                    $seriesScore = $this->scoreFromValues(
-                        $match['team1_score'] ?? null,
-                        $match['team2_score'] ?? null,
-                    );
+                    $seriesScore = $this->extractSeriesScoreFromApi($match);
                     $mapScore = $this->extractMapScoreFromApi($match);
 
                     $matchesPath = preg_replace('~/current$~', '', self::PATHS[$game]) ?? self::PATHS[$game];
@@ -265,22 +262,23 @@ class Bo3ScheduleService
     }
 
     /**
-     * Live rows replace the visible BO type with the current score. The match
-     * detail endpoint keeps exposing bo_type for both upcoming and live games,
-     * so use it only for rows whose format could not be read from the page.
+     * Live rows can omit the current-game score from the schedule response.
+     * Fetch details for incomplete live rows as well as rows whose BO format
+     * could not be read from the page.
      *
      * @param  array<int, array<string, mixed>>  $matches
      * @return array<int, array<string, mixed>>
      */
-    private function enrichMissingFormats(array $matches): array
+    private function enrichLiveDetailsAndMissingFormats(array $matches): array
     {
         $slugs = [];
 
         foreach ($matches as $index => $match) {
             $hasFormat = preg_match('/^BO\d+$/i', trim((string) ($match['format'] ?? ''))) === 1;
-            $isLiveWithoutSeriesScore = ($match['is_live'] ?? false) && ($match['series_score'] ?? null) === null;
+            $isLiveWithMissingScore = ($match['is_live'] ?? false)
+                && (($match['series_score'] ?? null) === null || ($match['score'] ?? null) === null);
 
-            if ($hasFormat && ! $isLiveWithoutSeriesScore) {
+            if ($hasFormat && ! $isLiveWithMissingScore) {
                 continue;
             }
 
@@ -328,10 +326,7 @@ class Bo3ScheduleService
                 $matches[$index]['is_live'] = true;
             }
 
-            $seriesScore = $this->scoreFromValues(
-                $response->json('team1_score'),
-                $response->json('team2_score'),
-            );
+            $seriesScore = $this->extractSeriesScoreFromApi($response->json());
 
             if ($seriesScore !== null) {
                 $matches[$index]['series_score'] ??= $seriesScore;
@@ -518,6 +513,19 @@ class Bo3ScheduleService
             return null;
         }
 
+        $liveUpdates = $data['live_updates'] ?? null;
+
+        if (is_array($liveUpdates)) {
+            $score = $this->scoreFromValues(
+                $liveUpdates['team_1']['game_score'] ?? null,
+                $liveUpdates['team_2']['game_score'] ?? null,
+            );
+
+            if ($score !== null) {
+                return $score;
+            }
+        }
+
         if (isset($data['current_map']) && is_array($data['current_map'])) {
             $score = $this->scoreFromValues(
                 $data['current_map']['team1_score'] ?? null,
@@ -554,6 +562,31 @@ class Bo3ScheduleService
         }
 
         return null;
+    }
+
+    private function extractSeriesScoreFromApi(mixed $data): ?string
+    {
+        if (! is_array($data)) {
+            return null;
+        }
+
+        $liveUpdates = $data['live_updates'] ?? null;
+
+        if (is_array($liveUpdates)) {
+            $score = $this->scoreFromValues(
+                $liveUpdates['team_1']['match_score'] ?? null,
+                $liveUpdates['team_2']['match_score'] ?? null,
+            );
+
+            if ($score !== null) {
+                return $score;
+            }
+        }
+
+        return $this->scoreFromValues(
+            $data['team1_score'] ?? null,
+            $data['team2_score'] ?? null,
+        );
     }
 
     private function isLiveStatus(mixed $status): bool
