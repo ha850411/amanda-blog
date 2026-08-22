@@ -966,37 +966,35 @@ class LineScheduleImageService
             $draw->setFillColor($team2Wins > $team1Wins ? '#ffffff' : ($team2Wins < $team1Wins ? '#94a3b8' : '#e2e8f0'));
             $draw->annotation($centerX + 18, $boxY + 34, (string) $team2Wins);
 
-            // 3. Current-game score, or a series label while the next game
-            // has not started. The BO win indicators stay visible in both
-            // states so BO1 / BO3 / BO5 remain visually distinct.
+            // 3. Draw the current-game score only when one is available. The
+            // series score and BO win indicators above already describe the
+            // live match when the next game has not started.
             $hasCurrentGameScore = $mapScore !== null;
-            $pillLeft = $centerX - ($hasCurrentGameScore ? 35 : 26);
-            $pillRight = $centerX + ($hasCurrentGameScore ? 35 : 26);
-            $pillTop = $boxY + 44;
-            $pillBottom = $boxY + 62;
+            if ($hasCurrentGameScore) {
+                $pillLeft = $centerX - 35;
+                $pillRight = $centerX + 35;
+                $pillTop = $boxY + 44;
+                $pillBottom = $boxY + 62;
 
-            $draw->setFillColor('#3d0d0d');
-            $draw->setStrokeColor('#991b1b');
-            $draw->setStrokeWidth(0.8);
-            $draw->roundRectangle($pillLeft, $pillTop, $pillRight, $pillBottom, 9, 9);
+                $draw->setFillColor('#3d0d0d');
+                $draw->setStrokeColor('#991b1b');
+                $draw->setStrokeWidth(0.8);
+                $draw->roundRectangle($pillLeft, $pillTop, $pillRight, $pillBottom, 9, 9);
 
-            // Live dot
-            $draw->setFillColor('#ef4444');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $dotX = $centerX - ($hasCurrentGameScore ? 20 : 14);
-            $draw->circle($dotX, $boxY + 53, $dotX + 2.5, $boxY + 53);
+                // Live dot
+                $draw->setFillColor('#ef4444');
+                $draw->setStrokeColor('none');
+                $draw->setStrokeWidth(0);
+                $dotX = $centerX - 20;
+                $draw->circle($dotX, $boxY + 53, $dotX + 2.5, $boxY + 53);
 
-            // Current-game score text. Keep this distinct from the series
-            // score above so LoL viewers can read both at a glance.
-            $draw->setFillColor('#fca5a5');
-            $draw->setFontSize(10);
-            $draw->setFontWeight(700);
-            $draw->annotation(
-                $centerX + ($hasCurrentGameScore ? 7 : 5),
-                $boxY + 57,
-                $hasCurrentGameScore ? '局 '.$mapScore : 'SERIES',
-            );
+                // Current-game score text. Keep this distinct from the series
+                // score above so LoL viewers can read both at a glance.
+                $draw->setFillColor('#fca5a5');
+                $draw->setFontSize(10);
+                $draw->setFontWeight(700);
+                $draw->annotation($centerX + 7, $boxY + 57, '局 '.$mapScore);
+            }
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
             return;
@@ -1004,7 +1002,7 @@ class LineScheduleImageService
 
         // Single score fallback
         $primaryScore = $seriesScore ?? $mapScore;
-        $scoreLabel = $seriesScore !== null ? 'SERIES' : 'LIVE';
+        $scoreLabel = 'LIVE';
 
         if ($primaryScore !== null) {
             $parsed = $this->parseScorePair($primaryScore);
