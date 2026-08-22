@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 19;
+    private const CACHE_VERSION = 20;
 
     private const CARD_HEIGHT = 180;
 
@@ -37,19 +37,19 @@ class LineScheduleImageService
             'text' => '#2dd4bf',
         ],
         3 => [
-            'bg' => '#451a03',
-            'border' => '#f59e0b',
-            'text' => '#fde68a',
+            'bg' => '#064e3b',
+            'border' => '#059669',
+            'text' => '#6ee7b7',
         ],
         5 => [
+            'bg' => '#451a03',
+            'border' => '#f59e0b',
+            'text' => '#fde047',
+        ],
+        7 => [
             'bg' => '#3b0764',
             'border' => '#c084fc',
             'text' => '#f5d0fe',
-        ],
-        7 => [
-            'bg' => '#4c0519',
-            'border' => '#f43f5e',
-            'text' => '#fecdd3',
         ],
         'default' => [
             'bg' => '#1e293b',
@@ -266,13 +266,14 @@ class LineScheduleImageService
             // Format Badge (e.g. BO1 / BO2 / BO3 / BO5)
             $formatTheme = $this->formatTheme($match['format'] ?? null);
             $formatBadgeX = $timeX + $timeWidth + 12;
-            $formatBadgeWidth = 56;
-            $formatBadgeHeight = 24;
-            $formatBadgeY = $y + 14;
+            $isBo5OrMore = in_array($formatTheme['label'], ['BO5', 'BO7'], true);
+            $formatBadgeWidth = $isBo5OrMore ? 62 : 56;
+            $formatBadgeHeight = 26;
+            $formatBadgeY = $y + 13;
 
             $draw->setFillColor($formatTheme['bg']);
             $draw->setStrokeColor($formatTheme['border']);
-            $draw->setStrokeWidth(1.2);
+            $draw->setStrokeWidth($isBo5OrMore ? 1.6 : 1.2);
             $draw->roundRectangle(
                 $formatBadgeX,
                 $formatBadgeY,
@@ -285,19 +286,20 @@ class LineScheduleImageService
             $draw->setFillColor($formatTheme['text']);
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->setFontSize(13);
-            $draw->setFontWeight(700);
+            $draw->setFontSize(14);
+            $draw->setFontWeight(800);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
             $draw->annotation(
                 $formatBadgeX + (int) round($formatBadgeWidth / 2),
-                $formatBadgeY + 17,
+                $formatBadgeY + 18,
                 $formatTheme['label']
             );
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
             if ($match['is_live'] ?? false) {
                 $liveBadgeX = $formatBadgeX + $formatBadgeWidth + 8;
-                $liveBadgeWidth = 54;
+                $liveBadgeWidth = 56;
+                $liveBadgeHeight = 26;
 
                 $draw->setFillColor('#450a0a');
                 $draw->setStrokeColor('#ef4444');
@@ -306,7 +308,7 @@ class LineScheduleImageService
                     $liveBadgeX,
                     $formatBadgeY,
                     $liveBadgeX + $liveBadgeWidth,
-                    $formatBadgeY + $formatBadgeHeight,
+                    $formatBadgeY + $liveBadgeHeight,
                     6,
                     6,
                 );
@@ -314,12 +316,12 @@ class LineScheduleImageService
                 $draw->setFillColor('#fca5a5');
                 $draw->setStrokeColor('none');
                 $draw->setStrokeWidth(0);
-                $draw->setFontSize(12);
+                $draw->setFontSize(13);
                 $draw->setFontWeight(700);
                 $draw->setTextAlignment(Imagick::ALIGN_CENTER);
                 $draw->annotation(
                     $liveBadgeX + (int) round($liveBadgeWidth / 2),
-                    $formatBadgeY + 17,
+                    $formatBadgeY + 18,
                     '滾球',
                 );
                 $draw->setTextAlignment(Imagick::ALIGN_LEFT);
@@ -349,9 +351,9 @@ class LineScheduleImageService
             $draw->setFillColor('#f8fafc');
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->setFontSize(19);
+            $draw->setFontSize(21);
             $draw->setFontWeight(700);
-            $draw->annotation($x + 36, $boxY + 45, $this->fitText($image, $draw, $match['team1'], 260, 14));
+            $draw->annotation($x + 36, $boxY + 46, $this->fitText($image, $draw, $match['team1'], 265, 14));
 
             // Team 1 Odds Pill
             $draw->setFillColor('#0d1524');
@@ -364,7 +366,7 @@ class LineScheduleImageService
             $draw->setFillColor($hasOdds ? '#38bdf8' : '#64748b');
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->setFontSize(17);
+            $draw->setFontSize(18);
             $draw->setFontWeight(700);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
             $draw->annotation($x + 362, $boxY + 44, $team1Odds);
@@ -384,9 +386,9 @@ class LineScheduleImageService
             $draw->setFillColor('#f8fafc');
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->setFontSize(19);
+            $draw->setFontSize(21);
             $draw->setFontWeight(700);
-            $draw->annotation($team2BoxX + 16, $boxY + 45, $this->fitText($image, $draw, $match['team2'], 260, 14));
+            $draw->annotation($team2BoxX + 16, $boxY + 46, $this->fitText($image, $draw, $match['team2'], 265, 14));
 
             // Team 2 Odds Pill
             $draw->setFillColor('#0d1524');
@@ -398,7 +400,7 @@ class LineScheduleImageService
             $draw->setFillColor($hasOdds ? '#38bdf8' : '#64748b');
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->setFontSize(17);
+            $draw->setFontSize(18);
             $draw->setFontWeight(700);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
             $draw->annotation($team2BoxX + 340, $boxY + 44, $team2Odds);
@@ -623,7 +625,7 @@ class LineScheduleImageService
             $draw->setFillColor('#94a3b8');
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->setFontSize(10.5);
+            $draw->setFontSize(11);
             $draw->setFontWeight(500);
             $draw->annotation($x, $rowY + 15, (string) ($result['date'] ?? '—'));
 
@@ -632,11 +634,11 @@ class LineScheduleImageService
             $draw->setFillColor($formatTheme['bg']);
             $draw->setStrokeColor($formatTheme['border']);
             $draw->setStrokeWidth(1);
-            $draw->roundRectangle($x + 72, $rowY + 1, $x + 102, $rowY + 19, 3, 3);
+            $draw->roundRectangle($x + 70, $rowY + 1, $x + 104, $rowY + 19, 3, 3);
             $draw->setFillColor($formatTheme['text']);
             $draw->setStrokeColor('none');
             $draw->setStrokeWidth(0);
-            $draw->setFontSize(9.5);
+            $draw->setFontSize(10);
             $draw->setFontWeight(700);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
             $draw->annotation($x + 87, $rowY + 14, $formatTheme['label']);
@@ -1102,8 +1104,8 @@ class LineScheduleImageService
         int $totalRequired,
         string $wonColor,
     ): void {
-        $pipWidth = 5;
-        $pipHeight = 3;
+        $pipWidth = $totalRequired >= 3 ? 7 : 10;
+        $pipHeight = 4;
         $gap = 2;
         $totalWidth = ($totalRequired * $pipWidth) + (($totalRequired - 1) * $gap);
         $startX = $centerX - (int) round($totalWidth / 2);
@@ -1114,7 +1116,7 @@ class LineScheduleImageService
 
             $draw->setFillColor($isWon ? $wonColor : '#1e293b');
             $draw->setStrokeColor($isWon ? $wonColor : '#475569');
-            $draw->setStrokeWidth(0.7);
+            $draw->setStrokeWidth(0.8);
             $draw->roundRectangle($left, $y, $left + $pipWidth, $y + $pipHeight, 1.5, 1.5);
         }
     }
