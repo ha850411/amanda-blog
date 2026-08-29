@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use App\Models\About;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Storage;
 
 class AboutController extends Controller
@@ -32,8 +32,8 @@ class AboutController extends Controller
             }
             try {
                 // 上傳新圖片，回傳相對路徑
-                $amazonUrl = "https://" . env('AWS_BUCKET') . ".s3." . env('AWS_DEFAULT_REGION') . ".amazonaws.com";
-                $update['picture'] = $amazonUrl . '/' . $request->file('avatar')->store('avatars', 's3');
+                $amazonUrl = 'https://'.env('AWS_BUCKET').'.s3.'.env('AWS_DEFAULT_REGION').'.amazonaws.com';
+                $update['picture'] = $amazonUrl.'/'.$request->file('avatar')->store('avatars', 's3');
             } catch (\Exception $e) {
                 return response()->json([
                     'success' => false,

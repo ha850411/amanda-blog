@@ -28,6 +28,7 @@ class MarkdownHelper
         $text = preg_replace_callback('/<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/is', function ($matches) {
             $url = $matches[1];
             $linkText = trim(strip_tags($matches[2]));
+
             return $linkText ? "[{$linkText}]({$url})" : $url;
         }, $text);
 
@@ -36,6 +37,7 @@ class MarkdownHelper
             $src = $matches[1];
             preg_match('/alt=["\']([^"\']*)["\']/', $matches[0], $altMatch);
             $alt = $altMatch[1] ?? 'image';
+
             return "\n![{$alt}]({$src})\n";
         }, $text);
 

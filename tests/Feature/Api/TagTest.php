@@ -8,7 +8,7 @@ use App\Models\Tag;
 class TagTest extends ApiTestCase
 {
     /** GET /api/tag 應回傳含 children 的樹狀標籤結構 */
-    public function testGetTagTreeReturnsParentTagsWithChildren(): void
+    public function test_get_tag_tree_returns_parent_tags_with_children(): void
     {
         $parent = Tag::factory()->create(['parent_id' => 0, 'sort' => 1]);
         Tag::create(['name' => '子標籤', 'parent_id' => $parent->id, 'sort' => 1]);
@@ -20,13 +20,13 @@ class TagTest extends ApiTestCase
     }
 
     /** 已登入時 POST /api/tag 應同時建立主標籤與子標籤 */
-    public function testStoreTagCreatesParentWithChildren(): void
+    public function test_store_tag_creates_parent_with_children(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
 
         $response = $this->actingAs($admin, 'admin')
             ->postJson('/api/tag', [
-                'name'     => '主標籤',
+                'name' => '主標籤',
                 'children' => ['子標籤一', '子標籤二'],
             ]);
 
@@ -39,7 +39,7 @@ class TagTest extends ApiTestCase
     }
 
     /** POST /api/tag 缺少 name 時應回傳 422 驗證錯誤 */
-    public function testStoreTagRequiresName(): void
+    public function test_store_tag_requires_name(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
 
@@ -51,14 +51,14 @@ class TagTest extends ApiTestCase
     }
 
     /** 已登入時 PUT /api/tag/{id} 應更新主標籤名稱 */
-    public function testUpdateTag(): void
+    public function test_update_tag(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $tag   = Tag::factory()->create(['name' => '舊名稱', 'parent_id' => 0]);
+        $tag = Tag::factory()->create(['name' => '舊名稱', 'parent_id' => 0]);
 
         $response = $this->actingAs($admin, 'admin')
             ->putJson("/api/tag/{$tag->id}", [
-                'name'     => '新名稱',
+                'name' => '新名稱',
                 'children' => [],
             ]);
 
@@ -69,15 +69,15 @@ class TagTest extends ApiTestCase
     }
 
     /** 嘗試更新子標籤時應回傳 422，因為僅允許編輯主選單 */
-    public function testUpdateChildTagReturnsError(): void
+    public function test_update_child_tag_returns_error(): void
     {
-        $admin  = Admin::create(['username' => 'admin', 'password' => 'secret']);
+        $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
         $parent = Tag::factory()->create(['parent_id' => 0]);
-        $child  = Tag::create(['name' => '子標籤', 'parent_id' => $parent->id, 'sort' => 1]);
+        $child = Tag::create(['name' => '子標籤', 'parent_id' => $parent->id, 'sort' => 1]);
 
         $response = $this->actingAs($admin, 'admin')
             ->putJson("/api/tag/{$child->id}", [
-                'name'     => '嘗試修改子標籤',
+                'name' => '嘗試修改子標籤',
                 'children' => [],
             ]);
 
@@ -85,11 +85,11 @@ class TagTest extends ApiTestCase
     }
 
     /** 已登入時 DELETE /api/tag/{id} 應同時刪除主標籤及其子標籤 */
-    public function testDestroyTagAlsoDeletesChildren(): void
+    public function test_destroy_tag_also_deletes_children(): void
     {
-        $admin  = Admin::create(['username' => 'admin', 'password' => 'secret']);
+        $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
         $parent = Tag::factory()->create(['parent_id' => 0]);
-        $child  = Tag::create(['name' => '子標籤', 'parent_id' => $parent->id, 'sort' => 1]);
+        $child = Tag::create(['name' => '子標籤', 'parent_id' => $parent->id, 'sort' => 1]);
 
         $response = $this->actingAs($admin, 'admin')
             ->deleteJson("/api/tag/{$parent->id}");
@@ -102,15 +102,15 @@ class TagTest extends ApiTestCase
     }
 
     /** 已登入時 POST /api/tag/sort 可將指定標籤往上移動一位 */
-    public function testUpdateSortMovesTagUp(): void
+    public function test_update_sort_moves_tag_up(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $tag1  = Tag::factory()->create(['parent_id' => 0, 'sort' => 1]);
-        $tag2  = Tag::factory()->create(['parent_id' => 0, 'sort' => 2]);
+        $tag1 = Tag::factory()->create(['parent_id' => 0, 'sort' => 1]);
+        $tag2 = Tag::factory()->create(['parent_id' => 0, 'sort' => 2]);
 
         $response = $this->actingAs($admin, 'admin')
             ->postJson('/api/tag/sort', [
-                'id'        => $tag2->id,
+                'id' => $tag2->id,
                 'direction' => 'up',
             ]);
 
@@ -122,14 +122,14 @@ class TagTest extends ApiTestCase
     }
 
     /** 已在最前面的標籤執行往上排序時，應回傳 success = false */
-    public function testUpdateSortFailsWhenAlreadyFirst(): void
+    public function test_update_sort_fails_when_already_first(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $tag   = Tag::factory()->create(['parent_id' => 0, 'sort' => 1]);
+        $tag = Tag::factory()->create(['parent_id' => 0, 'sort' => 1]);
 
         $response = $this->actingAs($admin, 'admin')
             ->postJson('/api/tag/sort', [
-                'id'        => $tag->id,
+                'id' => $tag->id,
                 'direction' => 'up',
             ]);
 
@@ -138,7 +138,7 @@ class TagTest extends ApiTestCase
     }
 
     /** 未登入時 POST /api/tag 應回傳 401 */
-    public function testStoreTagRequiresAuthentication(): void
+    public function test_store_tag_requires_authentication(): void
     {
         $response = $this->postJson('/api/tag', ['name' => '未授權標籤']);
 

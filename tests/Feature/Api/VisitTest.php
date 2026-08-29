@@ -7,7 +7,7 @@ use App\Models\Visit;
 class VisitTest extends ApiTestCase
 {
     /** GET /api/visit 應回傳今日與累計瀏覽數 */
-    public function testGetVisitCounts(): void
+    public function test_get_visit_counts(): void
     {
         $today = date('Y/m/d');
 
@@ -27,7 +27,7 @@ class VisitTest extends ApiTestCase
     }
 
     /** POST /api/visit 應新增一筆訪客瀏覽紀錄並回傳 200 */
-    public function testStoreVisitRecord(): void
+    public function test_store_visit_record(): void
     {
         $response = $this->postJson('/api/visit');
 

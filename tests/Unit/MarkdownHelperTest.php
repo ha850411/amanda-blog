@@ -2,8 +2,8 @@
 
 namespace Tests\Unit;
 
-use PHPUnit\Framework\TestCase;
 use App\Support\MarkdownHelper;
+use PHPUnit\Framework\TestCase;
 
 class MarkdownHelperTest extends TestCase
 {

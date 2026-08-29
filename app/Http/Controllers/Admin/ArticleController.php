@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Models\Tag;
 use App\Models\Article;
+use App\Models\Tag;
 
 class ArticleController extends Controller
 {
@@ -17,14 +17,14 @@ class ArticleController extends Controller
             ->get();
 
         view()->share([
-            'tags' => $tags
+            'tags' => $tags,
         ]);
     }
 
     public function article()
     {
         return view('admin.article')->with([
-            'active' => 'article'
+            'active' => 'article',
         ]);
     }
 
@@ -32,7 +32,7 @@ class ArticleController extends Controller
     {
         return view('admin.article_add')->with([
             'active' => 'article',
-            'article' => null
+            'article' => null,
         ]);
     }
 
@@ -42,7 +42,7 @@ class ArticleController extends Controller
 
         return view('admin.article_add')->with([
             'active' => 'article',
-            'article' => $article
+            'article' => $article,
         ]);
     }
 }

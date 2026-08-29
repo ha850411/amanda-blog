@@ -39,6 +39,7 @@ class EnsureDatabasesExist extends Command
             // 目前僅支援 MySQL
             if (($config['driver'] ?? null) !== 'mysql') {
                 $this->warn("Skipping non-MySQL connection: {$name}");
+
                 continue;
             }
 
@@ -49,13 +50,15 @@ class EnsureDatabasesExist extends Command
             $database = $config['database'] ?? null;
 
             $allowedHosts = array_filter(array_map('trim', explode(',', env('DB_ENSURE_ALLOWED_HOSTS', '127.0.0.1,localhost,mysql,mariadb,host.docker.internal,amanda-blog-mysql,amanda-blog-ci-mysql'))));
-            if (!in_array($host, $allowedHosts)) {
+            if (! in_array($host, $allowedHosts)) {
                 $this->error("❌ Invalid host for connection {$name}: {$host}");
+
                 return CommandAlias::FAILURE;
             }
 
-            if (!$database) {
+            if (! $database) {
                 $this->warn("No database name specified for connection: {$name}");
+
                 continue;
             }
 
@@ -67,7 +70,7 @@ class EnsureDatabasesExist extends Command
                 $this->info("✅ Test DB `{$database}` ensured for connection: {$name}");
             } catch (\Throwable $e) {
                 // 若連線或 SQL 錯誤，印出錯誤訊息
-                $this->error("❌ Failed to ensure DB for connection {$name}: " . $e->getMessage());
+                $this->error("❌ Failed to ensure DB for connection {$name}: ".$e->getMessage());
             }
         }
 

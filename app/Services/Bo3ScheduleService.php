@@ -275,10 +275,9 @@ class Bo3ScheduleService
 
         foreach ($matches as $index => $match) {
             $hasFormat = preg_match('/^BO\d+$/i', trim((string) ($match['format'] ?? ''))) === 1;
-            $isLiveWithMissingScore = ($match['is_live'] ?? false)
-                && (($match['series_score'] ?? null) === null || ($match['score'] ?? null) === null);
+            $isLive = (bool) ($match['is_live'] ?? false);
 
-            if ($hasFormat && ! $isLiveWithMissingScore) {
+            if ($hasFormat && ! $isLive) {
                 continue;
             }
 
@@ -334,8 +333,9 @@ class Bo3ScheduleService
 
             $mapScore = $this->extractMapScoreFromApi($response->json());
 
-            if ($mapScore !== null && ($matches[$index]['score'] ?? null) === null) {
+            if ($mapScore !== null) {
                 $matches[$index]['score'] = $mapScore;
+                $matches[$index]['score_source'] = 'bo3';
             }
         }
 
@@ -516,10 +516,10 @@ class Bo3ScheduleService
         $liveUpdates = $data['live_updates'] ?? null;
 
         if (is_array($liveUpdates)) {
-            $score = $this->scoreFromValues(
-                $liveUpdates['team_1']['game_score'] ?? null,
-                $liveUpdates['team_2']['game_score'] ?? null,
-            );
+            $t1GameScore = $liveUpdates['team_1']['game_score'] ?? $liveUpdates['team1']['game_score'] ?? $liveUpdates['team_1']['score'] ?? $liveUpdates['team1']['score'] ?? null;
+            $t2GameScore = $liveUpdates['team_2']['game_score'] ?? $liveUpdates['team2']['game_score'] ?? $liveUpdates['team_2']['score'] ?? $liveUpdates['team2']['score'] ?? null;
+
+            $score = $this->scoreFromValues($t1GameScore, $t2GameScore);
 
             if ($score !== null) {
                 return $score;
@@ -528,8 +528,8 @@ class Bo3ScheduleService
 
         if (isset($data['current_map']) && is_array($data['current_map'])) {
             $score = $this->scoreFromValues(
-                $data['current_map']['team1_score'] ?? null,
-                $data['current_map']['team2_score'] ?? null,
+                $data['current_map']['team1_score'] ?? $data['current_map']['score1'] ?? $data['current_map']['team_1_score'] ?? null,
+                $data['current_map']['team2_score'] ?? $data['current_map']['score2'] ?? $data['current_map']['team_2_score'] ?? null,
             );
 
             if ($score !== null) {
@@ -541,14 +541,14 @@ class Bo3ScheduleService
             $liveMap = collect($data['maps'])
                 ->first(fn (mixed $map): bool => is_array($map) && in_array(
                     mb_strtolower(trim((string) ($map['status'] ?? ''))),
-                    ['current', 'live', 'in_progress'],
+                    ['current', 'live', 'in_progress', 'ongoing', 'playing', 'active'],
                     true,
                 ));
 
             if (is_array($liveMap)) {
                 $score = $this->scoreFromValues(
-                    $liveMap['team1_score'] ?? null,
-                    $liveMap['team2_score'] ?? null,
+                    $liveMap['team1_score'] ?? $liveMap['score1'] ?? $liveMap['team_1_score'] ?? null,
+                    $liveMap['team2_score'] ?? $liveMap['score2'] ?? $liveMap['team_2_score'] ?? null,
                 );
 
                 if ($score !== null) {

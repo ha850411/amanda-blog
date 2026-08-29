@@ -8,7 +8,7 @@ use App\Models\Social;
 class SocialTest extends ApiTestCase
 {
     /** GET /api/social 應回傳所有社群連結 */
-    public function testGetSocialsReturnsAllRecords(): void
+    public function test_get_socials_returns_all_records(): void
     {
         Social::factory()->count(3)->create();
 
@@ -20,14 +20,14 @@ class SocialTest extends ApiTestCase
     }
 
     /** 已登入時 PATCH /api/social/{id} 應更新 url 與 status */
-    public function testUpdateSocial(): void
+    public function test_update_social(): void
     {
-        $admin  = Admin::create(['username' => 'admin', 'password' => 'secret']);
+        $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
         $social = Social::factory()->create();
 
         $response = $this->actingAs($admin, 'admin')
             ->patchJson("/api/social/{$social->id}", [
-                'url'    => 'https://github.com/test',
+                'url' => 'https://github.com/test',
                 'status' => 1,
             ]);
 
@@ -35,13 +35,13 @@ class SocialTest extends ApiTestCase
             ->assertJson(['message' => '社群 icon 更新成功']);
 
         $this->assertDatabaseHas('social', [
-            'id'  => $social->id,
+            'id' => $social->id,
             'url' => 'https://github.com/test',
         ]);
     }
 
     /** 更新不存在的社群連結時應回傳 404 */
-    public function testUpdateNonexistentSocialReturns404(): void
+    public function test_update_nonexistent_social_returns404(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
 
@@ -54,7 +54,7 @@ class SocialTest extends ApiTestCase
     }
 
     /** 未登入時 PATCH /api/social/{id} 應回傳 401 */
-    public function testUpdateSocialRequiresAuthentication(): void
+    public function test_update_social_requires_authentication(): void
     {
         $social = Social::factory()->create();
 

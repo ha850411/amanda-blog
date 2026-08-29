@@ -11,7 +11,7 @@ use Carbon\Carbon;
 class ArticleTest extends ApiTestCase
 {
     /** GET /api/article 應回傳分頁格式 */
-    public function testGetArticlesReturnsPaginatedList(): void
+    public function test_get_articles_returns_paginated_list(): void
     {
         Article::factory()->count(3)->create();
 
@@ -23,7 +23,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** perpage 參數應控制每頁筆數 */
-    public function testGetArticlesRespectsPerpage(): void
+    public function test_get_articles_respects_perpage(): void
     {
         Article::factory()->count(5)->create();
 
@@ -36,7 +36,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** page 參數應控制當前頁碼 */
-    public function testGetArticlesRespectsPage(): void
+    public function test_get_articles_respects_page(): void
     {
         Article::factory()->count(5)->create();
 
@@ -47,7 +47,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** status 篩選參數應只回傳符合狀態的文章 */
-    public function testGetArticlesFilterByStatus(): void
+    public function test_get_articles_filter_by_status(): void
     {
         Article::factory()->create(['status' => 1]);
         Article::factory()->create(['status' => 0]);
@@ -59,9 +59,9 @@ class ArticleTest extends ApiTestCase
     }
 
     /** tag 篩選參數應只回傳含有符合標籤名稱的文章 */
-    public function testGetArticlesFilterByTag(): void
+    public function test_get_articles_filter_by_tag(): void
     {
-        $tag     = Tag::factory()->create(['name' => 'laravel']);
+        $tag = Tag::factory()->create(['name' => 'laravel']);
         $article = Article::factory()->create();
         $article->tags()->attach($tag->id);
 
@@ -74,9 +74,9 @@ class ArticleTest extends ApiTestCase
     }
 
     /** tagId 篩選參數應只回傳含有指定 tag id 的文章 */
-    public function testGetArticlesFilterByTagId(): void
+    public function test_get_articles_filter_by_tag_id(): void
     {
-        $tag     = Tag::factory()->create();
+        $tag = Tag::factory()->create();
         $article = Article::factory()->create();
         $article->tags()->attach($tag->id);
 
@@ -89,7 +89,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** start 篩選參數應只回傳建立時間在該日期之後的文章 */
-    public function testGetArticlesFilterByStart(): void
+    public function test_get_articles_filter_by_start(): void
     {
         Article::factory()->create(['created_at' => Carbon::parse('2024-01-01')]);
         Article::factory()->create(['created_at' => Carbon::parse('2024-06-01')]);
@@ -101,7 +101,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** end 篩選參數應只回傳建立時間在該日期之前的文章 */
-    public function testGetArticlesFilterByEnd(): void
+    public function test_get_articles_filter_by_end(): void
     {
         Article::factory()->create(['created_at' => Carbon::parse('2024-01-01')]);
         Article::factory()->create(['created_at' => Carbon::parse('2024-06-01')]);
@@ -113,7 +113,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** show_first_image 參數應在每篇文章資料中附加 first_image 欄位 */
-    public function testGetArticlesWithFirstImage(): void
+    public function test_get_articles_with_first_image(): void
     {
         Article::factory()->create([
             'content' => '<p><img src="https://example.com/photo.jpg" /></p>',
@@ -130,7 +130,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 無圖片的文章，first_image 應為 null */
-    public function testGetArticlesFirstImageIsNullWhenNoImage(): void
+    public function test_get_articles_first_image_is_null_when_no_image(): void
     {
         Article::factory()->create([
             'content' => '<p>純文字內容</p>',
@@ -147,16 +147,16 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 已登入時 POST /api/article（無 id）應新增文章 */
-    public function testStoreArticleCreatesNewArticle(): void
+    public function test_store_article_creates_new_article(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $tag   = Tag::factory()->create();
+        $tag = Tag::factory()->create();
 
         $response = $this->actingAs($admin, 'admin')
             ->postJson('/api/article', [
-                'title'        => '新文章標題',
-                'content'      => '文章內容',
-                'status'       => 1,
+                'title' => '新文章標題',
+                'content' => '文章內容',
+                'status' => 1,
                 'selectedTags' => [['id' => $tag->id]],
             ]);
 
@@ -167,16 +167,16 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 新增文章時應正確建立文章與標籤的關聯 */
-    public function testStoreArticleAttachesTags(): void
+    public function test_store_article_attaches_tags(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $tag   = Tag::factory()->create();
+        $tag = Tag::factory()->create();
 
         $this->actingAs($admin, 'admin')
             ->postJson('/api/article', [
-                'title'        => '有標籤文章',
-                'content'      => '內容',
-                'status'       => 1,
+                'title' => '有標籤文章',
+                'content' => '內容',
+                'status' => 1,
                 'selectedTags' => [['id' => $tag->id]],
             ]);
 
@@ -185,17 +185,17 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 已登入時 POST /api/article（帶 id）應更新既有文章 */
-    public function testStoreArticleUpdatesExistingArticle(): void
+    public function test_store_article_updates_existing_article(): void
     {
-        $admin   = Admin::create(['username' => 'admin', 'password' => 'secret']);
+        $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
         $article = Article::factory()->create(['title' => '舊標題']);
 
         $response = $this->actingAs($admin, 'admin')
             ->postJson('/api/article', [
-                'id'           => $article->id,
-                'title'        => '更新後標題',
-                'content'      => '更新後內容',
-                'status'       => 1,
+                'id' => $article->id,
+                'title' => '更新後標題',
+                'content' => '更新後內容',
+                'status' => 1,
                 'selectedTags' => [],
             ]);
 
@@ -203,26 +203,26 @@ class ArticleTest extends ApiTestCase
             ->assertJson(['status' => 'success']);
 
         $this->assertDatabaseHas('article', [
-            'id'    => $article->id,
+            'id' => $article->id,
             'title' => '更新後標題',
         ]);
     }
 
     /** 更新文章時應重設標籤關聯 */
-    public function testStoreArticleReplacesTagsOnUpdate(): void
+    public function test_store_article_replaces_tags_on_update(): void
     {
-        $admin      = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $oldTag     = Tag::factory()->create();
-        $newTag     = Tag::factory()->create();
-        $article    = Article::factory()->create();
+        $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
+        $oldTag = Tag::factory()->create();
+        $newTag = Tag::factory()->create();
+        $article = Article::factory()->create();
         $article->tags()->attach($oldTag->id);
 
         $this->actingAs($admin, 'admin')
             ->postJson('/api/article', [
-                'id'           => $article->id,
-                'title'        => $article->title,
-                'content'      => $article->content,
-                'status'       => 1,
+                'id' => $article->id,
+                'title' => $article->title,
+                'content' => $article->content,
+                'status' => 1,
                 'selectedTags' => [['id' => $newTag->id]],
             ]);
 
@@ -232,9 +232,9 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 已登入時 DELETE /api/article/{id} 應刪除文章，回傳 204 */
-    public function testDestroyArticle(): void
+    public function test_destroy_article(): void
     {
-        $admin   = Admin::create(['username' => 'admin', 'password' => 'secret']);
+        $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
         $article = Article::factory()->create();
 
         $response = $this->actingAs($admin, 'admin')
@@ -246,10 +246,10 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 刪除文章時應一併移除文章與標籤的關聯 */
-    public function testDestroyArticleDetachesTags(): void
+    public function test_destroy_article_detaches_tags(): void
     {
-        $admin   = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $tag     = Tag::factory()->create();
+        $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
+        $tag = Tag::factory()->create();
         $article = Article::factory()->create();
         $article->tags()->attach($tag->id);
 
@@ -260,7 +260,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 錯誤密碼不應通過文章驗證 */
-    public function testVerifyArticleRejectsWrongPassword(): void
+    public function test_verify_article_rejects_wrong_password(): void
     {
         config(['cache.default' => 'array']);
 
@@ -281,7 +281,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 驗證成功後，後續同使用者 cookie 的列表查詢應帶出已驗證狀態 */
-    public function testVerifiedArticleStateIsReadFromLaravelCache(): void
+    public function test_verified_article_state_is_read_from_laravel_cache(): void
     {
         config(['cache.default' => 'file']);
         app('cache')->setDefaultDriver('file');
@@ -327,10 +327,10 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 未登入時 POST /api/article 應回傳 401 */
-    public function testStoreArticleRequiresAuthentication(): void
+    public function test_store_article_requires_authentication(): void
     {
         $response = $this->postJson('/api/article', [
-            'title'   => '未授權文章',
+            'title' => '未授權文章',
             'content' => '內容',
         ]);
 
@@ -338,7 +338,7 @@ class ArticleTest extends ApiTestCase
     }
 
     /** 未登入時 DELETE /api/article/{id} 應回傳 401 */
-    public function testDestroyArticleRequiresAuthentication(): void
+    public function test_destroy_article_requires_authentication(): void
     {
         $article = Article::factory()->create();
 

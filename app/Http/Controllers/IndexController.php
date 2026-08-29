@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Article;
 use App\Models\Tag;
 use App\Support\ArticlePasswordCache;
+use Illuminate\Http\Request;
 
 class IndexController extends Controller
 {
@@ -37,7 +37,7 @@ class IndexController extends Controller
         $siteJsonLd = [
             '@context' => 'https://schema.org',
             '@type' => 'WebSite',
-            'name' => "Amanda's Blog - " . $selectedTag->name,
+            'name' => "Amanda's Blog - ".$selectedTag->name,
             'url' => route('tag', ['tagId' => $tagId]),
             'description' => "Amanda 的「{$selectedTag->name}」文章整理與分享。",
             'inLanguage' => 'zh-TW',
@@ -106,7 +106,7 @@ class IndexController extends Controller
             'frontendArticle' => [
                 'id' => $article->id,
                 'title' => $article->title,
-                'content' => (int) $article->status === 2 && !$isPasswordVerified ? '' : $article->content,
+                'content' => (int) $article->status === 2 && ! $isPasswordVerified ? '' : $article->content,
                 'status' => $article->status,
                 'created_at' => $article->created_at?->format('Y/m/d H:i:s'),
                 'updated_at' => $article->updated_at?->format('Y/m/d H:i:s'),
@@ -154,9 +154,9 @@ class IndexController extends Controller
         $output .= "## Overview\n\n";
         $output .= "本站為 Amanda 的個人部落格，分享台灣在地美食探店、各類生活開箱與真實體驗心得。\n\n";
         $output .= "## Quick Links & Machine Feeds\n\n";
-        $output .= "- [RSS Feed](" . url('/rss.xml') . "): 最新文章 RSS 訂閱源\n";
-        $output .= "- [Full Markdown Content](" . url('/llms-full.txt') . "): 全站文章完整 Markdown 彙整 (適合 AI LLM 閱讀)\n";
-        $output .= "- [Sitemap](" . url('/sitemap.xml') . "): XML 網站地圖\n\n";
+        $output .= '- [RSS Feed]('.url('/rss.xml')."): 最新文章 RSS 訂閱源\n";
+        $output .= '- [Full Markdown Content]('.url('/llms-full.txt')."): 全站文章完整 Markdown 彙整 (適合 AI LLM 閱讀)\n";
+        $output .= '- [Sitemap]('.url('/sitemap.xml')."): XML 網站地圖\n\n";
 
         $output .= "## Published Articles\n\n";
         foreach ($articles as $article) {
@@ -204,7 +204,7 @@ class IndexController extends Controller
             if ($tagsStr) {
                 $output .= "- **Tags**: {$tagsStr}\n";
             }
-            $output .= "\n" . $mdContent . "\n\n";
+            $output .= "\n".$mdContent."\n\n";
             $output .= "---\n\n";
         }
 
@@ -232,7 +232,7 @@ class IndexController extends Controller
         }
         $output .= "\n";
 
-        if ((int) $article->status === 2 && !$isPasswordVerified) {
+        if ((int) $article->status === 2 && ! $isPasswordVerified) {
             $output .= "> 這篇文章受密碼保護，需驗證密碼後方可讀取完整內容。\n";
         } else {
             $output .= \App\Support\MarkdownHelper::htmlToMarkdown($article->content);

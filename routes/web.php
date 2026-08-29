@@ -1,9 +1,9 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Middleware\AdminMiddleware;
-use App\Http\Controllers\IndexController;
 use App\Http\Controllers\Admin;
+use App\Http\Controllers\IndexController;
+use App\Http\Middleware\AdminMiddleware;
+use Illuminate\Support\Facades\Route;
 
 Route::get('/', [IndexController::class, 'index'])
     ->name('index');
@@ -30,7 +30,6 @@ Route::get('/rss.xml', [IndexController::class, 'rss'])
     ->name('rss');
 
 Route::get('/feed', [IndexController::class, 'rss']);
-
 
 Route::prefix('admin')->group(function () {
     // 登入頁（不需要驗證）

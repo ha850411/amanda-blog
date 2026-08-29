@@ -15,7 +15,7 @@ class LoginController extends Controller
         }
 
         return view('admin.login')->with([
-            'bodyClass' => 'login'
+            'bodyClass' => 'login',
         ]);
     }
 

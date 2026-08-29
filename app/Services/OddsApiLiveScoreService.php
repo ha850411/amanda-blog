@@ -8,7 +8,7 @@ use Throwable;
 
 class OddsApiLiveScoreService
 {
-    private const SUPPORTED_GAMES = ['lol', 'cs'];
+    private const SUPPORTED_GAMES = ['lol', 'cs', 'valorant'];
 
     public function __construct(private readonly LiveMatchMatcher $matcher) {}
 
@@ -63,24 +63,23 @@ class OddsApiLiveScoreService
                 $matches[$index]['is_live'] = true;
                 $matches[$index]['live_event_id'] = isset($event['id']) ? (string) $event['id'] : null;
 
-                // Odds-API.io currently reports CS2 series/map wins in
-                // scores.periods, not the live round score of the active map.
-                // Do not keep presenting a possibly stale bo3.gg round score
-                // after an Odds API event has been matched successfully.
-                if (($matches[$index]['game'] ?? null) === 'cs') {
-                    $matches[$index]['score'] = null;
-                    unset($matches[$index]['score_source']);
+                $team1IsHome = $this->matcher->firstTeamUsesHome(
+                    $matches[$index],
+                    (string) ($event['home'] ?? ''),
+                    (string) ($event['away'] ?? ''),
+                );
+
+                $periodScore = $this->extractMapScoreFromPeriods($scores['periods'] ?? null, $team1IsHome);
+
+                if ($periodScore !== null) {
+                    $matches[$index]['score'] = $periodScore;
+                    $matches[$index]['score_source'] = 'odds-api';
                 }
 
                 if (! is_numeric($homeScore) || ! is_numeric($awayScore)) {
                     continue;
                 }
 
-                $team1IsHome = $this->matcher->firstTeamUsesHome(
-                    $matches[$index],
-                    (string) $event['home'],
-                    (string) $event['away'],
-                );
                 $matches[$index]['series_score'] = $team1IsHome
                     ? $this->score($homeScore, $awayScore)
                     : $this->score($awayScore, $homeScore);
@@ -99,6 +98,74 @@ class OddsApiLiveScoreService
         return collect($matches)->contains(
             fn (array $match): bool => in_array($match['game'] ?? null, self::SUPPORTED_GAMES, true),
         );
+    }
+
+    /**
+     * Extract active map round score from Odds API periods data if available.
+     */
+    private function extractMapScoreFromPeriods(mixed $periods, bool $team1IsHome): ?string
+    {
+        if (! is_array($periods) || $periods === []) {
+            return null;
+        }
+
+        $validPeriods = [];
+
+        foreach ($periods as $key => $period) {
+            if (! is_array($period)) {
+                continue;
+            }
+
+            $home = $period['home'] ?? $period['score1'] ?? $period['team1'] ?? null;
+            $away = $period['away'] ?? $period['score2'] ?? $period['team2'] ?? null;
+
+            if (is_numeric($home) && is_numeric($away)) {
+                $validPeriods[(string) $key] = [
+                    'home' => (int) $home,
+                    'away' => (int) $away,
+                ];
+            }
+        }
+
+        if ($validPeriods === []) {
+            return null;
+        }
+
+        foreach (['current', 'live', 'current_map', 'active'] as $currentKey) {
+            if (isset($validPeriods[$currentKey])) {
+                $p = $validPeriods[$currentKey];
+
+                return $team1IsHome ? $this->score($p['home'], $p['away']) : $this->score($p['away'], $p['home']);
+            }
+        }
+
+        $allBinary = collect($validPeriods)->every(
+            fn (array $p): bool => $p['home'] <= 1 && $p['away'] <= 1,
+        );
+
+        if ($allBinary) {
+            if (count($validPeriods) > 1) {
+                return null;
+            }
+
+            $first = reset($validPeriods);
+
+            if ($first['home'] === 0 && $first['away'] === 0) {
+                return $this->score(0, 0);
+            }
+
+            return null;
+        }
+
+        $lastPeriod = end($validPeriods);
+
+        if ($lastPeriod !== false) {
+            return $team1IsHome
+                ? $this->score($lastPeriod['home'], $lastPeriod['away'])
+                : $this->score($lastPeriod['away'], $lastPeriod['home']);
+        }
+
+        return null;
     }
 
     private function score(mixed $left, mixed $right): string

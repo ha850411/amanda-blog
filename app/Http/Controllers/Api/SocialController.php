@@ -2,18 +2,16 @@
 
 namespace App\Http\Controllers\Api;
 
-use Exception;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Models\Social;
-use Carbon\Carbon;
+use Illuminate\Http\Request;
 
 class SocialController extends Controller
 {
     public function index()
     {
         $socials = Social::all();
+
         return response()->json([
             'data' => $socials,
         ]);
@@ -22,7 +20,7 @@ class SocialController extends Controller
     public function update(Request $request, $id)
     {
         $social = Social::find($id);
-        if (!$social) {
+        if (! $social) {
             return response()->json([
                 'message' => '社群 icon 不存在',
             ], 404);

@@ -16,7 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->prefix('api')
                 ->name('api.')
                 ->middleware('api')
-                ->group(__DIR__ . '/../routes/api.php');
+                ->group(__DIR__.'/../routes/api.php');
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {

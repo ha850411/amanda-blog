@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use Exception;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Storage;
 
 class ImageController extends Controller
@@ -16,7 +16,7 @@ class ImageController extends Controller
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => '上傳失敗：' . $e->getMessage(),
+                'message' => '上傳失敗：'.$e->getMessage(),
             ], 500);
         }
 

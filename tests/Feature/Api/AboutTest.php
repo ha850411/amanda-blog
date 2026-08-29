@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Storage;
 class AboutTest extends ApiTestCase
 {
     /** 有資料時 GET /api/about 應回傳關於我內容 */
-    public function testGetAboutReturnsData(): void
+    public function test_get_about_returns_data(): void
     {
         About::factory()->create(['title' => '關於Amanda']);
 
@@ -21,7 +21,7 @@ class AboutTest extends ApiTestCase
     }
 
     /** 無資料時 GET /api/about 的 data 應為 null */
-    public function testGetAboutReturnsNullWhenNoRecord(): void
+    public function test_get_about_returns_null_when_no_record(): void
     {
         $response = $this->getJson('/api/about');
 
@@ -30,14 +30,14 @@ class AboutTest extends ApiTestCase
     }
 
     /** 已登入時可更新文字欄位，應回傳 success = true 並寫入資料庫 */
-    public function testUpdateAboutTextFields(): void
+    public function test_update_about_text_fields(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
 
         $response = $this->actingAs($admin, 'admin')
             ->postJson('/api/about', [
-                'title'       => '測試標題',
-                'sub_title'   => '測試副標題',
+                'title' => '測試標題',
+                'sub_title' => '測試副標題',
                 'description' => '測試內容',
             ]);
 
@@ -48,7 +48,7 @@ class AboutTest extends ApiTestCase
     }
 
     /** 未登入時 POST /api/about 應回傳 401 */
-    public function testUpdateAboutRequiresAuthentication(): void
+    public function test_update_about_requires_authentication(): void
     {
         $response = $this->postJson('/api/about', [
             'title' => '測試標題',
@@ -58,7 +58,7 @@ class AboutTest extends ApiTestCase
     }
 
     /** 已登入時可上傳頭像並更新，S3 操作由 Storage::fake('s3') 模擬 */
-    public function testUpdateAboutWithAvatar(): void
+    public function test_update_about_with_avatar(): void
     {
         Storage::fake('s3');
 
@@ -67,7 +67,7 @@ class AboutTest extends ApiTestCase
 
         $response = $this->actingAs($admin, 'admin')
             ->post('/api/about', [
-                'title'  => '有頭像的標題',
+                'title' => '有頭像的標題',
                 'avatar' => UploadedFile::fake()->create('avatar.jpg', 100, 'image/jpeg'),
             ]);
 

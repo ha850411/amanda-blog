@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Storage;
 class ImageTest extends ApiTestCase
 {
     /** 已登入時上傳圖片至 S3（Storage::fake 模擬），應回傳 success = true 及 url */
-    public function testUploadImageReturnsUrl(): void
+    public function test_upload_image_returns_url(): void
     {
         Storage::fake('s3');
 
@@ -26,7 +26,7 @@ class ImageTest extends ApiTestCase
     }
 
     /** 未登入時 POST /api/image/upload 應回傳 401 */
-    public function testUploadRequiresAuthentication(): void
+    public function test_upload_requires_authentication(): void
     {
         $response = $this->post('/api/image/upload', [
             'upload' => UploadedFile::fake()->create('photo.jpg', 100, 'image/jpeg'),

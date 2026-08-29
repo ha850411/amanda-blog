@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use App\Models\Tag;
 use App\Models\Article;
+use App\Models\Tag;
 use Illuminate\Database\Seeder;
 
 class ArticleSeeder extends Seeder
@@ -19,17 +19,17 @@ class ArticleSeeder extends Seeder
             // 隨機取 1~3 個 Tag id
             $filterTags = array_rand(array_flip($tagIds), rand(1, 3));
             Article::factory()
-                    ->hasAttached($filterTags, [], 'tags')->create([
-                    'title' => "文章標題 $i",
-                    'content' => "這是文章內容 $i",
-                    'status' => 1
-                ]);
+                ->hasAttached($filterTags, [], 'tags')->create([
+                        'title' => "文章標題 $i",
+                        'content' => "這是文章內容 $i",
+                        'status' => 1,
+                    ]);
         }
 
         // 文章 20 -> 密碼
         Article::find(20)->update([
             'status' => 2,
-            'password' => '123'
+            'password' => '123',
         ]);
     }
 }

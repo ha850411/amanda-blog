@@ -4,8 +4,8 @@ namespace App\Support;
 
 use App\Models\Article;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 class ArticlePasswordCache
 {
@@ -61,7 +61,7 @@ class ArticlePasswordCache
     {
         $clientId = $this->resolveClientId($request);
 
-        if (!$clientId) {
+        if (! $clientId) {
             return [];
         }
 
@@ -75,7 +75,7 @@ class ArticlePasswordCache
 
     private function storeVerifiedArticles(?string $clientId, array $verifiedArticles): void
     {
-        if (!$clientId) {
+        if (! $clientId) {
             return;
         }
 
@@ -90,7 +90,7 @@ class ArticlePasswordCache
     {
         $clientId = $request->cookie($this->cookieName());
 
-        if (!is_string($clientId) || $clientId === '') {
+        if (! is_string($clientId) || $clientId === '') {
             return null;
         }
 

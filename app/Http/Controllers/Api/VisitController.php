@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
-use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Models\Visit;
+use Illuminate\Http\Request;
 
 class VisitController extends Controller
 {
@@ -12,8 +12,8 @@ class VisitController extends Controller
     {
         return response()->json([
             'data' => [
-                "today" => Visit::where("date", date('Y/m/d'))->count(),
-                "total" => Visit::count(),
+                'today' => Visit::where('date', date('Y/m/d'))->count(),
+                'total' => Visit::count(),
             ],
         ]);
     }

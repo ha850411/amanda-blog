@@ -2,16 +2,16 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use App\Models\Tag;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\DB;
 
 class TagController extends Controller
 {
     /**
-    * 取得標籤樹（主選單 + 子選單）
-    */
+     * 取得標籤樹（主選單 + 子選單）
+     */
     public function index()
     {
         return response()->json([
@@ -72,9 +72,10 @@ class TagController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => '新增失敗：' . $e->getMessage(),
+                'message' => '新增失敗：'.$e->getMessage(),
             ], 500);
         }
     }
@@ -144,9 +145,10 @@ class TagController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => '更新失敗：' . $e->getMessage(),
+                'message' => '更新失敗：'.$e->getMessage(),
             ], 500);
         }
     }
@@ -174,9 +176,10 @@ class TagController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => '刪除失敗：' . $e->getMessage(),
+                'message' => '刪除失敗：'.$e->getMessage(),
             ], 500);
         }
     }
@@ -206,10 +209,10 @@ class TagController extends Controller
                 ->first();
         }
 
-        if (!$swapTag) {
+        if (! $swapTag) {
             return response()->json([
                 'success' => false,
-                'message' => '已經是最' . ($request->direction === 'up' ? '前' : '後') . '了',
+                'message' => '已經是最'.($request->direction === 'up' ? '前' : '後').'了',
             ]);
         }
 

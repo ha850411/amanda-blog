@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers\Api;
 
-use Exception;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Models\Article;
 use App\Support\ArticlePasswordCache;
 use Carbon\Carbon;
+use Exception;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ArticleController extends Controller
 {
@@ -36,10 +36,10 @@ class ArticleController extends Controller
                 })
                 ->when($request->input('tag'), function ($query) use ($request) {
                     $query->whereHas('tags', function ($query) use ($request) {
-                        $query->where('name', 'like', '%' . $request->input('tag') . '%');
+                        $query->where('name', 'like', '%'.$request->input('tag').'%');
                     });
                 })
-                ->when($request->input("tagId"), function ($query) use ($request) {
+                ->when($request->input('tagId'), function ($query) use ($request) {
                     $query->whereHas('tags', function ($query) use ($request) {
                         $query->where('tag.id', $request->input('tagId'));
                     });
@@ -103,7 +103,7 @@ class ArticleController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        if (!hash_equals((string) $article->password, (string) $validated['password'])) {
+        if (! hash_equals((string) $article->password, (string) $validated['password'])) {
             return response()->json([
                 'status' => 'error',
                 'message' => '密碼錯誤',
@@ -133,26 +133,26 @@ class ArticleController extends Controller
         try {
             $article = DB::transaction(function () use ($request) {
                 // 若有 id 則為修改模式
-                if ($request->input("id")) {
-                    $article = Article::find($request->input("id"));
+                if ($request->input('id')) {
+                    $article = Article::find($request->input('id'));
                     $article->update([
-                        'title' => $request->input("title", ""),
-                        'content' => $request->input("content", ""),
-                        'status' => $request->input("status", 1),
-                        'password' => $request->input("password", ""),
+                        'title' => $request->input('title', ''),
+                        'content' => $request->input('content', ''),
+                        'status' => $request->input('status', 1),
+                        'password' => $request->input('password', ''),
                     ]);
                     // 刪除原本對應的 tag
                     $article->tags()->detach();
                 } else {
                     $article = Article::create([
-                        'title' => $request->input("title", ""),
-                        'content' => $request->input("content", ""),
-                        'status' => $request->input("status", 1),
-                        'password' => $request->input("password", ""),
+                        'title' => $request->input('title', ''),
+                        'content' => $request->input('content', ''),
+                        'status' => $request->input('status', 1),
+                        'password' => $request->input('password', ''),
                     ]);
                 }
                 // 前端傳來的是物件陣列，需取出 id ['id' => 1, ...] -> [1, ...]
-                $tagIds = collect($request->input("selectedTags", []))->pluck('id')->toArray();
+                $tagIds = collect($request->input('selectedTags', []))->pluck('id')->toArray();
                 $article->tags()->attach($tagIds);
 
                 return $article;
@@ -190,6 +190,7 @@ class ArticleController extends Controller
                 'message' => $e->getMessage(),
             ]);
         }
+
         return response()->noContent();
     }
 
@@ -205,7 +206,7 @@ class ArticleController extends Controller
 
     private function resolveFirstImage(Article $article, bool $isPasswordVerified): ?string
     {
-        if ((int) $article->status === 2 && !$isPasswordVerified) {
+        if ((int) $article->status === 2 && ! $isPasswordVerified) {
             return null;
         }
 
