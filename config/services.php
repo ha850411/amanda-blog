@@ -71,4 +71,10 @@ return [
         'feed_delay_seconds' => (int) env('RIOT_ESPORTS_FEED_DELAY_SECONDS', 20),
     ],
 
+    'vlr' => [
+        'matches_url' => env('VLR_MATCHES_URL', 'https://www.vlr.gg/matches'),
+        'base_url' => env('VLR_BASE_URL', 'https://www.vlr.gg'),
+        'timeout_seconds' => (int) env('VLR_TIMEOUT_SECONDS', 8),
+    ],
+
 ];

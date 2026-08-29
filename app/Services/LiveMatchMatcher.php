@@ -89,9 +89,17 @@ class LiveMatchMatcher
             return 1.0;
         }
 
+        if (str_starts_with($left, $right) || str_starts_with($right, $left)) {
+            $shorter = min(strlen($left), strlen($right));
+            $longer = max(strlen($left), strlen($right));
+
+            return max(0.85, $shorter / $longer);
+        }
+
         similar_text($left, $right, $percentage);
 
         return $percentage / 100;
+
     }
 
     private function normalizeName(string $name): string

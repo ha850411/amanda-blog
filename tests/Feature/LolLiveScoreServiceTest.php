@@ -6,6 +6,7 @@ use App\Services\LiveMatchMatcher;
 use App\Services\LolLiveScoreService;
 use App\Services\OddsApiLiveScoreService;
 use App\Services\RiotEsportsLiveScoreService;
+use App\Services\VlrLiveScoreService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -74,6 +75,7 @@ class LolLiveScoreServiceTest extends TestCase
         $service = new LolLiveScoreService(
             new OddsApiLiveScoreService($matcher),
             new RiotEsportsLiveScoreService($matcher),
+            new VlrLiveScoreService($matcher),
         );
         $matches = [$this->match()];
 
@@ -117,6 +119,7 @@ class LolLiveScoreServiceTest extends TestCase
         $service = new LolLiveScoreService(
             new OddsApiLiveScoreService($matcher),
             new RiotEsportsLiveScoreService($matcher),
+            new VlrLiveScoreService($matcher),
         );
 
         $matches = [$this->match()];
@@ -146,6 +149,7 @@ class LolLiveScoreServiceTest extends TestCase
         $service = new LolLiveScoreService(
             new OddsApiLiveScoreService($matcher),
             new RiotEsportsLiveScoreService($matcher),
+            new VlrLiveScoreService($matcher),
         );
 
         $result = $service->enrich([$this->match()]);
@@ -178,6 +182,7 @@ class LolLiveScoreServiceTest extends TestCase
         $service = new LolLiveScoreService(
             new OddsApiLiveScoreService($matcher),
             new RiotEsportsLiveScoreService($matcher),
+            new VlrLiveScoreService($matcher),
         );
 
         $result = $service->enrich([$this->match()]);
@@ -187,6 +192,73 @@ class LolLiveScoreServiceTest extends TestCase
         $this->assertSame('3：1', $result[0]['series_score']);
         $this->assertSame('riot-esports', $result[0]['series_score_source']);
         Http::assertSentCount(1);
+    }
+
+    public function test_it_enriches_valorant_matches_through_vlr(): void
+    {
+        config([
+            'services.odds.api_key' => null,
+            'services.riot_esports.schedule_url' => 'https://lolesports.com/en-US/',
+            'services.vlr.matches_url' => 'https://www.vlr.gg/matches',
+        ]);
+
+        $vlrMatches = <<<'HTML'
+<div class="wf-card">
+    <a href="/742485/gen-g-vs-t1-vct-2026-pacific-stage-2-lr2" class="wf-module-item match-item mod-color mod-first">
+        <div class="match-item-vs">
+            <div class="match-item-vs-team">
+                <div class="match-item-vs-team-name">Gen.G</div>
+                <div class="match-item-vs-team-score">0</div>
+            </div>
+            <div class="match-item-vs-team">
+                <div class="match-item-vs-team-name">T1</div>
+                <div class="match-item-vs-team-score">1</div>
+            </div>
+        </div>
+        <div class="match-item-eta">
+            <div class="ml mod-live"><div class="ml-status">LIVE</div></div>
+        </div>
+    </a>
+</div>
+HTML;
+
+        $vlrDetail = <<<'HTML'
+<div class="match-header-vs">
+    <div class="match-header-vs-score">
+        <div class="sp-hide"><span>0</span><span class="colon">:</span><span>1</span></div>
+    </div>
+</div>
+<div class="vm-stats-game" data-game-id="1"><div class="score">5</div><div class="score">13</div></div>
+<div class="vm-stats-game mod-active" data-game-id="2"><div class="score">11</div><div class="score">12</div></div>
+HTML;
+
+        Http::fake([
+            'https://www.vlr.gg/matches' => Http::response($vlrMatches),
+            'https://www.vlr.gg/742485/gen-g-vs-t1-vct-2026-pacific-stage-2-lr2' => Http::response($vlrDetail),
+        ]);
+
+        $matcher = new LiveMatchMatcher;
+        $service = new LolLiveScoreService(
+            new OddsApiLiveScoreService($matcher),
+            new RiotEsportsLiveScoreService($matcher),
+            new VlrLiveScoreService($matcher),
+        );
+
+        $matches = [[
+            'game' => 'valorant',
+            'team1' => 'Gen.G Esports',
+            'team2' => 'T1',
+            'start_at' => CarbonImmutable::parse('2026-08-29T11:00:00Z'),
+            'is_live' => true,
+        ]];
+
+        $result = $service->enrich($matches);
+
+        $this->assertTrue($result[0]['is_live']);
+        $this->assertSame('0：1', $result[0]['series_score']);
+        $this->assertSame('vlr', $result[0]['series_score_source']);
+        $this->assertSame('11：12', $result[0]['score']);
+        $this->assertSame('vlr', $result[0]['score_source']);
     }
 
     /** @return array<string, mixed> */
