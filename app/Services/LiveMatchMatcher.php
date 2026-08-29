@@ -10,14 +10,20 @@ class LiveMatchMatcher
      * @param  array<int, array<string, mixed>>  $matches
      * @param  array<int, array<string, mixed>>  $events
      * @param  callable(array<string, mixed>): array{home: string, away: string}  $teams
+     * @param  array<int, string>  $supportedGames
      * @return array<int, array<string, mixed>>
      */
-    public function match(array $matches, array $events, callable $teams): array
+    public function match(
+        array $matches,
+        array $events,
+        callable $teams,
+        array $supportedGames = ['lol'],
+    ): array
     {
         $result = [];
 
         foreach ($matches as $index => $match) {
-            if (($match['game'] ?? null) !== 'lol') {
+            if (! in_array($match['game'] ?? null, $supportedGames, true)) {
                 continue;
             }
 

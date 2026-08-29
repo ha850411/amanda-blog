@@ -8,6 +8,8 @@ use Throwable;
 
 class OddsApiLiveScoreService
 {
+    private const SUPPORTED_GAMES = ['lol', 'cs'];
+
     public function __construct(private readonly LiveMatchMatcher $matcher) {}
 
     /**
@@ -18,7 +20,7 @@ class OddsApiLiveScoreService
     {
         $apiKey = trim((string) config('services.odds.api_key'));
 
-        if ($apiKey === '' || ! $this->containsLolMatch($matches)) {
+        if ($apiKey === '' || ! $this->containsSupportedMatch($matches)) {
             return $matches;
         }
 
@@ -50,6 +52,7 @@ class OddsApiLiveScoreService
                     'home' => is_string($event['home'] ?? null) ? $event['home'] : '',
                     'away' => is_string($event['away'] ?? null) ? $event['away'] : '',
                 ],
+                self::SUPPORTED_GAMES,
             );
 
             foreach ($matchedEvents as $index => $event) {
@@ -59,6 +62,15 @@ class OddsApiLiveScoreService
 
                 $matches[$index]['is_live'] = true;
                 $matches[$index]['live_event_id'] = isset($event['id']) ? (string) $event['id'] : null;
+
+                // Odds-API.io currently reports CS2 series/map wins in
+                // scores.periods, not the live round score of the active map.
+                // Do not keep presenting a possibly stale bo3.gg round score
+                // after an Odds API event has been matched successfully.
+                if (($matches[$index]['game'] ?? null) === 'cs') {
+                    $matches[$index]['score'] = null;
+                    unset($matches[$index]['score_source']);
+                }
 
                 if (! is_numeric($homeScore) || ! is_numeric($awayScore)) {
                     continue;
@@ -82,9 +94,11 @@ class OddsApiLiveScoreService
         return $matches;
     }
 
-    private function containsLolMatch(array $matches): bool
+    private function containsSupportedMatch(array $matches): bool
     {
-        return collect($matches)->contains(fn (array $match): bool => ($match['game'] ?? null) === 'lol');
+        return collect($matches)->contains(
+            fn (array $match): bool => in_array($match['game'] ?? null, self::SUPPORTED_GAMES, true),
+        );
     }
 
     private function score(mixed $left, mixed $right): string

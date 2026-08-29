@@ -10,8 +10,9 @@ class LolLiveScoreService
     ) {}
 
     /**
-     * Directly requests both live providers on every invocation. No Laravel
-     * Cache or persistent application state is used for live scores.
+     * Directly requests live providers on every invocation. Odds-API.io
+     * enriches LoL and CS2 series scores, while Riot enriches LoL game data.
+     * No Laravel Cache or persistent application state is used.
      *
      * @param  array<int, array<string, mixed>>  $matches
      * @return array<int, array<string, mixed>>
