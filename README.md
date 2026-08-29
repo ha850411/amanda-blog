@@ -63,7 +63,7 @@ LINE_SCHEDULE_IMAGE_RETENTION_DAYS=7
 
 輸入 `!help` 才會顯示使用說明；一般訊息與無效指令不會回覆。指令格式為 `!lol 08/11`、`!val 今天`、`!cs 明天`；只輸入 `!match`、`!lol`、`!val` 或 `!cs` 時，日期預設為台灣時間的今天。日期支援 `MM/DD`、今天、明天與後天；查詢今天時顯示滾球中和尚未開打的賽事，滾球賽事會加上標記，並在資料可取得時顯示目前比分；預設只查 S Tier。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`；未指定 `limit` 時最多顯示 19 場。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。LoL 與 VALORANT 賽程會另外透過 `BO3_API_URL` 取得最近五次 Head to Head 的系列賽勝場、小局總比分，以及每次交手的日期、BO 賽制、比分與勝方；逐場資訊會列在賽程圖中各對局的右側。資料暫時無法取得時仍會正常顯示賽程。
 
-當天 LoL 滾球比分不使用 Laravel Cache：設定 `ODDS_API_KEY` 後，每次指令會直接呼叫 Odds-API.io `/events/live` 更新系列賽比分；另設定 `PANDASCORE_API_TOKEN` 後，會直接查詢 PandaScore `/lives` 並短暫連線到其 Frames endpoint，使用最新 frame 顯示當局擊殺。兩個即時來源任一失敗時，保留 bo3.gg 比分作為備援。`PANDASCORE_FRAME_TIMEOUT_SECONDS` 預設 3 秒，因此使用 PandaScore 時 LINE 回覆可能增加數秒等待。
+當天 LoL 滾球比分不使用 Laravel Cache：設定 `ODDS_API_KEY` 後，每次指令會直接呼叫 Odds-API.io `/events/live` 更新系列賽比分；當局擊殺則會直接讀取 Riot LoL Esports 官網目前進行中的 game ID，再呼叫 `feed.lolesports.com/livestats/v1/window/{gameId}` 取得最新 frame。即時來源失敗時保留 bo3.gg 比分作為備援。Riot LoL Esports feed 是官網內部且未公開支援的接口，可能在 Riot 改版後需要同步調整。
 
 LINE webhook 會先記錄事件並快速回傳 HTTP 200，再由 queue worker 處理外部 API、圖片與 LINE 回覆；正式環境需執行 `php artisan migrate --force`，並保持 `php artisan queue:work --tries=3 --backoff=2 --timeout=300` 常駐。queue connection 的 `retry_after` 必須大於 300 秒（預設 330 秒），避免同一工作被重複執行。若事件在 queue 等待與背景處理的總時間超過 `LINE_REPLY_TOKEN_SAFE_WINDOW_SECONDS`（預設 45 秒），Bot 會跳過即將失效的 reply token，直接以事件來源 ID 改用 push message；若 Reply API 提早拒絕 token，也會 fallback 成 push。queue dispatch 失敗時 webhook 會回傳 HTTP 500，讓已開啟 webhook redelivery 的 LINE channel 能重新投遞事件。
 

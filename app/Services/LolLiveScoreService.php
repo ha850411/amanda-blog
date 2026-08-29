@@ -6,7 +6,7 @@ class LolLiveScoreService
 {
     public function __construct(
         private readonly OddsApiLiveScoreService $odds,
-        private readonly PandaScoreLiveScoreService $pandaScore,
+        private readonly RiotEsportsLiveScoreService $riotEsports,
     ) {}
 
     /**
@@ -20,6 +20,6 @@ class LolLiveScoreService
     {
         $matches = $this->odds->enrich($matches);
 
-        return $this->pandaScore->enrich($matches);
+        return $this->riotEsports->enrich($matches);
     }
 }

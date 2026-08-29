@@ -64,11 +64,11 @@ return [
         'timeout_seconds' => (int) env('ODDS_API_TIMEOUT_SECONDS', 10),
     ],
 
-    'pandascore' => [
-        'api_token' => env('PANDASCORE_API_TOKEN'),
-        'base_url' => env('PANDASCORE_API_BASE_URL', 'https://api.pandascore.co'),
-        'timeout_seconds' => (int) env('PANDASCORE_TIMEOUT_SECONDS', 5),
-        'frame_timeout_seconds' => (float) env('PANDASCORE_FRAME_TIMEOUT_SECONDS', 3),
+    'riot_esports' => [
+        'schedule_url' => env('RIOT_ESPORTS_SCHEDULE_URL', 'https://lolesports.com/en-US/'),
+        'feed_base_url' => env('RIOT_ESPORTS_FEED_BASE_URL', 'https://feed.lolesports.com/livestats/v1'),
+        'timeout_seconds' => (int) env('RIOT_ESPORTS_TIMEOUT_SECONDS', 8),
+        'feed_delay_seconds' => (int) env('RIOT_ESPORTS_FEED_DELAY_SECONDS', 20),
     ],
 
 ];

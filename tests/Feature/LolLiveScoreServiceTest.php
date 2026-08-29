@@ -5,27 +5,36 @@ namespace Tests\Feature;
 use App\Services\LiveMatchMatcher;
 use App\Services\LolLiveScoreService;
 use App\Services\OddsApiLiveScoreService;
-use App\Services\PandaScoreFrameStream;
-use App\Services\PandaScoreLiveScoreService;
+use App\Services\RiotEsportsLiveScoreService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
-use Mockery;
 use Tests\TestCase;
 
 class LolLiveScoreServiceTest extends TestCase
 {
-    public function test_it_fetches_fresh_series_and_current_game_scores_on_every_call(): void
+    protected function tearDown(): void
     {
+        CarbonImmutable::setTestNow();
+
+        parent::tearDown();
+    }
+
+    public function test_it_fetches_fresh_series_and_riot_current_game_scores_on_every_call(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-29T12:25:55Z');
         config([
             'services.odds.api_key' => 'odds-key',
             'services.odds.base_url' => 'https://api.odds-api.io/v3',
-            'services.pandascore.api_token' => 'panda-token',
-            'services.pandascore.base_url' => 'https://api.pandascore.co',
+            'services.riot_esports.schedule_url' => 'https://lolesports.com/en-US/',
+            'services.riot_esports.feed_base_url' => 'https://feed.lolesports.com/livestats/v1',
+            'services.riot_esports.timeout_seconds' => 8,
+            'services.riot_esports.feed_delay_seconds' => 20,
         ]);
 
         $oddsCalls = 0;
-        $pandaCalls = 0;
-        Http::fake(function ($request) use (&$oddsCalls, &$pandaCalls) {
+        $scheduleCalls = 0;
+        $feedCalls = 0;
+        Http::fake(function ($request) use (&$oddsCalls, &$scheduleCalls, &$feedCalls) {
             if (str_contains($request->url(), 'odds-api.io/v3/events/live')) {
                 $oddsCalls++;
 
@@ -43,43 +52,28 @@ class LolLiveScoreServiceTest extends TestCase
                 ]]);
             }
 
-            if (str_contains($request->url(), 'api.pandascore.co/lives')) {
-                $pandaCalls++;
+            if ($request->url() === 'https://lolesports.com/en-US/') {
+                $scheduleCalls++;
 
-                return Http::response([[
-                    'endpoints' => [[
-                        'match_id' => 888,
-                        'open' => true,
-                        'type' => 'frames',
-                        'url' => 'wss://live.pandascore.co/matches/888',
-                    ]],
-                    'match' => [
-                        'id' => 888,
-                        'date' => '2026-08-29T08:00:00Z',
-                        'opponents' => [
-                            ['opponent' => ['name' => 'Team Alpha']],
-                            ['opponent' => ['name' => 'Team Beta']],
-                        ],
-                    ],
-                ]]);
+                return Http::response('<script>'.$this->riotEvent().'</script>');
+            }
+
+            if (str_contains($request->url(), 'feed.lolesports.com/livestats/v1/window/999')) {
+                $feedCalls++;
+
+                return Http::response($this->riotWindow(
+                    alphaKills: 6 + $feedCalls,
+                    betaKills: 3 + $feedCalls,
+                ));
             }
 
             return Http::response([], 404);
         });
 
-        $frames = Mockery::mock(PandaScoreFrameStream::class);
-        $frames->shouldReceive('firstFrame')
-            ->twice()
-            ->with('wss://live.pandascore.co/matches/888', 'panda-token')
-            ->andReturn(
-                $this->frame(alphaKills: 7, betaKills: 4),
-                $this->frame(alphaKills: 8, betaKills: 5),
-            );
-
         $matcher = new LiveMatchMatcher;
         $service = new LolLiveScoreService(
             new OddsApiLiveScoreService($matcher),
-            new PandaScoreLiveScoreService($matcher, $frames),
+            new RiotEsportsLiveScoreService($matcher),
         );
         $matches = [$this->match()];
 
@@ -90,39 +84,109 @@ class LolLiveScoreServiceTest extends TestCase
         $this->assertSame('2：0', $second[0]['series_score']);
         $this->assertSame('odds-api', $second[0]['series_score_source']);
         $this->assertSame('8：5', $second[0]['score']);
-        $this->assertSame('pandascore', $second[0]['score_source']);
+        $this->assertSame('riot-esports', $second[0]['score_source']);
+        $this->assertSame('999', $second[0]['live_game_id']);
+        $this->assertSame(4, $second[0]['live_game_number']);
+        $this->assertSame('2026-08-29T12:25:39.943Z', $second[0]['live_frame_at']);
         $this->assertSame(2, $oddsCalls);
-        $this->assertSame(2, $pandaCalls);
+        $this->assertSame(2, $scheduleCalls);
+        $this->assertSame(2, $feedCalls);
 
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/events/live')
             && $request->hasHeader('Cache-Control', 'no-cache, no-store')
             && $request['apiKey'] === 'odds-key'
             && $request['sport'] === 'esports');
-        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/lives')
-            && $request->hasHeader('Authorization', 'Bearer panda-token')
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://lolesports.com/en-US/'
+            && $request->hasHeader('Cache-Control', 'no-cache, no-store'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/window/999')
             && $request->hasHeader('Cache-Control', 'no-cache, no-store')
-            && $request['per_page'] === 100);
+            && $request['startingTime'] === '2026-08-29T12:25:30.000Z');
     }
 
-    public function test_it_keeps_bo3_fallback_values_when_live_credentials_are_missing(): void
+    public function test_it_keeps_bo3_fallback_values_when_riot_live_data_is_unavailable(): void
     {
         config([
             'services.odds.api_key' => null,
-            'services.pandascore.api_token' => null,
+            'services.riot_esports.schedule_url' => 'https://lolesports.com/en-US/',
         ]);
-        Http::fake();
+        Http::fake([
+            'https://lolesports.com/en-US/' => Http::response('<html></html>'),
+        ]);
 
         $matcher = new LiveMatchMatcher;
         $service = new LolLiveScoreService(
             new OddsApiLiveScoreService($matcher),
-            new PandaScoreLiveScoreService($matcher, Mockery::mock(PandaScoreFrameStream::class)),
+            new RiotEsportsLiveScoreService($matcher),
         );
 
         $matches = [$this->match()];
         $result = $service->enrich($matches);
 
         $this->assertSame($matches, $result);
-        Http::assertNothingSent();
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_uses_riot_series_score_when_odds_live_score_is_unavailable(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-29T12:25:55Z');
+        config([
+            'services.odds.api_key' => null,
+            'services.riot_esports.schedule_url' => 'https://lolesports.com/en-US/',
+            'services.riot_esports.feed_base_url' => 'https://feed.lolesports.com/livestats/v1',
+            'services.riot_esports.feed_delay_seconds' => 20,
+        ]);
+        Http::fake([
+            'https://lolesports.com/en-US/' => Http::response('<script>'.$this->riotEvent().'</script>'),
+            'https://feed.lolesports.com/livestats/v1/window/999*' => Http::response(
+                $this->riotWindow(alphaKills: 7, betaKills: 4),
+            ),
+        ]);
+
+        $matcher = new LiveMatchMatcher;
+        $service = new LolLiveScoreService(
+            new OddsApiLiveScoreService($matcher),
+            new RiotEsportsLiveScoreService($matcher),
+        );
+
+        $result = $service->enrich([$this->match()]);
+
+        $this->assertSame('1：0', $result[0]['series_score']);
+        $this->assertSame('riot-esports', $result[0]['series_score_source']);
+        $this->assertSame('7：4', $result[0]['score']);
+    }
+
+    public function test_it_marks_a_stale_bo3_live_match_as_completed_from_riot(): void
+    {
+        config([
+            'services.odds.api_key' => null,
+            'services.riot_esports.schedule_url' => 'https://lolesports.com/en-US/',
+        ]);
+        $event = json_decode($this->riotEvent(), true, flags: JSON_THROW_ON_ERROR);
+        $event['state'] = 'completed';
+        $event['match']['state'] = 'completed';
+        $event['match']['games'][3]['state'] = 'completed';
+        $event['matchTeams'][0]['result'] = ['gameWins' => 3, 'outcome' => 'win'];
+        $event['matchTeams'][1]['result'] = ['gameWins' => 1, 'outcome' => 'loss'];
+
+        Http::fake([
+            'https://lolesports.com/en-US/' => Http::response(
+                '<script>'.json_encode($event, JSON_THROW_ON_ERROR).'</script>',
+            ),
+        ]);
+
+        $matcher = new LiveMatchMatcher;
+        $service = new LolLiveScoreService(
+            new OddsApiLiveScoreService($matcher),
+            new RiotEsportsLiveScoreService($matcher),
+        );
+
+        $result = $service->enrich([$this->match()]);
+
+        $this->assertFalse($result[0]['is_live']);
+        $this->assertSame('riot-esports', $result[0]['live_status_source']);
+        $this->assertSame('3：1', $result[0]['series_score']);
+        $this->assertSame('riot-esports', $result[0]['series_score_source']);
+        Http::assertSentCount(1);
     }
 
     /** @return array<string, mixed> */
@@ -139,25 +203,58 @@ class LolLiveScoreServiceTest extends TestCase
         ];
     }
 
+    private function riotEvent(): string
+    {
+        return json_encode([
+            '__typename' => 'EventMatch',
+            'id' => '888',
+            'blockName' => 'Playoffs',
+            'startTime' => '2026-08-29T08:00:00Z',
+            'state' => 'completed',
+            'type' => 'match',
+            'matchTeams' => [
+                [
+                    'id' => '888:111',
+                    'name' => 'Team Alpha',
+                    'code' => 'ALP',
+                    'result' => ['gameWins' => 1, 'outcome' => null],
+                ],
+                [
+                    'id' => '888:222',
+                    'name' => 'Team Beta',
+                    'code' => 'BET',
+                    'result' => ['gameWins' => 0, 'outcome' => null],
+                ],
+            ],
+            'match' => [
+                'id' => '888',
+                'state' => 'inProgress',
+                'games' => [
+                    ['id' => '996', 'number' => 1, 'state' => 'completed'],
+                    ['id' => '997', 'number' => 2, 'state' => 'completed'],
+                    ['id' => '998', 'number' => 3, 'state' => 'completed'],
+                    ['id' => '999', 'number' => 4, 'state' => 'inProgress'],
+                ],
+            ],
+        ], JSON_THROW_ON_ERROR);
+    }
+
     /** @return array<string, mixed> */
-    private function frame(int $alphaKills, int $betaKills): array
+    private function riotWindow(int $alphaKills, int $betaKills): array
     {
         return [
-            'match' => ['id' => 888],
-            'game' => ['id' => 999, 'finished' => false, 'winner_id' => null],
-            'blue' => [
-                'id' => 2,
-                'name' => 'Team Beta',
-                'kills' => $betaKills,
-                'score' => 0,
+            'esportsGameId' => '999',
+            'esportsMatchId' => '888',
+            'gameMetadata' => [
+                'blueTeamMetadata' => ['esportsTeamId' => '222'],
+                'redTeamMetadata' => ['esportsTeamId' => '111'],
             ],
-            'red' => [
-                'id' => 1,
-                'name' => 'Team Alpha',
-                'kills' => $alphaKills,
-                'score' => 1,
-            ],
-            'current_timestamp' => 532,
+            'frames' => [[
+                'rfc460Timestamp' => '2026-08-29T12:25:39.943Z',
+                'gameState' => 'in_game',
+                'blueTeam' => ['totalKills' => $betaKills],
+                'redTeam' => ['totalKills' => $alphaKills],
+            ]],
         ];
     }
 }
