@@ -64,4 +64,11 @@ return [
         'timeout_seconds' => (int) env('ODDS_API_TIMEOUT_SECONDS', 10),
     ],
 
+    'pandascore' => [
+        'api_token' => env('PANDASCORE_API_TOKEN'),
+        'base_url' => env('PANDASCORE_API_BASE_URL', 'https://api.pandascore.co'),
+        'timeout_seconds' => (int) env('PANDASCORE_TIMEOUT_SECONDS', 5),
+        'frame_timeout_seconds' => (float) env('PANDASCORE_FRAME_TIMEOUT_SECONDS', 3),
+    ],
+
 ];

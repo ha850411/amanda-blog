@@ -50,20 +50,12 @@ class OddsApiService
      */
     private function eventsForDate(CarbonImmutable $date, string $apiKey): array
     {
-        $cacheKey = 'odds-api:events:'.$date->format('Y-m-d');
-
-        try {
-            $cached = Cache::get($cacheKey);
-
-            if (is_array($cached)) {
-                return $cached;
-            }
-        } catch (Throwable) {
-            // Cache is optional for this integration.
-        }
-
         $response = Http::acceptJson()
             ->withUserAgent('AmandaBlogLineBot/1.0')
+            ->withHeaders([
+                'Cache-Control' => 'no-cache, no-store',
+                'Pragma' => 'no-cache',
+            ])
             ->timeout((int) config('services.odds.timeout_seconds', 10))
             ->get(rtrim((string) config('services.odds.base_url'), '/').'/events', [
                 'apiKey' => $apiKey,
@@ -80,15 +72,8 @@ class OddsApiService
         }
 
         $events = $response->json();
-        $events = is_array($events) ? array_values(array_filter($events, 'is_array')) : [];
 
-        try {
-            Cache::put($cacheKey, $events, (int) config('services.odds.cache_seconds', 60));
-        } catch (Throwable) {
-            // Cache is optional for this integration.
-        }
-
-        return $events;
+        return is_array($events) ? array_values(array_filter($events, 'is_array')) : [];
     }
 
     /**

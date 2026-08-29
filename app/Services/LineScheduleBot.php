@@ -19,6 +19,7 @@ class LineScheduleBot
         private readonly OddsApiService $odds,
         private readonly Bo3OddsService $bo3Odds,
         private readonly Bo3HeadToHeadService $headToHead,
+        private readonly LolLiveScoreService $liveScores,
     ) {}
 
     public function respond(string $message): ?string
@@ -66,6 +67,8 @@ class LineScheduleBot
         $now = CarbonImmutable::now($timezone);
 
         if ($command['date']->isSameDay($now)) {
+            $allMatches = $this->liveScores->enrich($allMatches);
+
             $allMatches = array_values(array_filter(
                 $allMatches,
                 fn (array $match): bool => ($match['is_live'] ?? false)
