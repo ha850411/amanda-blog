@@ -151,8 +151,13 @@ class Bo3ScheduleService
             $index = $knownMatches[$key];
             $structuredMatches[$index]['is_live'] = ($structuredMatches[$index]['is_live'] ?? false)
                 || ($match['is_live'] ?? false);
-            $structuredMatches[$index]['series_score'] ??= $match['series_score'] ?? null;
-            $structuredMatches[$index]['score'] ??= $match['score'] ?? null;
+            if (($match['series_score'] ?? null) !== null) {
+                $structuredMatches[$index]['series_score'] = $match['series_score'];
+            }
+            if (($match['score'] ?? null) !== null) {
+                $structuredMatches[$index]['score'] = $match['score'];
+                $structuredMatches[$index]['score_source'] = 'bo3';
+            }
         }
 
         $structuredMatches = $this->enrichLiveDetailsAndMissingFormats($structuredMatches);
@@ -299,7 +304,7 @@ class Bo3ScheduleService
                     ->acceptJson()
                     ->withUserAgent('AmandaBlogLineBot/1.0')
                     ->timeout((int) config('services.bo3.timeout_seconds', 10))
-                    ->get($this->baseUrl().'/api/v1/matches/'.rawurlencode($slug));
+                    ->get($this->apiUrl().'/matches/'.rawurlencode($slug));
             }
         }, 5);
 
@@ -328,7 +333,8 @@ class Bo3ScheduleService
             $seriesScore = $this->extractSeriesScoreFromApi($response->json());
 
             if ($seriesScore !== null) {
-                $matches[$index]['series_score'] ??= $seriesScore;
+                $matches[$index]['series_score'] = $seriesScore;
+                $matches[$index]['series_score_source'] = 'bo3';
             }
 
             $mapScore = $this->extractMapScoreFromApi($response->json());
@@ -537,8 +543,9 @@ class Bo3ScheduleService
             }
         }
 
-        if (isset($data['maps']) && is_array($data['maps'])) {
-            $liveMap = collect($data['maps'])
+        $maps = $data['match_maps'] ?? $data['maps'] ?? null;
+        if (is_array($maps)) {
+            $liveMap = collect($maps)
                 ->first(fn (mixed $map): bool => is_array($map) && in_array(
                     mb_strtolower(trim((string) ($map['status'] ?? ''))),
                     ['current', 'live', 'in_progress', 'ongoing', 'playing', 'active'],
@@ -554,6 +561,17 @@ class Bo3ScheduleService
                 if ($score !== null) {
                     return $score;
                 }
+            }
+        }
+
+        if (isset($data['team1_last_game_score'], $data['team2_last_game_score'])) {
+            $score = $this->scoreFromValues(
+                $data['team1_last_game_score'],
+                $data['team2_last_game_score'],
+            );
+
+            if ($score !== null) {
+                return $score;
             }
         }
 

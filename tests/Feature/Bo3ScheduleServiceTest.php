@@ -69,12 +69,13 @@ class Bo3ScheduleServiceTest extends TestCase
     {
         config([
             'services.bo3.base_url' => 'https://bo3.gg',
+            'services.bo3.api_url' => 'https://api.bo3.gg/api/v1',
             'services.bo3.timezone' => 'Asia/Taipei',
         ]);
 
         Http::fake([
             'https://bo3.gg/lol/matches/current*' => Http::response($this->liveScheduleHtml(), 200),
-            'https://bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026' => Http::response([
+            'https://api.bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026' => Http::response([
                 'status' => 'current',
                 'bo_type' => 3,
                 'team1_score' => 1,
@@ -98,7 +99,7 @@ class Bo3ScheduleServiceTest extends TestCase
         $this->assertSame('6：14', $matches[0]['score']);
 
         Http::assertSent(fn ($request): bool => $request->url()
-            === 'https://bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026');
+            === 'https://api.bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026');
     }
 
     public function test_lol_live_match_fetches_and_separates_series_and_current_game_scores(): void
@@ -114,6 +115,16 @@ class Bo3ScheduleServiceTest extends TestCase
                 str_replace('6 - 14', 'Bo3', $this->liveScheduleHtml()),
                 200,
             ),
+            'https://api.bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026' => Http::response([
+                'status' => 'current',
+                'bo_type' => 3,
+                'team1_score' => 1,
+                'team2_score' => 0,
+                'live_updates' => [
+                    'team_1' => ['match_score' => 1, 'game_score' => 7],
+                    'team_2' => ['match_score' => 0, 'game_score' => 4],
+                ],
+            ], 200),
             'https://api.bo3.gg/api/v1/matches*' => Http::response([
                 'results' => [$this->valorantApiMatch(
                     'shifters-vs-sk-gaming-14-08-2026',
@@ -125,16 +136,6 @@ class Bo3ScheduleServiceTest extends TestCase
                     1,
                     0,
                 )],
-            ], 200),
-            'https://bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026' => Http::response([
-                'status' => 'current',
-                'bo_type' => 3,
-                'team1_score' => 1,
-                'team2_score' => 0,
-                'live_updates' => [
-                    'team_1' => ['match_score' => 1, 'game_score' => 7],
-                    'team_2' => ['match_score' => 0, 'game_score' => 4],
-                ],
             ], 200),
         ]);
 
@@ -148,7 +149,7 @@ class Bo3ScheduleServiceTest extends TestCase
         $this->assertSame('1：0', $matches[0]['series_score']);
         $this->assertSame('7：4', $matches[0]['score']);
         Http::assertSent(fn ($request): bool => $request->url()
-            === 'https://bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026');
+            === 'https://api.bo3.gg/api/v1/matches/shifters-vs-sk-gaming-14-08-2026');
     }
 
     public function test_lol_schedule_merges_the_complete_local_day_from_the_api(): void
@@ -188,6 +189,48 @@ class Bo3ScheduleServiceTest extends TestCase
 
             return $request['filter']['matches.discipline_id']['eq'] === 3;
         });
+    }
+
+    public function test_cs_live_match_merges_series_and_map_score_from_api(): void
+    {
+        config([
+            'services.bo3.base_url' => 'https://bo3.gg',
+            'services.bo3.api_url' => 'https://api.bo3.gg/api/v1',
+            'services.bo3.timezone' => 'Asia/Taipei',
+        ]);
+
+        Http::fake([
+            'https://bo3.gg/matches/current*' => Http::response(
+                '<html><script id="micro-markup" type="application/ld+json">[]</script></html>',
+                200,
+            ),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response([
+                'results' => [[
+                    'slug' => 'furia-vs-mouz-cs-29-08-2026',
+                    'start_date' => '2026-08-29T12:00:00.000+00:00',
+                    'bo_type' => 3,
+                    'tier' => 's',
+                    'status' => 'current',
+                    'team1_score' => 1,
+                    'team2_score' => 1,
+                    'round_score' => '11 - 7',
+                    'team1' => ['name' => 'FURIA'],
+                    'team2' => ['name' => 'MOUZ'],
+                    'tournament' => ['name' => 'BLAST Open Fall 2026'],
+                ]],
+            ], 200),
+        ]);
+
+        $matches = app(Bo3ScheduleService::class)->forDate(
+            'cs',
+            CarbonImmutable::parse('2026-08-29', 'Asia/Taipei'),
+            ['s'],
+        );
+
+        $this->assertCount(1, $matches);
+        $this->assertTrue($matches[0]['is_live']);
+        $this->assertSame('1：1', $matches[0]['series_score']);
+        $this->assertSame('11：7', $matches[0]['score']);
     }
 
     private function liveScheduleHtml(): string

@@ -104,6 +104,54 @@ class LiveMatchMatcher
 
     private function normalizeName(string $name): string
     {
-        return preg_replace('/[^a-z0-9]+/u', '', mb_strtolower($name)) ?? '';
+        $normalized = preg_replace('/[^a-z0-9]+/u', '', mb_strtolower($name)) ?? '';
+
+        $aliases = [
+            'navi' => 'natusvincere',
+            'mouz' => 'mousesports',
+            'nip' => 'ninjasinpyjamas',
+            'vp' => 'virtuspro',
+            'eg' => 'evilgeniuses',
+            'c9' => 'cloud9',
+            '100t' => '100thieves',
+            'th' => 'teamheretics',
+            'kc' => 'karminecorp',
+            'ts' => 'teamsecret',
+            'dk' => 'dpluskia',
+            'kdf' => 'kwangdongfreecs',
+            'fox' => 'fearx',
+            'bro' => 'brion',
+            'freditbrion' => 'brion',
+            'oksavingsbankbrion' => 'brion',
+            'gen' => 'geng',
+            'gengesports' => 'geng',
+            't1esports' => 't1',
+            'prx' => 'paperrex',
+            'fnc' => 'fnatic',
+            'tl' => 'liquid',
+            'teamliquid' => 'liquid',
+            'teamspirit' => 'spirit',
+            'teamfalcons' => 'falcons',
+            'furiaesports' => 'furia',
+            'futesports' => 'fut',
+            'lynnvision' => 'lynnvision',
+            'lynnvisiongaming' => 'lynnvision',
+            'complexitygaming' => 'complexity',
+            'bigclan' => 'big',
+            'fazeclan' => 'faze',
+            'g2esports' => 'g2',
+            'imperialesports' => 'imperial',
+            'paingaming' => 'pain',
+            'bleed' => 'bleedesports',
+            'betboomteam' => 'betboom',
+            'nemigagaming' => 'nemiga',
+            'amkalesports' => 'amkal',
+            'wildcardgaming' => 'wildcard',
+            'sangalesports' => 'sangal',
+            'nordicpartnersgaming' => 'nordicpartners',
+            'innercircleesports' => 'innercircle',
+        ];
+
+        return $aliases[$normalized] ?? $normalized;
     }
 }

@@ -254,7 +254,7 @@ class LineScheduleBot
      */
     private function parseCommand(string $message): ?array
     {
-        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs)(?:\s+(今天|明天|後天|\d{1,2}\/\d{1,2}))?(?:\s+(.*))?$/iu', $message, $matches)) {
+        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs2|cs)(?:\s+(今天|明天|後天|\d{1,2}\/\d{1,2}))?(?:\s+(.*))?$/iu', $message, $matches)) {
             return null;
         }
 
@@ -278,7 +278,7 @@ class LineScheduleBot
         if (in_array($commandKey, ['賽程', 'schedule', 'match', 'matches'], true)) {
             $games = $options['games'] ?? ['lol', 'valorant', 'cs'];
         } else {
-            $defaultGame = ['lol' => 'lol', 'val' => 'valorant', 'cs' => 'cs'][$commandKey];
+            $defaultGame = ['lol' => 'lol', 'val' => 'valorant', 'cs' => 'cs', 'cs2' => 'cs'][$commandKey];
             $games = $options['games'] ?? [$defaultGame];
         }
 

@@ -144,4 +144,43 @@ class OddsApiLiveScoreServiceTest extends TestCase
         $this->assertSame($matches, $result);
         Http::assertNothingSent();
     }
+
+    public function test_it_matches_cs_teams_using_canonical_aliases(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-29T13:00:00Z');
+        config([
+            'services.odds.api_key' => 'odds-key',
+            'services.odds.base_url' => 'https://api.odds-api.io/v3',
+            'services.odds.timeout_seconds' => 10,
+        ]);
+        Http::fake([
+            'https://api.odds-api.io/v3/events/live*' => Http::response([
+                [
+                    'id' => 111,
+                    'home' => 'Natus Vincere',
+                    'away' => 'mousesports',
+                    'date' => '2026-08-29T13:00:00Z',
+                    'status' => 'live',
+                    'scores' => [
+                        'home' => 1,
+                        'away' => 0,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $service = new OddsApiLiveScoreService(new LiveMatchMatcher);
+        $result = $service->enrich([[
+            'game' => 'cs',
+            'team1' => 'NAVI',
+            'team2' => 'MOUZ',
+            'start_at' => CarbonImmutable::parse('2026-08-29T13:00:00Z'),
+            'is_live' => true,
+        ]]);
+
+        $this->assertTrue($result[0]['is_live']);
+        $this->assertSame('1：0', $result[0]['series_score']);
+        $this->assertSame('odds-api', $result[0]['series_score_source']);
+        $this->assertSame('111', $result[0]['live_event_id']);
+    }
 }
