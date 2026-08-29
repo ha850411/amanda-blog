@@ -18,8 +18,7 @@ class LiveMatchMatcher
         array $events,
         callable $teams,
         array $supportedGames = ['lol'],
-    ): array
-    {
+    ): array {
         $result = [];
 
         foreach ($matches as $index => $match) {
