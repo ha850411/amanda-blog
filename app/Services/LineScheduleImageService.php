@@ -974,8 +974,6 @@ class LineScheduleImageService
             $draw->setFontWeight(800);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
             $draw->annotation($centerX, $boxY + 38, $mapScore);
-        } elseif ($parsedSeries !== null) {
-            [$s1, $s2] = $parsedSeries;
         } else {
             // Live map score starting at 0:0 when not yet registered
             [$s1, $s2] = [0, 0];
