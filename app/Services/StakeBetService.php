@@ -1138,18 +1138,24 @@ GRAPHQL;
             ? (int) $eventStatus['awayScore']
             : null;
 
+        $periodScore = $this->resolveCurrentPeriodScore($eventStatus, $matchStatus);
+        $stageText = $matchStatus;
+        if ($periodScore !== null) {
+            $stageText = $stageText !== null ? "{$stageText} {$periodScore}" : $periodScore;
+        }
+
         $startTime = $fixture['data']['startTime'] ?? null;
 
         if ($status === 'live') {
             if ($homeScore !== null && $awayScore !== null) {
                 $scoreText = "{$homeScore}-{$awayScore}";
 
-                return $matchStatus !== null
-                    ? "滾球中（{$scoreText}，{$matchStatus}）"
+                return $stageText !== null
+                    ? "滾球中（{$scoreText}，{$stageText}）"
                     : "滾球中（{$scoreText}）";
             }
 
-            return $matchStatus !== null ? "滾球中（{$matchStatus}）" : '滾球進行中';
+            return $stageText !== null ? "滾球中（{$stageText}）" : '滾球進行中';
         }
 
         if (is_string($startTime) && trim($startTime) !== '') {
@@ -1168,6 +1174,71 @@ GRAPHQL;
         }
 
         return $matchStatus ?? '未開賽';
+    }
+
+    /**
+     * @param  array<string, mixed>  $eventStatus
+     */
+    private function resolveCurrentPeriodScore(array $eventStatus, ?string $matchStatus): ?string
+    {
+        $scoreboard = is_array($eventStatus['scoreboard'] ?? null) ? $eventStatus['scoreboard'] : null;
+
+        if ($scoreboard !== null) {
+            // Rounds (CS2 / Valorant)
+            if (isset($scoreboard['homeWonRounds'], $scoreboard['awayWonRounds'])
+                && is_numeric($scoreboard['homeWonRounds'])
+                && is_numeric($scoreboard['awayWonRounds'])) {
+                return ((int) $scoreboard['homeWonRounds']).'-'.((int) $scoreboard['awayWonRounds']);
+            }
+
+            // Kills (LoL / Dota 2)
+            if (isset($scoreboard['homeKills'], $scoreboard['awayKills'])
+                && is_numeric($scoreboard['homeKills'])
+                && is_numeric($scoreboard['awayKills'])) {
+                return ((int) $scoreboard['homeKills']).'-'.((int) $scoreboard['awayKills']);
+            }
+
+            // Goals (Soccer / Rocket League)
+            if (isset($scoreboard['homeGoals'], $scoreboard['awayGoals'])
+                && is_numeric($scoreboard['homeGoals'])
+                && is_numeric($scoreboard['awayGoals'])) {
+                return ((int) $scoreboard['homeGoals']).'-'.((int) $scoreboard['awayGoals']);
+            }
+        }
+
+        // Tennis game score
+        if (isset($eventStatus['homeGameScore'], $eventStatus['awayGameScore'])
+            && trim((string) $eventStatus['homeGameScore']) !== ''
+            && trim((string) $eventStatus['awayGameScore']) !== '') {
+            return trim((string) $eventStatus['homeGameScore']).'-'.trim((string) $eventStatus['awayGameScore']);
+        }
+
+        // Period scores fallback
+        $periodScores = is_array($eventStatus['periodScores'] ?? null) ? $eventStatus['periodScores'] : [];
+        foreach ($periodScores as $p) {
+            if (! is_array($p)) {
+                continue;
+            }
+
+            if (($p['type'] ?? null) === 'map') {
+                if ($matchStatus !== null && ($p['matchStatus'] ?? null) === $matchStatus) {
+                    if (isset($p['homeWonRounds'], $p['awayWonRounds']) && is_numeric($p['homeWonRounds']) && is_numeric($p['awayWonRounds'])) {
+                        return ((int) $p['homeWonRounds']).'-'.((int) $p['awayWonRounds']);
+                    }
+                    if (isset($p['homeKills'], $p['awayKills']) && is_numeric($p['homeKills']) && is_numeric($p['awayKills'])) {
+                        return ((int) $p['homeKills']).'-'.((int) $p['awayKills']);
+                    }
+                }
+            } else {
+                if ($matchStatus !== null && ($p['matchStatus'] ?? null) === $matchStatus) {
+                    if (isset($p['homeScore'], $p['awayScore']) && is_numeric($p['homeScore']) && is_numeric($p['awayScore'])) {
+                        return ((int) $p['homeScore']).'-'.((int) $p['awayScore']);
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private function formatNumber(float $number): string

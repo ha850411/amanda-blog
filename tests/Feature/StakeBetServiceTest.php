@@ -300,6 +300,45 @@ class StakeBetServiceTest extends TestCase
         $this->assertTrue($reply->imageData['bets'][0]['cashout_disabled']);
     }
 
+    public function test_bet_command_displays_in_progress_period_scores(): void
+    {
+        $betsResponse = $this->sampleActiveSportBetsResponse();
+        // Bet 1, leg 1 (T1 vs DK): add kills scoreboard
+        $betsResponse['data']['user']['activeSportBets'][0]['outcomes'][0]['fixture']['eventStatus']['scoreboard'] = [
+            '__typename' => 'SportFixtureEventScoreboard',
+            'homeKills' => 14,
+            'awayKills' => 7,
+            'homeWonRounds' => null,
+            'awayWonRounds' => null,
+            'homeGoals' => null,
+            'awayGoals' => null,
+        ];
+        // Bet 1, leg 2 (IG vs WE): add rounds scoreboard
+        $betsResponse['data']['user']['activeSportBets'][0]['outcomes'][1]['fixture']['eventStatus']['scoreboard'] = [
+            '__typename' => 'SportFixtureEventScoreboard',
+            'homeKills' => null,
+            'awayKills' => null,
+            'homeWonRounds' => 12,
+            'awayWonRounds' => 11,
+            'homeGoals' => null,
+            'awayGoals' => null,
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push($this->sampleActiveBetCountResponse(), 200)
+                ->push($betsResponse, 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('賽況：滾球中（0-0，一號地圖 14-7）', $reply->text);
+        $this->assertStringContainsString('賽況：滾球中（1-1，三號地圖 12-11）', $reply->text);
+        $this->assertSame('滾球中（0-0，一號地圖 14-7）', $reply->imageData['bets'][0]['legs'][0]['match_status']);
+        $this->assertSame('滾球中（1-1，三號地圖 12-11）', $reply->imageData['bets'][0]['legs'][1]['match_status']);
+    }
+
     /**
      * @return array<string, mixed>
      */

@@ -789,10 +789,16 @@ class LineScheduleImageService
                     $statusBadgeX = $matchLeft + min(400, $tourW) + 14;
 
                     if ($isLive) {
+                        $draw->setFontSize(12);
+                        $draw->setFontWeight(600);
+                        $metrics = $image->queryFontMetrics($draw, $matchStatus);
+                        $textW = (int) round($metrics['textWidth']);
+                        $badgeW = max(110, min(240, $textW + 30));
+
                         $draw->setFillColor('#3b0811');
                         $draw->setStrokeColor('#ef4444');
                         $draw->setStrokeWidth(1);
-                        $draw->roundRectangle($statusBadgeX, $legY + 12, $statusBadgeX + 175, $legY + 34, 4, 4);
+                        $draw->roundRectangle($statusBadgeX, $legY + 12, $statusBadgeX + $badgeW, $legY + 34, 4, 4);
 
                         // Red dot
                         $draw->setFillColor('#ef4444');
@@ -802,7 +808,7 @@ class LineScheduleImageService
                         $draw->setFillColor('#fca5a5');
                         $draw->setFontSize(12);
                         $draw->setFontWeight(600);
-                        $draw->annotation($statusBadgeX + 18, $legY + 27, $this->fitText($image, $draw, $matchStatus, 150, 10));
+                        $draw->annotation($statusBadgeX + 18, $legY + 27, $this->fitText($image, $draw, $matchStatus, $badgeW - 24, 10));
                     } else {
                         $draw->setFillColor('#64748b');
                         $draw->setFontSize(13);
