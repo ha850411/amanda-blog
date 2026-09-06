@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 22;
+    private const CACHE_VERSION = 23;
 
     private const CARD_HEIGHT = 180;
 
@@ -88,41 +88,7 @@ class LineScheduleImageService
     /**
      * Generate the image resolutions used by LINE and return their base URL.
      *
-     * @param  array{
-     *     title: string,
-     *     subtitle: string,
-     *     game?: ?string,
-     *     matches: array<int, array{
-     *         start_time: string,
-     *         format: string,
-     *         is_live?: bool,
-     *         series_score?: ?string,
-     *         score?: ?string,
-     *         team1: string,
-     *         team2: string,
-     *         tournament: string,
-     *         game?: ?string,
-     *         odds: ?array{
-     *             team1: array{price: float, bookmaker: string},
-     *             team2: array{price: float, bookmaker: string}
-     *         },
-     *         h2h?: ?array{
-     *             sample_size: int,
-     *             history_total: int,
-     *             team1_wins: int,
-     *             team2_wins: int,
-     *             team1_games: int,
-     *             team2_games: int,
-     *             series?: array<int, array{
-     *                 date: string,
-     *                 format: string,
-     *                 team1_score: int,
-     *                 team2_score: int,
-     *                 winner: 'team1'|'team2'
-     *             }>
-     *         }
-     *     }>
-     * }  $data
+     * @param  array<string, mixed>  $data
      */
     public function create(array $data, string $linkUrl): string
     {
@@ -159,9 +125,21 @@ class LineScheduleImageService
     }
 
     /**
-     * @param  array{title: string, subtitle: string, game?: ?string, matches: array<int, array<string, mixed>>}  $data
+     * @param  array<string, mixed>  $data
      */
     private function render(array $data): Imagick
+    {
+        if (($data['type'] ?? '') === 'bets' || isset($data['bets'])) {
+            return $this->renderBets($data);
+        }
+
+        return $this->renderSchedule($data);
+    }
+
+    /**
+     * @param  array{title: string, subtitle: string, game?: ?string, matches: array<int, array<string, mixed>>}  $data
+     */
+    private function renderSchedule(array $data): Imagick
     {
         $matches = $data['matches'];
         $canvasHeight = $this->canvasHeight($matches);
@@ -468,6 +446,384 @@ class LineScheduleImageService
             + (count($matches) * self::CARD_HEIGHT)
             + (max(0, count($matches) - 1) * self::CARD_GAP)
             + self::CANVAS_BOTTOM_PADDING;
+    }
+
+    /**
+     * @param  array{
+     *     type?: string,
+     *     title: string,
+     *     subtitle: string,
+     *     total_count?: int,
+     *     total_staked?: string,
+     *     bets: array<int, array{
+     *         type_label: string,
+     *         is_parlay: bool,
+     *         iid?: ?string,
+     *         amount_formatted: string,
+     *         multiplier_formatted: string,
+     *         payout_formatted: string,
+     *         cashout_formatted?: ?string,
+     *         created_at_formatted?: ?string,
+     *         legs: array<int, array{
+     *             leg_index: int,
+     *             total_legs: int,
+     *             status: string,
+     *             status_label: string,
+     *             game?: ?string,
+     *             sport_name?: ?string,
+     *             tournament: string,
+     *             match_name: string,
+     *             match_status: string,
+     *             is_live?: bool,
+     *             selection: string,
+     *             odds: string,
+     *             market: string,
+     *         }>
+     *     }>
+     * }  $data
+     */
+    private function renderBets(array $data): Imagick
+    {
+        $bets = $data['bets'] ?? [];
+        $canvasHeight = $this->betsCanvasHeight($bets);
+        $image = new Imagick;
+        $image->newImage(self::CANVAS_WIDTH, $canvasHeight, '#090d16', 'png');
+        $image->setImageColorspace(Imagick::COLORSPACE_SRGB);
+
+        $font = $this->fontPath();
+        $draw = new ImagickDraw;
+        $draw->setFont($font);
+        $draw->setTextAntialias(true);
+
+        // Header Title
+        $draw->setFillColor('#f8fafc');
+        $draw->setFontSize(40);
+        $draw->setFontWeight(700);
+        $draw->annotation(46, 64, $this->fitText($image, $draw, $data['title'], 760, 32));
+
+        // Header Subtitle
+        $draw->setFillColor('#94a3b8');
+        $draw->setFontSize(21);
+        $draw->setFontWeight(400);
+        $draw->annotation(48, 104, $this->fitText($image, $draw, $data['subtitle'], 760, 17));
+
+        // Top Right Count Badge
+        $count = (int) ($data['total_count'] ?? count($bets));
+        $draw->setFillColor('#0284c7');
+        $draw->setStrokeColor('#38bdf8');
+        $draw->setStrokeWidth(1.2);
+        $draw->roundRectangle(1232, 36, 1394, 92, 28, 28);
+        $draw->setFillColor('#ffffff');
+        $draw->setStrokeColor('none');
+        $draw->setStrokeWidth(0);
+        $draw->setFontSize(22);
+        $draw->setFontWeight(700);
+        $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+        $draw->annotation(1313, 72, $count.' 筆進行中');
+        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+        // Top Right Total Stake (if present)
+        if (! empty($data['total_staked'])) {
+            $draw->setFillColor('#38bdf8');
+            $draw->setFontSize(20);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+            $draw->annotation(1216, 72, '總投注：'.$data['total_staked']);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+        }
+
+        $cardWidth = 1352;
+        $left = 44;
+        $y = self::CARDS_TOP;
+        $iconsToDraw = [];
+
+        foreach ($bets as $bet) {
+            $x = $left;
+            $isParlay = (bool) ($bet['is_parlay'] ?? false);
+            $legs = $bet['legs'] ?? [];
+            $legCount = count($legs);
+            $cardHeight = 54 + ($legCount * 86) + 10;
+
+            // Card Container Background & Border
+            $draw->setFillColor('#131b2e');
+            $draw->setStrokeColor('#1f2d47');
+            $draw->setStrokeWidth(1.5);
+            $draw->roundRectangle($x, $y, $x + $cardWidth, $y + $cardHeight, 16, 16);
+
+            // Left Theme Indicator Bar
+            $accentColor = $isParlay ? '#a855f7' : '#0ea5e9';
+            $draw->setFillColor($accentColor);
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->roundRectangle($x + 2, $y + 14, $x + 6, $y + $cardHeight - 14, 2, 2);
+
+            // Card Header Row
+            // 1. Bet Type Badge (e.g. 2 關串關 / 單注)
+            $typeLabel = (string) ($bet['type_label'] ?? ($isParlay ? "{$legCount} 關串關" : '單注'));
+            $badgeWidth = $isParlay ? 100 : 68;
+            $draw->setFillColor($isParlay ? '#2e1065' : '#082f49');
+            $draw->setStrokeColor($isParlay ? '#7e22ce' : '#0284c7');
+            $draw->setStrokeWidth(1);
+            $draw->roundRectangle($x + 22, $y + 14, $x + 22 + $badgeWidth, $y + 40, 6, 6);
+
+            $draw->setFillColor($isParlay ? '#e9d5ff' : '#7dd3fc');
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->setFontSize(14);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation($x + 22 + (int) round($badgeWidth / 2), $y + 32, $typeLabel);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            // 2. Bet IID
+            $idStr = (string) ($bet['iid'] ?? '');
+            $currentLeftX = $x + 22 + $badgeWidth + 14;
+            if ($idStr !== '') {
+                $draw->setFillColor('#94a3b8');
+                $draw->setFontSize(18);
+                $draw->setFontWeight(700);
+                $draw->annotation($currentLeftX, $y + 34, $idStr);
+                $metrics = $image->queryFontMetrics($draw, $idStr);
+                $currentLeftX += (int) round($metrics['textWidth']) + 16;
+            }
+
+            // 3. Placed Time
+            if (! empty($bet['created_at_formatted'])) {
+                $draw->setFillColor('#64748b');
+                $draw->setFontSize(15);
+                $draw->setFontWeight(400);
+                $draw->annotation($currentLeftX, $y + 33, $bet['created_at_formatted']);
+            }
+
+            // Right side of Header: Payout, Odds, Stake
+            $rightX = $x + $cardWidth - 22;
+
+            // Payout text
+            $payoutStr = '預估返還 '.$bet['payout_formatted'];
+            $draw->setFillColor('#4ade80');
+            $draw->setFontSize(19);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+            $draw->annotation($rightX, $y + 34, $payoutStr);
+            $payoutMetrics = $image->queryFontMetrics($draw, $payoutStr);
+            $payoutW = (int) round($payoutMetrics['textWidth']);
+
+            // Total Multiplier / Odds badge
+            $multStr = (string) $bet['multiplier_formatted'].'x';
+            $multMetrics = $image->queryFontMetrics($draw, $multStr);
+            $multW = (int) round($multMetrics['textWidth']) + 18;
+            $multX = $rightX - $payoutW - 14 - $multW;
+
+            $draw->setFillColor('#0c2033');
+            $draw->setStrokeColor('#0284c7');
+            $draw->setStrokeWidth(1);
+            $draw->roundRectangle($multX, $y + 14, $multX + $multW, $y + 40, 6, 6);
+
+            $draw->setFillColor('#38bdf8');
+            $draw->setStrokeColor('none');
+            $draw->setStrokeWidth(0);
+            $draw->setFontSize(15);
+            $draw->setFontWeight(800);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation($multX + (int) round($multW / 2), $y + 32, $multStr);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            // Stake amount
+            $stakeStr = '投注 '.$bet['amount_formatted'];
+            $draw->setFillColor('#f8fafc');
+            $draw->setFontSize(18);
+            $draw->setFontWeight(600);
+            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+            $draw->annotation($multX - 14, $y + 34, $stakeStr);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            // Header separator line
+            $draw->setStrokeColor('#1e293b');
+            $draw->setStrokeWidth(1);
+            $draw->line($x + 20, $y + 48, $x + $cardWidth - 20, $y + 48);
+
+            // Legs list
+            $legY = $y + 56;
+
+            foreach ($legs as $legIndex => $leg) {
+                $legBoxHeight = 78;
+
+                // Leg Row Background
+                $draw->setFillColor('#172236');
+                $draw->setStrokeColor('#22324e');
+                $draw->setStrokeWidth(1);
+                $draw->roundRectangle($x + 20, $legY, $x + $cardWidth - 20, $legY + $legBoxHeight, 8, 8);
+
+                // Left: Leg Index (if parlay) and Status
+                $rawStatus = mb_strtolower((string) ($leg['status'] ?? 'pending'));
+                $statusTheme = match ($rawStatus) {
+                    'won' => ['bg' => '#052e16', 'border' => '#16a34a', 'text' => '#4ade80', 'label' => '已過 ✅'],
+                    'lost' => ['bg' => '#3b0811', 'border' => '#dc2626', 'text' => '#fca5a5', 'label' => '未過 ❌'],
+                    'void', 'refund', 'cancelled' => ['bg' => '#1e293b', 'border' => '#475569', 'text' => '#cbd5e1', 'label' => '退本金 ⚪'],
+                    default => ['bg' => '#082f49', 'border' => '#0284c7', 'text' => '#38bdf8', 'label' => '進行中 ⏳'],
+                };
+
+                if ($isParlay) {
+                    // Leg index badge: 1/2
+                    $idxText = sprintf('%d/%d', $leg['leg_index'] ?? ($legIndex + 1), $leg['total_legs'] ?? $legCount);
+                    $draw->setFillColor('#1e293b');
+                    $draw->setStrokeColor('#334155');
+                    $draw->setStrokeWidth(1);
+                    $draw->roundRectangle($x + 32, $legY + 12, $x + 82, $legY + 36, 4, 4);
+
+                    $draw->setFillColor('#cbd5e1');
+                    $draw->setStrokeColor('none');
+                    $draw->setFontSize(13);
+                    $draw->setFontWeight(700);
+                    $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                    $draw->annotation($x + 57, $legY + 28, $idxText);
+
+                    // Status badge
+                    $draw->setFillColor($statusTheme['bg']);
+                    $draw->setStrokeColor($statusTheme['border']);
+                    $draw->setStrokeWidth(1);
+                    $draw->roundRectangle($x + 32, $legY + 42, $x + 130, $legY + 68, 4, 4);
+
+                    $draw->setFillColor($statusTheme['text']);
+                    $draw->setStrokeColor('none');
+                    $draw->setFontSize(13);
+                    $draw->setFontWeight(700);
+                    $draw->annotation($x + 81, $legY + 59, $statusTheme['label']);
+                    $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+                } else {
+                    // Single bet: Centered status badge
+                    $draw->setFillColor($statusTheme['bg']);
+                    $draw->setStrokeColor($statusTheme['border']);
+                    $draw->setStrokeWidth(1);
+                    $draw->roundRectangle($x + 32, $legY + 24, $x + 130, $legY + 54, 6, 6);
+
+                    $draw->setFillColor($statusTheme['text']);
+                    $draw->setStrokeColor('none');
+                    $draw->setFontSize(14);
+                    $draw->setFontWeight(700);
+                    $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                    $draw->annotation($x + 81, $legY + 44, $statusTheme['label']);
+                    $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+                }
+
+                // Middle: Sport icon, Tournament, Match Name & Live status
+                $matchLeft = $x + 146;
+                $game = $leg['game'] ?? null;
+                $iconPath = $this->iconPathForGame($game);
+
+                if ($iconPath !== null) {
+                    $iconsToDraw[] = [
+                        'path' => $iconPath,
+                        'x' => $matchLeft,
+                        'y' => $legY + 12,
+                        'size' => 22,
+                    ];
+                    $matchLeft += 30;
+                }
+
+                $sportName = (string) ($leg['sport_name'] ?? '');
+                $sportPrefix = $sportName !== '' ? "【{$sportName}】" : '';
+                $tourText = $sportPrefix.(string) ($leg['tournament'] ?? '');
+                $draw->setFillColor('#94a3b8');
+                $draw->setFontSize(15);
+                $draw->setFontWeight(500);
+                $draw->annotation($matchLeft, $legY + 28, $this->fitText($image, $draw, $tourText, 400, 12));
+
+                $tourMetrics = $image->queryFontMetrics($draw, $tourText);
+                $tourW = (int) round($tourMetrics['textWidth']);
+
+                // Live status pill
+                $matchStatus = (string) ($leg['match_status'] ?? '');
+                if ($matchStatus !== '') {
+                    $isLive = (bool) ($leg['is_live'] ?? false);
+                    $statusBadgeX = $matchLeft + min(400, $tourW) + 14;
+
+                    if ($isLive) {
+                        $draw->setFillColor('#3b0811');
+                        $draw->setStrokeColor('#ef4444');
+                        $draw->setStrokeWidth(1);
+                        $draw->roundRectangle($statusBadgeX, $legY + 12, $statusBadgeX + 175, $legY + 34, 4, 4);
+
+                        // Red dot
+                        $draw->setFillColor('#ef4444');
+                        $draw->setStrokeColor('none');
+                        $draw->circle($statusBadgeX + 10, $legY + 23, $statusBadgeX + 13, $legY + 23);
+
+                        $draw->setFillColor('#fca5a5');
+                        $draw->setFontSize(12);
+                        $draw->setFontWeight(600);
+                        $draw->annotation($statusBadgeX + 18, $legY + 27, $this->fitText($image, $draw, $matchStatus, 150, 10));
+                    } else {
+                        $draw->setFillColor('#64748b');
+                        $draw->setFontSize(13);
+                        $draw->setFontWeight(400);
+                        $draw->annotation($statusBadgeX, $legY + 28, $matchStatus);
+                    }
+                }
+
+                // Match Name (Teams)
+                $draw->setFillColor('#f8fafc');
+                $draw->setFontSize(21);
+                $draw->setFontWeight(700);
+                $draw->annotation($x + 146, $legY + 62, $this->fitText($image, $draw, (string) ($leg['match_name'] ?? ''), 600, 15));
+
+                // Right: Selection Name & Odds, Market Name
+                $legRightX = $x + $cardWidth - 36;
+
+                $selText = (string) ($leg['selection'] ?? '').' @ '.(string) ($leg['odds'] ?? '');
+                $draw->setFillColor('#38bdf8');
+                $draw->setFontSize(22);
+                $draw->setFontWeight(800);
+                $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+                $draw->annotation($legRightX, $legY + 38, $this->fitText($image, $draw, $selText, 450, 16));
+
+                $marketText = (string) ($leg['market'] ?? '');
+                if ($marketText !== '') {
+                    $draw->setFillColor('#94a3b8');
+                    $draw->setFontSize(14);
+                    $draw->setFontWeight(400);
+                    $draw->annotation($legRightX, $legY + 63, $this->fitText($image, $draw, $marketText, 450, 11));
+                }
+                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+                $legY += 86;
+            }
+
+            $y += $cardHeight + 20;
+        }
+
+        $image->drawImage($draw);
+
+        foreach ($iconsToDraw as $iconData) {
+            try {
+                $icon = new Imagick($iconData['path']);
+                $icon->resizeImage($iconData['size'], $iconData['size'], Imagick::FILTER_LANCZOS, 1);
+                $image->compositeImage($icon, Imagick::COMPOSITE_OVER, $iconData['x'], $iconData['y']);
+                $icon->clear();
+            } catch (Throwable) {
+                // Ignore icon loading error
+            }
+        }
+
+        $image->stripImage();
+
+        return $image;
+    }
+
+    /**
+     * @param  array<int, array{legs?: array<int, mixed>}>  $bets
+     */
+    private function betsCanvasHeight(array $bets): int
+    {
+        $height = self::CARDS_TOP;
+
+        foreach ($bets as $bet) {
+            $legCount = count($bet['legs'] ?? []);
+            $cardHeight = 54 + ($legCount * 86) + 10;
+            $height += $cardHeight + 20;
+        }
+
+        return $height + self::CANVAS_BOTTOM_PADDING;
     }
 
     /**

@@ -20,6 +20,7 @@ class LineScheduleBot
         private readonly Bo3OddsService $bo3Odds,
         private readonly Bo3HeadToHeadService $headToHead,
         private readonly LolLiveScoreService $liveScores,
+        private readonly ?StakeBetService $stake = null,
     ) {}
 
     public function respond(string $message): ?string
@@ -33,6 +34,15 @@ class LineScheduleBot
 
         if (mb_strtolower($message) === '!help') {
             return new LineBotReply($this->help());
+        }
+
+        if (preg_match('/^!(?:bet|bets|stake|投注)(?:\s+(.*))?$/iu', $message, $matches)) {
+            $argument = trim($matches[1] ?? '');
+            if (mb_strtolower($argument) === 'help') {
+                return new LineBotReply("指令格式：\n!bet\n查詢 Stake 帳號目前進行中的體育投注與串關進度。");
+            }
+
+            return ($this->stake ?? app(StakeBetService::class))->reply($argument);
         }
 
         $command = $this->parseCommand($message);

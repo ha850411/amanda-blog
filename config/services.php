@@ -77,4 +77,20 @@ return [
         'timeout_seconds' => (int) env('VLR_TIMEOUT_SECONDS', 8),
     ],
 
+    'stake' => [
+        'access_token' => env('STAKE_ACCESS_TOKEN'),
+        'api_url' => env('STAKE_API_URL', 'https://stake.com/_api/graphql'),
+        'timeout_seconds' => (int) env('STAKE_TIMEOUT_SECONDS', 10),
+        'cache_seconds' => (int) env('STAKE_CACHE_SECONDS', 0),
+        'language' => env('STAKE_LANGUAGE', 'zh'),
+        'proxy' => env('STAKE_PROXY'),
+        'user_agent' => env('STAKE_USER_AGENT'),
+        'cookie' => env('STAKE_COOKIE'),
+        'kpsdk_cd' => env('STAKE_KPSDK_CD'),
+        'kpsdk_ct' => env('STAKE_KPSDK_CT'),
+        'kpsdk_h' => env('STAKE_KPSDK_H'),
+        'kpsdk_v' => env('STAKE_KPSDK_V'),
+    ],
+
 ];
+

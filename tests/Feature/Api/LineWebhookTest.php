@@ -886,6 +886,42 @@ class LineWebhookTest extends TestCase
         $this->assertSame('1：0', $reply->imageData['matches'][0]['score']);
     }
 
+    public function test_line_webhook_can_query_stake_bets(): void
+    {
+        config(['services.stake.access_token' => 'test-token']);
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push(['data' => ['user' => ['activeSportBetCount' => 0]]], 200),
+            'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
+        ]);
+
+        $body = json_encode([
+            'events' => [[
+                'type' => 'message',
+                'replyToken' => 'reply-token-bet',
+                'message' => [
+                    'id' => '12345',
+                    'type' => 'text',
+                    'text' => '!bet',
+                ],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $response = $this->callWebhook($body, $this->signature($body));
+
+        $response->assertOk()->assertExactJson([]);
+
+        Http::assertSent(function ($request): bool {
+            if ($request->url() !== 'https://api.line.me/v2/bot/message/reply') {
+                return false;
+            }
+
+            return $request['replyToken'] === 'reply-token-bet'
+                && str_contains($request['messages'][0]['text'] ?? '', '目前無進行中的 Stake 體育注單。');
+        });
+    }
+
     private function callWebhook(string $body, string $signature)
     {
         return $this->call(
