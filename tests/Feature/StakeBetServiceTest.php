@@ -27,7 +27,8 @@ class StakeBetServiceTest extends TestCase
         Http::fake([
             'https://stake.com/_api/graphql' => Http::sequence()
                 ->push($this->sampleActiveBetCountResponse(), 200)
-                ->push($this->sampleActiveSportBetsResponse(), 200),
+                ->push($this->sampleActiveSportBetsResponse(), 200)
+                ->push($this->sampleUserBalancesResponse(), 200),
         ]);
 
         $reply = app(LineScheduleBot::class)->reply('!bet');
@@ -71,6 +72,7 @@ class StakeBetServiceTest extends TestCase
 
         // Summary footer
         $this->assertStringContainsString('總計 3 筆注單｜總投注：151.8 USDT', $text);
+        $this->assertStringContainsString('資金水位｜可用：0.0083 USDT', $text);
         $this->assertStringContainsString('完整注單｜https://stake.com/zh/my-bets/sports', $text);
 
         // Image support assertions
@@ -84,11 +86,18 @@ class StakeBetServiceTest extends TestCase
         $this->assertSame('92.41 USDT（1.287x）', $reply->imageData['bets'][0]['cashout_formatted']);
         $this->assertFalse($reply->imageData['bets'][0]['cashout_disabled']);
         $this->assertSame(1.287, $reply->imageData['bets'][0]['cashout_multiplier']);
+        $this->assertSame('0.0083 USDT', $reply->imageData['balance_formatted']);
 
         Http::assertSent(function ($request): bool {
             return $request->url() === 'https://stake.com/_api/graphql'
                 && $request->header('x-access-token')[0] === 'test-stake-token-123'
                 && $request->header('x-operation-name')[0] === 'ActiveBetCount_User';
+        });
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://stake.com/_api/graphql'
+                && $request->header('x-access-token')[0] === 'test-stake-token-123'
+                && $request->header('x-operation-name')[0] === 'UserBalances';
         });
 
         Http::assertSent(function ($request): bool {
@@ -119,7 +128,10 @@ class StakeBetServiceTest extends TestCase
         $this->assertNotNull($reply);
         $this->assertStringContainsString('目前無進行中的 Stake 體育注單。', $reply->text);
 
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
+        Http::assertNotSent(function ($request): bool {
+            return $request->header('x-operation-name')[0] === 'FetchActiveSportBets';
+        });
     }
 
     public function test_bet_command_handles_missing_access_token(): void
@@ -337,6 +349,122 @@ class StakeBetServiceTest extends TestCase
         $this->assertStringContainsString('賽況：滾球中（1-1，三號地圖 12-11）', $reply->text);
         $this->assertSame('滾球中（0-0，一號地圖 14-7）', $reply->imageData['bets'][0]['legs'][0]['match_status']);
         $this->assertSame('滾球中（1-1，三號地圖 12-11）', $reply->imageData['bets'][0]['legs'][1]['match_status']);
+    }
+
+    public function test_bet_command_handles_zero_active_bets_with_balance(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push(['data' => ['user' => ['activeSportBetCount' => 0]]], 200)
+                ->push($this->sampleUserBalancesResponse(), 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('目前無進行中的 Stake 體育注單。', $reply->text);
+        $this->assertStringContainsString('資金水位｜可用：0.0083 USDT', $reply->text);
+        $this->assertStringContainsString('完整注單｜https://stake.com/zh/my-bets/sports', $reply->text);
+    }
+
+    public function test_bet_command_formats_balance_with_vault(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push($this->sampleActiveBetCountResponse(), 200)
+                ->push($this->sampleActiveSportBetsResponse(), 200)
+                ->push($this->sampleUserBalancesResponse(150.5, 2000.0), 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('資金水位｜可用：150.5 USDT（金庫：2,000 USDT / 總計：2,150.5 USDT）', $reply->text);
+        $this->assertSame('150.5 USDT（金庫 2,000）', $reply->imageData['balance_formatted']);
+    }
+
+    public function test_bet_command_handles_balance_argument(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::response($this->sampleUserBalancesResponse(), 200),
+        ]);
+
+        $aliases = ['!bet balance', '!bet 水位', '!bet 資金', '!bet 餘額', '!bet usdt', '!bet bal'];
+
+        foreach ($aliases as $alias) {
+            $reply = app(LineScheduleBot::class)->reply($alias);
+            $this->assertNotNull($reply, "Failed asserting that alias {$alias} was handled.");
+            $this->assertStringContainsString('Stake 體育投注｜即時資金水位', $reply->text);
+            $this->assertStringContainsString('資金水位｜可用：0.0083 USDT', $reply->text);
+            $this->assertStringContainsString('完整注單｜https://stake.com/zh/my-bets/sports', $reply->text);
+        }
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://stake.com/_api/graphql'
+                && $request->header('x-operation-name')[0] === 'UserBalances';
+        });
+        Http::assertNotSent(function ($request): bool {
+            return $request->header('x-operation-name')[0] === 'ActiveBetCount_User';
+        });
+    }
+
+    public function test_bet_command_handles_balance_api_failure(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::response(['message' => 'Unauthorized'], 401),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet balance');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('Stake 認證失敗', $reply->text);
+    }
+
+    public function test_bet_command_image_renders_both_staked_and_balance(): void
+    {
+        if (! extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick is required to test bet image rendering.');
+        }
+
+        $font = collect([
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        ])->first(fn (string $path): bool => is_readable($path));
+
+        if ($font === null) {
+            $this->markTestSkipped('A readable font is required to verify image rendering.');
+        }
+
+        config([
+            'services.line.schedule_image_disk' => 'test-disk',
+            'services.line.schedule_image_font' => $font,
+        ]);
+        \Illuminate\Support\Facades\Storage::fake('test-disk');
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push($this->sampleActiveBetCountResponse(), 200)
+                ->push($this->sampleActiveSportBetsResponse(), 200)
+                ->push($this->sampleUserBalancesResponse(100.0, 50.0), 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+        $this->assertNotNull($reply);
+        $this->assertTrue($reply->prefersImage());
+
+        $url = app(\App\Services\LineScheduleImageService::class)->create($reply->imageData, $reply->linkUrl);
+        $this->assertNotEmpty($url);
+
+        $files = \Illuminate\Support\Facades\Storage::disk('test-disk')->allFiles('line-schedules');
+        $originalPath = collect($files)->first(fn (string $path): bool => str_ends_with($path, '/1440'));
+        $this->assertNotNull($originalPath);
+
+        $original = new \Imagick;
+        $original->readImageBlob(\Illuminate\Support\Facades\Storage::disk('test-disk')->get($originalPath));
+        $this->assertSame(1440, $original->getImageWidth());
+        $this->assertGreaterThan(500, $original->getImageHeight());
+        $original->clear();
     }
 
     /**
@@ -636,6 +764,49 @@ class StakeBetServiceTest extends TestCase
                             ],
                         ],
                     ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sampleUserBalancesResponse(float $available = 0.008342077713606955, float $vault = 6.325308277155273e-9): array
+    {
+        return [
+            'data' => [
+                'user' => [
+                    'id' => '2ca2dc66-5764-4ddc-9981-9c2c5575e8ad',
+                    'balances' => [
+                        [
+                            'available' => [
+                                'amount' => 0,
+                                'currency' => 'btc',
+                                '__typename' => 'Balance',
+                            ],
+                            'vault' => [
+                                'amount' => 0,
+                                'currency' => 'btc',
+                                '__typename' => 'Balance',
+                            ],
+                            '__typename' => 'UserBalance',
+                        ],
+                        [
+                            'available' => [
+                                'amount' => $available,
+                                'currency' => 'usdt',
+                                '__typename' => 'Balance',
+                            ],
+                            'vault' => [
+                                'amount' => $vault,
+                                'currency' => 'usdt',
+                                '__typename' => 'Balance',
+                            ],
+                            '__typename' => 'UserBalance',
+                        ],
+                    ],
+                    '__typename' => 'User',
                 ],
             ],
         ];

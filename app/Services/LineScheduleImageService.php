@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 23;
+    private const CACHE_VERSION = 24;
 
     private const CARD_HEIGHT = 180;
 
@@ -524,13 +524,27 @@ class LineScheduleImageService
         $draw->annotation(1313, 72, $count.' 筆進行中');
         $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
-        // Top Right Total Stake (if present)
-        if (! empty($data['total_staked'])) {
+        // Top Right Total Stake & Balance (if present)
+        $hasBalance = ! empty($data['balance_formatted']);
+        $hasStaked = ! empty($data['total_staked']);
+
+        if ($hasStaked) {
             $draw->setFillColor('#38bdf8');
-            $draw->setFontSize(20);
+            $draw->setFontSize($hasBalance ? 17 : 20);
             $draw->setFontWeight(700);
             $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-            $draw->annotation(1216, 72, '總投注：'.$data['total_staked']);
+            $yStaked = $hasBalance ? 55 : 72;
+            $draw->annotation(1216, $yStaked, '總投注：'.$data['total_staked']);
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+        }
+
+        if ($hasBalance) {
+            $draw->setFillColor('#34d399');
+            $draw->setFontSize(17);
+            $draw->setFontWeight(700);
+            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+            $yBalance = $hasStaked ? 83 : 72;
+            $draw->annotation(1216, $yBalance, '資金水位：'.$data['balance_formatted']);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
         }
 

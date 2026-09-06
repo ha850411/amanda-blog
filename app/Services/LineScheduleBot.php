@@ -39,7 +39,7 @@ class LineScheduleBot
         if (preg_match('/^!(?:bet|bets|stake|投注)(?:\s+(.*))?$/iu', $message, $matches)) {
             $argument = trim($matches[1] ?? '');
             if (mb_strtolower($argument) === 'help') {
-                return new LineBotReply("指令格式：\n!bet\n查詢 Stake 帳號目前進行中的體育投注與串關進度。");
+                return new LineBotReply("指令格式：\n!bet\n查詢 Stake 帳號目前進行中的體育投注、串關進度與即時資金水位。\n亦可輸入「!bet balance」或「!bet 水位」僅查詢 USDT 水位。");
             }
 
             return ($this->stake ?? app(StakeBetService::class))->reply($argument);

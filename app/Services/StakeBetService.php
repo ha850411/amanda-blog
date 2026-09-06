@@ -24,6 +24,29 @@ query ActiveBetCount_User($name: String) {
 }
 GRAPHQL;
 
+    public const USER_BALANCES_QUERY = <<<'GRAPHQL'
+query UserBalances {
+  user {
+    id
+    balances {
+      available {
+        amount
+        currency
+        __typename
+      }
+      vault {
+        amount
+        currency
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+GRAPHQL;
+
+
     public const FETCH_ACTIVE_SPORT_BETS_QUERY = <<<'GRAPHQL'
 query FetchActiveSportBets($limit: Int!, $offset: Int!, $name: String) {
   user(name: $name) {
@@ -607,17 +630,62 @@ GRAPHQL;
             return new LineBotReply('尚未設定 Stake Access Token，請在環境變數中設定 STAKE_ACCESS_TOKEN。');
         }
 
+        $trimmedArg = trim($argument);
+        $lowerArg = mb_strtolower($trimmedArg);
+
+        if (in_array($lowerArg, ['balance', 'bal', '水位', '資金', '餘額', 'usdt'], true)) {
+            try {
+                $balance = $this->getUsdtBalance();
+                if ($balance === null) {
+                    return new LineBotReply("Stake 體育投注｜即時資金水位\n目前無法取得 Stake 帳號資金水位，請稍後再試。\n完整注單｜https://stake.com/zh/my-bets/sports");
+                }
+
+                return new LineBotReply(sprintf(
+                    "Stake 體育投注｜即時資金水位\n資金水位｜%s\n完整注單｜https://stake.com/zh/my-bets/sports",
+                    $this->formatBalanceLine($balance)
+                ), 'https://stake.com/zh/my-bets/sports');
+            } catch (RequestException $exception) {
+                return $this->handleRequestException($exception);
+            } catch (ConnectionException $exception) {
+                return $this->handleConnectionException($exception);
+            } catch (Throwable $exception) {
+                report($exception);
+                Log::warning('Stake API processing failed.', [
+                    'type' => $exception::class,
+                    'error' => $exception->getMessage(),
+                ]);
+
+                return new LineBotReply('目前無法取得 Stake 帳號資金水位，請稍後再試。');
+            }
+        }
+
         try {
             $count = $this->getActiveBetCount();
 
             if ($count === 0) {
-                return new LineBotReply("目前無進行中的 Stake 體育注單。\n完整注單｜https://stake.com/zh/my-bets/sports");
+                $balance = null;
+                try {
+                    $balance = $this->getUsdtBalance();
+                } catch (Throwable $e) {
+                    Log::warning('Stake USDT balance fetch failed during bet reply.', [
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                $lines = [
+                    '目前無進行中的 Stake 體育注單。',
+                ];
+                if ($balance !== null) {
+                    $lines[] = '資金水位｜'.$this->formatBalanceLine($balance);
+                }
+                $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
+
+                return new LineBotReply(implode("\n", $lines), 'https://stake.com/zh/my-bets/sports');
             }
 
             $limit = 20;
             $forceText = false;
-            $trimmedArg = trim($argument);
-            if (in_array(mb_strtolower($trimmedArg), ['text', 'txt', '文字'], true)) {
+            if (in_array($lowerArg, ['text', 'txt', '文字'], true)) {
                 $forceText = true;
             } elseif (ctype_digit($trimmedArg) && (int) $trimmedArg > 0) {
                 $limit = min((int) $trimmedArg, 20);
@@ -625,44 +693,40 @@ GRAPHQL;
 
             $bets = $this->getActiveSportBets($limit);
 
-            if ($bets === []) {
-                return new LineBotReply("目前無進行中的 Stake 體育注單。\n完整注單｜https://stake.com/zh/my-bets/sports");
+            $balance = null;
+            try {
+                $balance = $this->getUsdtBalance();
+            } catch (Throwable $e) {
+                Log::warning('Stake USDT balance fetch failed during bet reply.', [
+                    'error' => $e->getMessage(),
+                ]);
             }
 
-            $text = $this->formatBetsMessage($bets, $count);
+            if ($bets === []) {
+                $lines = [
+                    '目前無進行中的 Stake 體育注單。',
+                ];
+                if ($balance !== null) {
+                    $lines[] = '資金水位｜'.$this->formatBalanceLine($balance);
+                }
+                $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
+
+                return new LineBotReply(implode("\n", $lines), 'https://stake.com/zh/my-bets/sports');
+            }
+
+            $text = $this->formatBetsMessage($bets, $count, $balance);
             $linkUrl = 'https://stake.com/zh/my-bets/sports';
 
             $imageData = null;
             if (! $forceText) {
-                $imageData = $this->buildImageData($bets, $count);
+                $imageData = $this->buildImageData($bets, $count, $balance);
             }
 
             return new LineBotReply($text, $linkUrl, $imageData);
         } catch (RequestException $exception) {
-            $status = $exception->response->status();
-            Log::warning('Stake API request failed.', [
-                'status' => $status,
-                'body' => mb_substr($exception->response->body(), 0, 500),
-            ]);
-
-            return new LineBotReply(match ($status) {
-                401 => 'Stake 認證失敗，Access Token 無效或已過期，請更新 Token 後再試。',
-                403 => 'Stake API 存取受限（觸發安全驗證防護或權限不足），請稍後再試。',
-                451 => 'Stake API 存取受限（區域限制 HTTP 451，需透過代理連線）。',
-                default => '目前無法取得 Stake 投注資訊，請稍後再試。',
-            });
+            return $this->handleRequestException($exception);
         } catch (ConnectionException $exception) {
-            $hasProxy = filled(config('services.stake.proxy'));
-            Log::warning('Stake API connection failed.', [
-                'error' => $exception->getMessage(),
-                'has_proxy' => $hasProxy,
-            ]);
-
-            return new LineBotReply(
-                $hasProxy
-                    ? '連線至 Stake 代理伺服器失敗或超時，請檢查 STAKE_PROXY 設定後再試。'
-                    : '連線至 Stake 伺服器超時，請稍後再試。'
-            );
+            return $this->handleConnectionException($exception);
         } catch (Throwable $exception) {
             report($exception);
             Log::warning('Stake API processing failed.', [
@@ -672,6 +736,37 @@ GRAPHQL;
 
             return new LineBotReply('目前無法取得 Stake 投注資訊，請稍後再試。');
         }
+    }
+
+    private function handleRequestException(RequestException $exception): LineBotReply
+    {
+        $status = $exception->response->status();
+        Log::warning('Stake API request failed.', [
+            'status' => $status,
+            'body' => mb_substr($exception->response->body(), 0, 500),
+        ]);
+
+        return new LineBotReply(match ($status) {
+            401 => 'Stake 認證失敗，Access Token 無效或已過期，請更新 Token 後再試。',
+            403 => 'Stake API 存取受限（觸發安全驗證防護或權限不足），請稍後再試。',
+            451 => 'Stake API 存取受限（區域限制 HTTP 451，需透過代理連線）。',
+            default => '目前無法取得 Stake 投注資訊，請稍後再試。',
+        });
+    }
+
+    private function handleConnectionException(ConnectionException $exception): LineBotReply
+    {
+        $hasProxy = filled(config('services.stake.proxy'));
+        Log::warning('Stake API connection failed.', [
+            'error' => $exception->getMessage(),
+            'has_proxy' => $hasProxy,
+        ]);
+
+        return new LineBotReply(
+            $hasProxy
+                ? '連線至 Stake 代理伺服器失敗或超時，請檢查 STAKE_PROXY 設定後再試。'
+                : '連線至 Stake 伺服器超時，請稍後再試。'
+        );
     }
 
     public function getActiveBetCount(): int
@@ -748,6 +843,64 @@ GRAPHQL;
     }
 
     /**
+     * @return array{available: float, vault: float, total: float}|null
+     */
+    public function getUsdtBalance(): ?array
+    {
+        $cacheSeconds = (int) config('services.stake.cache_seconds', 0);
+        $cacheKey = 'stake:usdt_balance';
+
+        if ($cacheSeconds > 0) {
+            try {
+                $cached = Cache::get($cacheKey);
+                if (is_array($cached)) {
+                    return $cached;
+                }
+            } catch (Throwable) {
+                // Cache error non-blocking
+            }
+        }
+
+        $response = $this->sendGraphQLRequest('UserBalances', self::USER_BALANCES_QUERY, []);
+
+        $balances = $response['data']['user']['balances'] ?? [];
+        if (! is_array($balances)) {
+            return null;
+        }
+
+        $usdtBalance = null;
+        foreach ($balances as $balance) {
+            if (! is_array($balance)) {
+                continue;
+            }
+
+            $availableCurrency = mb_strtolower((string) ($balance['available']['currency'] ?? ''));
+            $vaultCurrency = mb_strtolower((string) ($balance['vault']['currency'] ?? ''));
+
+            if ($availableCurrency === 'usdt' || $vaultCurrency === 'usdt') {
+                $available = (float) ($balance['available']['amount'] ?? 0);
+                $vault = (float) ($balance['vault']['amount'] ?? 0);
+                $usdtBalance = [
+                    'available' => $available,
+                    'vault' => $vault,
+                    'total' => $available + $vault,
+                ];
+                break;
+            }
+        }
+
+        if ($usdtBalance !== null && $cacheSeconds > 0) {
+            try {
+                Cache::put($cacheKey, $usdtBalance, $cacheSeconds);
+            } catch (Throwable) {
+                // Cache error non-blocking
+            }
+        }
+
+        return $usdtBalance;
+    }
+
+    /**
      * @param  array<string, mixed>  $variables
      * @return array<string, mixed>
      */
@@ -816,8 +969,9 @@ GRAPHQL;
 
     /**
      * @param  array<int, array<string, mixed>>  $bets
+     * @param  array{available: float, vault: float, total: float}|null  $balance
      */
-    public function formatBetsMessage(array $bets, int $totalCount): string
+    public function formatBetsMessage(array $bets, int $totalCount, ?array $balance = null): string
     {
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         $lines = [
@@ -954,6 +1108,9 @@ GRAPHQL;
         $totalStakedStr = implode(' / ', $summaryParts);
 
         $lines[] = sprintf('總計 %d 筆注單｜總投注：%s', $totalCount, $totalStakedStr);
+        if ($balance !== null) {
+            $lines[] = '資金水位｜'.$this->formatBalanceLine($balance);
+        }
         $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
 
         return implode("\n", $lines);
@@ -961,9 +1118,10 @@ GRAPHQL;
 
     /**
      * @param  array<int, array<string, mixed>>  $bets
+     * @param  array{available: float, vault: float, total: float}|null  $balance
      * @return array<string, mixed>
      */
-    public function buildImageData(array $bets, int $totalCount): array
+    public function buildImageData(array $bets, int $totalCount, ?array $balance = null): array
     {
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         $totalAmounts = [];
@@ -1097,6 +1255,7 @@ GRAPHQL;
             'subtitle' => sprintf('台灣時間｜共 %d 筆進行中注單', $totalCount),
             'total_count' => $totalCount,
             'total_staked' => $totalStakedStr,
+            'balance_formatted' => $balance !== null ? $this->formatBalanceForImage($balance) : null,
             'bets' => $betsForImage,
         ];
     }
@@ -1246,5 +1405,49 @@ GRAPHQL;
         $formatted = number_format($number, 2, '.', ',');
 
         return rtrim(rtrim($formatted, '0'), '.');
+    }
+
+    public function formatBalanceAmount(float $amount): string
+    {
+        if ($amount > 0 && $amount < 0.01) {
+            $formatted = number_format($amount, 4, '.', ',');
+
+            return rtrim(rtrim($formatted, '0'), '.');
+        }
+
+        return $this->formatNumber($amount);
+    }
+
+    /**
+     * @param  array{available: float, vault: float, total: float}  $balance
+     */
+    public function formatBalanceLine(array $balance): string
+    {
+        $availStr = $this->formatBalanceAmount($balance['available']);
+
+        if ($balance['vault'] >= 0.0001) {
+            $vaultStr = $this->formatBalanceAmount($balance['vault']);
+            $totalStr = $this->formatBalanceAmount($balance['total']);
+
+            return sprintf('可用：%s USDT（金庫：%s USDT / 總計：%s USDT）', $availStr, $vaultStr, $totalStr);
+        }
+
+        return sprintf('可用：%s USDT', $availStr);
+    }
+
+    /**
+     * @param  array{available: float, vault: float, total: float}  $balance
+     */
+    public function formatBalanceForImage(array $balance): string
+    {
+        $availStr = $this->formatBalanceAmount($balance['available']);
+
+        if ($balance['vault'] >= 0.0001) {
+            $vaultStr = $this->formatBalanceAmount($balance['vault']);
+
+            return sprintf('%s USDT（金庫 %s）', $availStr, $vaultStr);
+        }
+
+        return sprintf('%s USDT', $availStr);
     }
 }
