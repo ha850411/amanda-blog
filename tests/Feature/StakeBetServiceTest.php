@@ -81,6 +81,9 @@ class StakeBetServiceTest extends TestCase
         $this->assertCount(3, $reply->imageData['bets']);
         $this->assertSame('英雄聯盟', $reply->imageData['bets'][0]['legs'][0]['sport_name']);
         $this->assertSame('無畏契約', $reply->imageData['bets'][2]['legs'][1]['sport_name']);
+        $this->assertSame('92.41 USDT（1.287x）', $reply->imageData['bets'][0]['cashout_formatted']);
+        $this->assertFalse($reply->imageData['bets'][0]['cashout_disabled']);
+        $this->assertSame(1.287, $reply->imageData['bets'][0]['cashout_multiplier']);
 
         Http::assertSent(function ($request): bool {
             return $request->url() === 'https://stake.com/_api/graphql'
@@ -175,6 +178,34 @@ class StakeBetServiceTest extends TestCase
         $this->assertStringContainsString('目前無法取得 Stake 投注資訊', $reply->text);
     }
 
+    public function test_bet_command_handles_connection_exception_without_proxy(): void
+    {
+        config(['services.stake.proxy' => null]);
+        Http::fake([
+            'https://stake.com/_api/graphql' => function () {
+                throw new ConnectionException('Connection timed out');
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+        $this->assertNotNull($reply);
+        $this->assertSame('連線至 Stake 伺服器超時，請稍後再試。', $reply->text);
+    }
+
+    public function test_bet_command_handles_connection_exception_with_proxy(): void
+    {
+        config(['services.stake.proxy' => 'http://127.0.0.1:8080']);
+        Http::fake([
+            'https://stake.com/_api/graphql' => function () {
+                throw new ConnectionException('Failed to connect to proxy');
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+        $this->assertNotNull($reply);
+        $this->assertSame('連線至 Stake 代理伺服器失敗或超時，請檢查 STAKE_PROXY 設定後再試。', $reply->text);
+    }
+
     public function test_bet_command_case_and_unicode_variations(): void
     {
         Http::fake([
@@ -249,6 +280,24 @@ class StakeBetServiceTest extends TestCase
         $this->assertSame(1440, $original->getImageWidth());
         $this->assertGreaterThan(500, $original->getImageHeight());
         $original->clear();
+    }
+
+    public function test_bet_command_handles_suspended_cashout(): void
+    {
+        $betsResponse = $this->sampleActiveSportBetsResponse();
+        $betsResponse['data']['user']['activeSportBets'][0]['cashoutDisabled'] = true;
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push($this->sampleActiveBetCountResponse(), 200)
+                ->push($betsResponse, 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('・即時兌現：暫停兌現 ⏸️', $reply->text);
+        $this->assertTrue($reply->imageData['bets'][0]['cashout_disabled']);
     }
 
     /**

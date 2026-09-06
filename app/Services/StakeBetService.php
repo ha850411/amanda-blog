@@ -652,9 +652,17 @@ GRAPHQL;
                 default => '目前無法取得 Stake 投注資訊，請稍後再試。',
             });
         } catch (ConnectionException $exception) {
-            Log::warning('Stake API connection failed.', ['error' => $exception->getMessage()]);
+            $hasProxy = filled(config('services.stake.proxy'));
+            Log::warning('Stake API connection failed.', [
+                'error' => $exception->getMessage(),
+                'has_proxy' => $hasProxy,
+            ]);
 
-            return new LineBotReply('連線至 Stake 伺服器超時，請稍後再試。');
+            return new LineBotReply(
+                $hasProxy
+                    ? '連線至 Stake 代理伺服器失敗或超時，請檢查 STAKE_PROXY 設定後再試。'
+                    : '連線至 Stake 伺服器超時，請稍後再試。'
+            );
         } catch (Throwable $exception) {
             report($exception);
             Log::warning('Stake API processing failed.', [
@@ -854,7 +862,9 @@ GRAPHQL;
 
             $cashoutMultiplier = (float) ($bet['cashoutMultiplier'] ?? 0);
             $cashoutDisabled = (bool) ($bet['cashoutDisabled'] ?? false);
-            if (! $cashoutDisabled && $cashoutMultiplier > 0) {
+            if ($cashoutDisabled) {
+                $lines[] = '・即時兌現：暫停兌現 ⏸️';
+            } elseif ($cashoutMultiplier > 0) {
                 $cashoutAmount = $amount * $cashoutMultiplier;
                 $lines[] = sprintf(
                     '・即時兌現：%s %s（%.3fx）',
@@ -1068,6 +1078,8 @@ GRAPHQL;
                 'multiplier_formatted' => sprintf('%.3f', $multiplier),
                 'payout_formatted' => $this->formatNumber($payout).' '.$currency,
                 'cashout_formatted' => $cashoutFormatted,
+                'cashout_disabled' => $cashoutDisabled,
+                'cashout_multiplier' => $cashoutMultiplier,
                 'created_at_formatted' => $createdAtFormatted,
                 'legs' => $legsForImage,
             ];

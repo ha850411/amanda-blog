@@ -463,6 +463,8 @@ class LineScheduleImageService
      *         multiplier_formatted: string,
      *         payout_formatted: string,
      *         cashout_formatted?: ?string,
+     *         cashout_disabled?: bool,
+     *         cashout_multiplier?: float,
      *         created_at_formatted?: ?string,
      *         legs: array<int, array{
      *             leg_index: int,
@@ -636,6 +638,54 @@ class LineScheduleImageService
             $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
             $draw->annotation($multX - 14, $y + 34, $stakeStr);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+            $stakeMetrics = $image->queryFontMetrics($draw, $stakeStr);
+            $stakeW = (int) round($stakeMetrics['textWidth']);
+            $stakeLeftX = $multX - 14 - $stakeW;
+
+            // Cashout (即時兌現 / 販賣) Badge
+            $cashoutFormatted = $bet['cashout_formatted'] ?? null;
+            $cashoutDisabled = (bool) ($bet['cashout_disabled'] ?? false);
+            $cashoutMultiplier = (float) ($bet['cashout_multiplier'] ?? 0);
+
+            if ($cashoutFormatted !== null || $cashoutDisabled) {
+                $isSuspended = $cashoutDisabled;
+                $badgeText = $isSuspended ? '即時兌現 暫停' : '即時兌現 '.$cashoutFormatted;
+
+                if ($isSuspended) {
+                    $cBg = '#1e293b';
+                    $cBorder = '#475569';
+                    $cText = '#94a3b8';
+                } elseif ($cashoutMultiplier >= 1.0) {
+                    $cBg = '#064e3b';
+                    $cBorder = '#059669';
+                    $cText = '#34d399';
+                } else {
+                    $cBg = '#451a03';
+                    $cBorder = '#d97706';
+                    $cText = '#fbbf24';
+                }
+
+                $draw->setFontSize(14);
+                $draw->setFontWeight(700);
+                $cMetrics = $image->queryFontMetrics($draw, $badgeText);
+                $cBadgeW = (int) round($cMetrics['textWidth']) + 18;
+                $cBadgeX = $stakeLeftX - 14 - $cBadgeW;
+
+                if ($cBadgeX > $currentLeftX + 12) {
+                    $draw->setFillColor($cBg);
+                    $draw->setStrokeColor($cBorder);
+                    $draw->setStrokeWidth(1);
+                    $draw->roundRectangle($cBadgeX, $y + 14, $cBadgeX + $cBadgeW, $y + 40, 6, 6);
+
+                    $draw->setFillColor($cText);
+                    $draw->setStrokeColor('none');
+                    $draw->setStrokeWidth(0);
+                    $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                    $draw->annotation($cBadgeX + (int) round($cBadgeW / 2), $y + 32, $badgeText);
+                    $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+                }
+            }
 
             // Header separator line
             $draw->setStrokeColor('#1e293b');
