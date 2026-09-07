@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\LineScheduleBot;
+use App\Services\StakeBetService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -389,10 +390,77 @@ class StakeBetServiceTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!bet');
 
         $this->assertNotNull($reply);
-        // 145 * 0.523 * (1 - (0.038 + 0.029*0.523)) = 71.80 USDT (0.718x)
-        $this->assertStringContainsString('・即時兌現：71.8 USDT（0.718x）', $reply->text);
+        // EV = 145 * 0.523 = 75.835, oddsRatio = 1.45 / 1.78 = 0.8146
+        // factor = 0.9356 + 0.058 * (1 - 0.8146) = 0.94635 -> 71.77 USDT (0.718x)
+        $this->assertStringContainsString('・即時兌現：71.77 USDT（0.718x）', $reply->text);
         $this->assertFalse($reply->imageData['bets'][0]['cashout_disabled']);
-        $this->assertSame('71.8 USDT（0.718x）', $reply->imageData['bets'][0]['cashout_formatted']);
+        $this->assertSame('71.77 USDT（0.718x）', $reply->imageData['bets'][0]['cashout_formatted']);
+    }
+
+    public function test_resolve_cashout_state_matches_real_live_bets(): void
+    {
+        $service = app(StakeBetService::class);
+
+        // Bet 1: 50 USDT @ 1.78, live odds 1.78, prob 0.523 (Stake actual: 43.56)
+        $bet1 = [
+            'amount' => 50,
+            'currency' => 'usdt',
+            'potentialMultiplier' => 1.78,
+            'cashoutMultiplier' => 0.99,
+            'outcomes' => [
+                [
+                    'status' => 'pending',
+                    'odds' => 1.78,
+                    'fixture' => ['status' => 'live', 'cashoutEnabled' => true],
+                    'market' => ['status' => 'active'],
+                    'outcome' => ['odds' => 1.78, 'active' => true, 'probabilities' => 0.523],
+                ],
+            ],
+        ];
+        $res1 = $service->resolveCashoutState($bet1);
+        $this->assertTrue($res1['available']);
+        $this->assertFalse($res1['disabled']);
+        $this->assertSame('43.55 USDT（0.871x）', $res1['formatted']);
+
+        // Bet 2: 100 USDT @ 1.45, live odds 1.78, prob 0.523 (Stake actual: 71.77)
+        $bet2 = [
+            'amount' => 100,
+            'currency' => 'usdt',
+            'potentialMultiplier' => 1.45,
+            'cashoutMultiplier' => 0.99,
+            'outcomes' => [
+                [
+                    'status' => 'pending',
+                    'odds' => 1.45,
+                    'fixture' => ['status' => 'live', 'cashoutEnabled' => true],
+                    'market' => ['status' => 'active'],
+                    'outcome' => ['odds' => 1.78, 'active' => true, 'probabilities' => 0.523],
+                ],
+            ],
+        ];
+        $res2 = $service->resolveCashoutState($bet2);
+        $this->assertTrue($res2['available']);
+        $this->assertSame('71.77 USDT（0.718x）', $res2['formatted']);
+
+        // Bet 3: 87.719 USDT @ 1.22, live odds 1.08, prob 0.897 (Stake actual: 89.80)
+        $bet3 = [
+            'amount' => 87.719,
+            'currency' => 'usdt',
+            'potentialMultiplier' => 1.22,
+            'cashoutMultiplier' => 0.99,
+            'outcomes' => [
+                [
+                    'status' => 'pending',
+                    'odds' => 1.22,
+                    'fixture' => ['status' => 'live', 'cashoutEnabled' => true],
+                    'market' => ['status' => 'active'],
+                    'outcome' => ['odds' => 1.08, 'active' => true, 'probabilities' => 0.897],
+                ],
+            ],
+        ];
+        $res3 = $service->resolveCashoutState($bet3);
+        $this->assertTrue($res3['available']);
+        $this->assertSame('89.81 USDT（1.024x）', $res3['formatted']);
     }
 
     public function test_bet_command_displays_in_progress_period_scores(): void

@@ -1475,6 +1475,8 @@ GRAPHQL;
         $hasOddsMoved = false;
         $combinedProb = 1.0;
         $pendingLegCount = 0;
+        $placedOddsProduct = 1.0;
+        $liveOddsProduct = 1.0;
 
         foreach ($outcomes as $outcome) {
             $rawStatus = mb_strtolower((string) ($outcome['status'] ?? 'pending'));
@@ -1538,6 +1540,16 @@ GRAPHQL;
                 $hasSuspendedLeg = true;
             }
 
+            if ($placedOdds > 0) {
+                $placedOddsProduct *= $placedOdds;
+            }
+
+            if ($liveOdds !== null && $liveOdds > 0) {
+                $liveOddsProduct *= $liveOdds;
+            } elseif ($placedOdds > 0) {
+                $liveOddsProduct *= $placedOdds;
+            }
+
             if ($liveProb !== null && $liveProb > 0) {
                 $legProb = $liveProb;
             } elseif ($liveOdds !== null && $liveOdds > 0) {
@@ -1572,9 +1584,16 @@ GRAPHQL;
         $isStaleDefault = abs($rawCashoutMultiplier - 0.99) < 0.001;
         if ($isAnyLegLive && ($hasLiveProbabilities || ($isStaleDefault && $hasOddsMoved) || $rawCashoutMultiplier <= 0)) {
             $ev = $payout * $combinedProb;
-            $margin = 0.038 + (0.029 * $combinedProb);
-            $cashoutAmount = max(0.0, $ev * (1.0 - $margin));
-            $calcMultiplier = $cashoutAmount / $amount;
+            $oddsRatio = ($placedOddsProduct > 0 && $liveOddsProduct > 0)
+                ? ($placedOddsProduct / $liveOddsProduct)
+                : 1.0;
+
+            $factor = $oddsRatio < 1.0
+                ? min(0.98, 0.9356 + (0.058 * (1.0 - $oddsRatio)))
+                : 0.9356;
+
+            $cashoutAmount = max(0.0, min($payout, $ev * $factor));
+            $calcMultiplier = $amount > 0 ? ($cashoutAmount / $amount) : 0.0;
 
             return [
                 'available' => true,
