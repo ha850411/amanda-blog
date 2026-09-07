@@ -669,6 +669,205 @@ class StakeBetServiceTest extends TestCase
         $this->assertStringContainsString('Team Spirit vs Heroic', $reply->text);
     }
 
+    public function test_bet_history_supports_dates_without_year(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $bot = app(LineScheduleBot::class);
+
+        $reply1 = $bot->reply('!bet 09-06');
+        $this->assertNotNull($reply1);
+        $this->assertStringContainsString('Stake 體育投注｜每日損益與紀錄', $reply1->text);
+        $this->assertStringContainsString('2026-09-06', $reply1->text);
+
+        $reply2 = $bot->reply('!bet 9/6');
+        $this->assertNotNull($reply2);
+        $this->assertStringContainsString('Stake 體育投注｜每日損益與紀錄', $reply2->text);
+        $this->assertStringContainsString('2026-09-06', $reply2->text);
+    }
+
+    public function test_standalone_record_commands(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $bot = app(LineScheduleBot::class);
+
+        // Standalone commands defaulting to today
+        $commands = ['!r', '!record', '!history', '!pnl', '!損益', '!紀錄'];
+        foreach ($commands as $cmd) {
+            $reply = $bot->reply($cmd);
+            $this->assertNotNull($reply, "Failed executing {$cmd}");
+            $this->assertStringContainsString('Stake 體育投注｜每日損益與紀錄', $reply->text);
+            $this->assertSame('bet_history', $reply->imageData['type']);
+        }
+
+        // Help commands
+        $helpReplies = [$bot->reply('!r help'), $bot->reply('!record help')];
+        foreach ($helpReplies as $hr) {
+            $this->assertNotNull($hr);
+            $this->assertStringContainsString('!r 或 !record', $hr->text);
+            $this->assertStringContainsString('支援範例：', $hr->text);
+        }
+    }
+
+    public function test_bet_history_supports_date_range_and_relative_periods(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $bot = app(LineScheduleBot::class);
+
+        // Explicit date range
+        $rangeReply = $bot->reply('!r 09-01~09-06');
+        $this->assertNotNull($rangeReply);
+        $this->assertStringContainsString('Stake 體育投注｜區間損益與紀錄', $rangeReply->text);
+        $this->assertStringContainsString('區間｜2026-09-01 ~ 2026-09-06（共 6 天）', $rangeReply->text);
+        $this->assertTrue($rangeReply->imageData['is_range']);
+
+        // Relative 7 days
+        $daysReply = $bot->reply('!r 7d');
+        $this->assertNotNull($daysReply);
+        $this->assertStringContainsString('Stake 體育投注｜區間損益與紀錄', $daysReply->text);
+        $this->assertStringContainsString('共 7 天', $daysReply->text);
+
+        // Chinese period keyword
+        $weekReply = $bot->reply('!r 本週');
+        $this->assertNotNull($weekReply);
+        $this->assertStringContainsString('Stake 體育投注｜', $weekReply->text);
+    }
+
+    public function test_parse_history_argument_variations(): void
+    {
+        $service = app(StakeBetService::class);
+        $timezone = 'Asia/Taipei';
+
+        // Formats defaulting to current year (2026)
+        $shortDateCases = ['09-06', '9/6', '0906', '9.6', '9月6日', '9月6號'];
+        foreach ($shortDateCases as $case) {
+            $res = $service->parseHistoryArgument($case, $timezone);
+            $this->assertNotNull($res, "Failed parsing {$case}");
+            $this->assertSame('2026-09-06', $res['start_date']->format('Y-m-d'));
+            $this->assertFalse($res['is_range']);
+            $this->assertFalse($res['force_text']);
+        }
+
+        // Full year cases
+        $fullDateCases = ['2026-09-06', '2026/09/06', '20260906', '2026年9月6日'];
+        foreach ($fullDateCases as $case) {
+            $res = $service->parseHistoryArgument($case, $timezone);
+            $this->assertNotNull($res, "Failed parsing {$case}");
+            $this->assertSame('2026-09-06', $res['start_date']->format('Y-m-d'));
+            $this->assertFalse($res['is_range']);
+            $this->assertFalse($res['force_text']);
+        }
+
+        // Date range variations
+        $rangeCases = [
+            '09-01~09-06', '09-01 ~ 09-06', '9/1~9/6', '0901~0906',
+            '09-01至09-06', '09-01到09-06', '09-01..09-06', '09-01 - 09-06', '09-01-09-06',
+            '2026-09-01~2026-09-06',
+        ];
+        foreach ($rangeCases as $case) {
+            $res = $service->parseHistoryArgument($case, $timezone);
+            $this->assertNotNull($res, "Failed parsing range {$case}");
+            $this->assertTrue($res['is_range']);
+            $this->assertSame('2026-09-01', $res['start_date']->format('Y-m-d'));
+            $this->assertSame('2026-09-06', $res['end_date']->format('Y-m-d'));
+        }
+
+        // Relative range days
+        $relCases = ['7d', '7days', '近7天', '7天', '一週'];
+        foreach ($relCases as $case) {
+            $res = $service->parseHistoryArgument($case, $timezone);
+            $this->assertNotNull($res, "Failed parsing relative {$case}");
+            $this->assertTrue($res['is_range']);
+            $this->assertSame('2026-09-06', $res['end_date']->format('Y-m-d'));
+            $this->assertSame('2026-08-31', $res['start_date']->format('Y-m-d'));
+        }
+
+        // Relative periods
+        $weekRes = $service->parseHistoryArgument('本週', $timezone);
+        $this->assertNotNull($weekRes);
+        $this->assertTrue($weekRes['is_range']);
+
+        $lastWeekRes = $service->parseHistoryArgument('上週', $timezone);
+        $this->assertNotNull($lastWeekRes);
+        $this->assertTrue($lastWeekRes['is_range']);
+
+        $monthRes = $service->parseHistoryArgument('本月', $timezone);
+        $this->assertNotNull($monthRes);
+        $this->assertTrue($monthRes['is_range']);
+
+        // Number under history keyword (e.g. record 7 -> 7 days)
+        $record7 = $service->parseHistoryArgument('record 7', $timezone);
+        $this->assertNotNull($record7);
+        $this->assertTrue($record7['is_range']);
+        $this->assertSame('2026-08-31', $record7['start_date']->format('Y-m-d'));
+        $this->assertSame('2026-09-06', $record7['end_date']->format('Y-m-d'));
+
+        // Relative days
+        $todayRes = $service->parseHistoryArgument('today', $timezone);
+        $this->assertNotNull($todayRes);
+        $this->assertSame(CarbonImmutable::today($timezone)->format('Y-m-d'), $todayRes['start_date']->format('Y-m-d'));
+
+        $yesterdayRes = $service->parseHistoryArgument('昨天', $timezone);
+        $this->assertNotNull($yesterdayRes);
+        $this->assertSame(CarbonImmutable::yesterday($timezone)->format('Y-m-d'), $yesterdayRes['start_date']->format('Y-m-d'));
+
+        $beforeYesterdayRes = $service->parseHistoryArgument('前天', $timezone);
+        $this->assertNotNull($beforeYesterdayRes);
+        $this->assertSame(CarbonImmutable::today($timezone)->subDays(2)->format('Y-m-d'), $beforeYesterdayRes['start_date']->format('Y-m-d'));
+
+        // Force text mode
+        $textRes = $service->parseHistoryArgument('09-06 text', $timezone);
+        $this->assertNotNull($textRes);
+        $this->assertTrue($textRes['force_text']);
+        $this->assertSame('2026-09-06', $textRes['start_date']->format('Y-m-d'));
+
+        $rangeTextRes = $service->parseHistoryArgument('09-01~09-06 text', $timezone);
+        $this->assertNotNull($rangeTextRes);
+        $this->assertTrue($rangeTextRes['force_text']);
+        $this->assertTrue($rangeTextRes['is_range']);
+
+        // Non-history arguments that should return null
+        $nullCases = ['5', '10', '20', '50', 'bal', 'balance', '水位', '99-99', '02-30', '13-01'];
+        foreach ($nullCases as $case) {
+            $this->assertNull($service->parseHistoryArgument($case, $timezone), "Expected null for {$case}");
+        }
+    }
+
     public function test_bet_history_force_text_mode(): void
     {
         Http::fake([

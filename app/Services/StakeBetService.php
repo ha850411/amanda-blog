@@ -679,7 +679,12 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         $historyParams = $this->parseHistoryArgument($trimmedArg, $timezone);
         if ($historyParams !== null) {
-            return $this->handleBetHistoryReply($historyParams['date'], $historyParams['force_text'], $timezone);
+            return $this->handleBetHistoryReply(
+                $historyParams['start_date'],
+                $historyParams['end_date'],
+                $historyParams['force_text'],
+                $timezone
+            );
         }
 
         try {
@@ -865,8 +870,110 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         return array_values(array_filter($bets, 'is_array'));
     }
 
+    public function parseDateString(string $str, CarbonImmutable $today, string $timezone): ?CarbonImmutable
+    {
+        $trimmed = trim($str);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $ld = mb_strtolower($trimmed);
+        if (in_array($ld, ['today', '今天', '今日'], true)) {
+            return $today;
+        }
+        if (in_array($ld, ['yesterday', '昨天', '昨日'], true)) {
+            return $today->subDay();
+        }
+        if (in_array($ld, ['before_yesterday', '前天', '前日'], true)) {
+            return $today->subDays(2);
+        }
+
+        if (preg_match('/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/', $trimmed, $m)) {
+            $y = (int) $m[1];
+            $mon = (int) $m[2];
+            $d = (int) $m[3];
+            if (! checkdate($mon, $d, $y)) {
+                return null;
+            }
+            try {
+                return CarbonImmutable::createFromDate($y, $mon, $d, $timezone)->startOfDay();
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $trimmed, $m)) {
+            $y = (int) $m[1];
+            $mon = (int) $m[2];
+            $d = (int) $m[3];
+            if (! checkdate($mon, $d, $y)) {
+                return null;
+            }
+            try {
+                return CarbonImmutable::createFromDate($y, $mon, $d, $timezone)->startOfDay();
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        if (preg_match('/^(\d{4})年(\d{1,2})月(\d{1,2})[日號]?$/u', $trimmed, $m)) {
+            $y = (int) $m[1];
+            $mon = (int) $m[2];
+            $d = (int) $m[3];
+            if (! checkdate($mon, $d, $y)) {
+                return null;
+            }
+            try {
+                return CarbonImmutable::createFromDate($y, $mon, $d, $timezone)->startOfDay();
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        if (preg_match('/^(\d{1,2})[-\/\.](\d{1,2})$/', $trimmed, $m)) {
+            $mon = (int) $m[1];
+            $d = (int) $m[2];
+            if (! checkdate($mon, $d, $today->year)) {
+                return null;
+            }
+            try {
+                return CarbonImmutable::createFromDate($today->year, $mon, $d, $timezone)->startOfDay();
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        if (preg_match('/^(\d{2})(\d{2})$/', $trimmed, $m)) {
+            $mon = (int) $m[1];
+            $d = (int) $m[2];
+            if (! checkdate($mon, $d, $today->year)) {
+                return null;
+            }
+            try {
+                return CarbonImmutable::createFromDate($today->year, $mon, $d, $timezone)->startOfDay();
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        if (preg_match('/^(\d{1,2})月(\d{1,2})[日號]?$/u', $trimmed, $m)) {
+            $mon = (int) $m[1];
+            $d = (int) $m[2];
+            if (! checkdate($mon, $d, $today->year)) {
+                return null;
+            }
+            try {
+                return CarbonImmutable::createFromDate($today->year, $mon, $d, $timezone)->startOfDay();
+            } catch (Throwable) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
     /**
-     * @return array{date: CarbonImmutable, force_text: bool}|null
+     * @return array{start_date: CarbonImmutable, end_date: CarbonImmutable, is_range: bool, date: CarbonImmutable, force_text: bool}|null
      */
     public function parseHistoryArgument(string $argument, string $timezone): ?array
     {
@@ -879,7 +986,8 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         if (in_array($lower, ['balance', 'bal', '水位', '資金', '餘額', 'usdt', 'text', 'txt', '文字'], true)) {
             return null;
         }
-        if (ctype_digit($trimmed)) {
+
+        if (ctype_digit($trimmed) && strlen($trimmed) <= 2 && (int) $trimmed <= 20) {
             return null;
         }
 
@@ -891,7 +999,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
         $isHistory = false;
         $forceText = false;
-        $datePart = null;
+        $dateTokens = [];
 
         foreach ($parts as $p) {
             $lp = mb_strtolower($p);
@@ -905,57 +1013,165 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
                 continue;
             }
-            if ($datePart === null) {
-                $datePart = $p;
-            }
+            $dateTokens[] = $p;
         }
+
+        $datePart = $dateTokens !== [] ? implode(' ', $dateTokens) : null;
+
+        $now = CarbonImmutable::now($timezone);
+        $today = $now->startOfDay();
+        $startDate = null;
+        $endDate = null;
+        $isRange = false;
 
         if ($datePart !== null) {
             $ld = mb_strtolower($datePart);
-            if (
-                in_array($ld, ['today', '今天', 'yesterday', '昨天'], true)
-                || preg_match('/^\d{4}[-\/]?\d{1,2}[-\/]?\d{1,2}$/', $datePart)
-                || preg_match('/^\d{1,2}[-\/]\d{1,2}$/', $datePart)
-            ) {
+
+            // 1. 相對區間：近N天 / Nd / Ndays / 一週 / 一個月 / 本週 / 上週 / 本月 / 上月
+            if (preg_match('/^(?:近|過去)?\s*(\d{1,3})\s*(?:天|日|d|days)$/iu', $ld, $m)) {
+                $days = (int) $m[1];
+                if ($days >= 1 && $days <= 180) {
+                    $startDate = $today->subDays($days - 1);
+                    $endDate = $today;
+                    $isRange = $days > 1;
+                    $isHistory = true;
+                }
+            } elseif ($isHistory && preg_match('/^(\d{1,3})$/', $ld, $m)) {
+                $days = (int) $m[1];
+                if ($days >= 1 && $days <= 180) {
+                    $startDate = $today->subDays($days - 1);
+                    $endDate = $today;
+                    $isRange = $days > 1;
+                }
+            } elseif (in_array($ld, ['本週', '本周', 'this week', 'week', 'thisweek'], true)) {
+                $startDate = $today->startOfWeek();
+                $endDate = $today;
+                $isRange = true;
+                $isHistory = true;
+            } elseif (in_array($ld, ['上週', '上周', 'last week', 'lastweek'], true)) {
+                $startDate = $today->subWeek()->startOfWeek();
+                $endDate = $today->subWeek()->endOfWeek();
+                $isRange = true;
+                $isHistory = true;
+            } elseif (in_array($ld, ['本月', 'this month', 'month', 'thismonth'], true)) {
+                $startDate = $today->startOfMonth();
+                $endDate = $today;
+                $isRange = true;
+                $isHistory = true;
+            } elseif (in_array($ld, ['上月', 'last month', 'lastmonth'], true)) {
+                $startDate = $today->subMonth()->startOfMonth();
+                $endDate = $today->subMonth()->endOfMonth();
+                $isRange = true;
+                $isHistory = true;
+            } elseif (in_array($ld, ['一週', '一周'], true)) {
+                $startDate = $today->subDays(6);
+                $endDate = $today;
+                $isRange = true;
+                $isHistory = true;
+            } elseif (in_array($ld, ['一個月', '一个月'], true)) {
+                $startDate = $today->subDays(29);
+                $endDate = $today;
+                $isRange = true;
                 $isHistory = true;
             }
-        }
 
-        if (! $isHistory) {
-            return null;
-        }
-
-        $date = CarbonImmutable::today($timezone);
-        if ($datePart !== null) {
-            $ld = mb_strtolower($datePart);
-            if (in_array($ld, ['yesterday', '昨天'], true)) {
-                $date = CarbonImmutable::yesterday($timezone);
-            } elseif (in_array($ld, ['today', '今天'], true)) {
-                $date = CarbonImmutable::today($timezone);
-            } else {
-                try {
-                    if (preg_match('/^(\d{1,2})[-\/](\d{1,2})$/', $datePart, $m)) {
-                        $year = $date->year;
-                        $date = CarbonImmutable::createFromDate($year, (int) $m[1], (int) $m[2], $timezone)->startOfDay();
-                    } else {
-                        $date = CarbonImmutable::parse($datePart, $timezone)->startOfDay();
+            // 2. 兩日期分隔符區間 (09-01~09-06, 9/1~9/6, 0901~0906, 09-01至09-06, 09-01到09-06, 09-01..09-06, 09-01 - 09-06)
+            if ($startDate === null) {
+                if (preg_match('/^(.+?)(?:\s*(?:~|～|至|到|\.\.|\s-\s)\s*)(.+)$/u', $datePart, $rm)) {
+                    $d1 = $this->parseDateString(trim($rm[1]), $today, $timezone);
+                    $d2 = $this->parseDateString(trim($rm[2]), $today, $timezone);
+                    if ($d1 !== null && $d2 !== null) {
+                        if ($d2->lt($d1)) {
+                            [$d1, $d2] = [$d2, $d1];
+                        }
+                        $startDate = $d1;
+                        $endDate = $d2;
+                        $isRange = ! $d1->isSameDay($d2);
+                        $isHistory = true;
                     }
-                } catch (Throwable) {
-                    return null;
+                } elseif (preg_match('/^(\d{1,2}[-\/\.]\d{1,2})-(\d{1,2}[-\/\.]\d{1,2})$/', $datePart, $rm)) {
+                    $d1 = $this->parseDateString(trim($rm[1]), $today, $timezone);
+                    $d2 = $this->parseDateString(trim($rm[2]), $today, $timezone);
+                    if ($d1 !== null && $d2 !== null) {
+                        if ($d2->lt($d1)) {
+                            [$d1, $d2] = [$d2, $d1];
+                        }
+                        $startDate = $d1;
+                        $endDate = $d2;
+                        $isRange = ! $d1->isSameDay($d2);
+                        $isHistory = true;
+                    }
+                } elseif (preg_match('/^(\d{4})-(\d{4})$/', $datePart, $rm)) {
+                    $d1 = $this->parseDateString(trim($rm[1]), $today, $timezone);
+                    $d2 = $this->parseDateString(trim($rm[2]), $today, $timezone);
+                    if ($d1 !== null && $d2 !== null) {
+                        if ($d2->lt($d1)) {
+                            [$d1, $d2] = [$d2, $d1];
+                        }
+                        $startDate = $d1;
+                        $endDate = $d2;
+                        $isRange = ! $d1->isSameDay($d2);
+                        $isHistory = true;
+                    }
+                }
+            }
+
+            // 3. 單一日期 (09-06, 9/6, 0906, 9.6, 9月6日, 2026-09-06, 昨天, 今天等)
+            if ($startDate === null) {
+                $single = $this->parseDateString($datePart, $today, $timezone);
+                if ($single !== null) {
+                    $startDate = $single;
+                    $endDate = $single;
+                    $isRange = false;
+                    $isHistory = true;
                 }
             }
         }
 
+        // 4. 若未指定日期但包含 history/record 關鍵字，預設為今天
+        if ($startDate === null && $datePart === null && $isHistory) {
+            $startDate = $today;
+            $endDate = $today;
+            $isRange = false;
+        }
+
+        if (! $isHistory || $startDate === null || $endDate === null) {
+            return null;
+        }
+
         return [
-            'date' => $date,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'is_range' => $isRange,
+            'date' => $startDate,
             'force_text' => $forceText,
         ];
     }
 
-    public function handleBetHistoryReply(CarbonImmutable $date, bool $forceText, string $timezone): LineBotReply
-    {
+    public function handleBetHistoryReply(
+        CarbonImmutable $startDate,
+        CarbonImmutable|bool|null $endDateOrForceText = null,
+        bool|string $forceTextOrTimezone = false,
+        string $timezone = 'Asia/Taipei'
+    ): LineBotReply {
+        if ($endDateOrForceText instanceof CarbonImmutable) {
+            $endDate = $endDateOrForceText;
+            $forceText = (bool) $forceTextOrTimezone;
+        } elseif (is_bool($endDateOrForceText)) {
+            $endDate = $startDate;
+            $forceText = $endDateOrForceText;
+            $timezone = is_string($forceTextOrTimezone) ? $forceTextOrTimezone : $timezone;
+        } else {
+            $endDate = $startDate;
+            $forceText = (bool) $forceTextOrTimezone;
+        }
+
+        if ($endDate->lt($startDate)) {
+            [$startDate, $endDate] = [$endDate, $startDate];
+        }
+
         try {
-            $rawBets = $this->getBetsForDate($date);
+            $rawBets = $this->getBetsForRange($startDate, $endDate);
             $pnlData = $this->calculateDatePnL($rawBets, $timezone);
             $bets = $pnlData['bets'];
             $summary = $pnlData['summary'];
@@ -969,12 +1185,12 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 ]);
             }
 
-            $text = $this->formatBetHistoryMessage($date, $bets, $summary, $balance, $timezone);
+            $text = $this->formatBetHistoryMessage($startDate, $endDate, $bets, $summary, $balance, $timezone);
             $linkUrl = 'https://stake.com/zh/my-bets/sports';
 
             $imageData = null;
             if (! $forceText) {
-                $imageData = $this->buildBetHistoryImageData($date, $bets, $summary, $balance, $timezone);
+                $imageData = $this->buildBetHistoryImageData($startDate, $endDate, $bets, $summary, $balance, $timezone);
             }
 
             return new LineBotReply($text, $linkUrl, $imageData);
@@ -1037,16 +1253,24 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
      */
     public function getBetsForDate(CarbonImmutable $targetDate): array
     {
+        return $this->getBetsForRange($targetDate, $targetDate);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getBetsForRange(CarbonImmutable $startDate, CarbonImmutable $endDate): array
+    {
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
-        $targetDay = $targetDate->setTimezone($timezone);
-        $targetYmd = $targetDay->format('Y-m-d');
-        $todayYmd = CarbonImmutable::now($timezone)->format('Y-m-d');
+        $startDay = $startDate->setTimezone($timezone)->startOfDay();
+        $endDay = $endDate->setTimezone($timezone)->endOfDay();
+        $today = CarbonImmutable::now($timezone)->startOfDay();
 
         $seenIds = [];
         $matchedBets = [];
 
-        // 1. 若目標日期為今天，先嘗試包含進行中的即時注單
-        if ($targetYmd === $todayYmd) {
+        // 1. 若今天在查詢區間內，先嘗試包含進行中的即時注單
+        if ($endDay->greaterThanOrEqualTo($today) && $startDay->lessThanOrEqualTo($today->endOfDay())) {
             try {
                 $activeBets = $this->getActiveSportBets(50);
                 foreach ($activeBets as $bet) {
@@ -1055,7 +1279,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                         continue;
                     }
                     $created = CarbonImmutable::parse($createdAtStr)->setTimezone($timezone);
-                    if ($created->format('Y-m-d') === $targetYmd) {
+                    if ($created->greaterThanOrEqualTo($startDay) && $created->lessThanOrEqualTo($endDay)) {
                         $id = (string) ($bet['id'] ?? '');
                         if ($id !== '' && ! isset($seenIds[$id])) {
                             $seenIds[$id] = true;
@@ -1064,14 +1288,14 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                     }
                 }
             } catch (Throwable $e) {
-                Log::warning('Failed fetching active bets for date filter.', ['error' => $e->getMessage()]);
+                Log::warning('Failed fetching active bets for date range filter.', ['error' => $e->getMessage()]);
             }
         }
 
         // 2. 獲取已結算/歷史注單
         $offset = 0;
         $limit = 50;
-        $maxPages = 3;
+        $maxPages = 10;
 
         for ($page = 0; $page < $maxPages; $page++) {
             $list = $this->getSportBetList($limit, $offset);
@@ -1086,15 +1310,14 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                     continue;
                 }
                 $created = CarbonImmutable::parse($createdAtStr)->setTimezone($timezone);
-                $betYmd = $created->format('Y-m-d');
 
-                if ($betYmd === $targetYmd) {
+                if ($created->greaterThanOrEqualTo($startDay) && $created->lessThanOrEqualTo($endDay)) {
                     $id = (string) ($bet['id'] ?? '');
                     if ($id !== '' && ! isset($seenIds[$id])) {
                         $seenIds[$id] = true;
                         $matchedBets[] = $bet;
                     }
-                } elseif ($created->lt($targetDay->startOfDay())) {
+                } elseif ($created->lt($startDay)) {
                     $hasOlderBets = true;
                 }
             }
@@ -1288,22 +1511,34 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
      * @param  array{available: float, vault: float, total: float}|null  $balance
      */
     public function formatBetHistoryMessage(
-        CarbonImmutable $date,
+        CarbonImmutable $startDate,
+        ?CarbonImmutable $endDate,
         array $bets,
         array $summary,
         ?array $balance = null,
         string $timezone = 'Asia/Taipei'
     ): string {
+        $endDate = $endDate ?? $startDate;
         $now = CarbonImmutable::now($timezone);
-        $dateDesc = match (true) {
-            $date->isSameDay($now) => '今天',
-            $date->isSameDay($now->subDay()) => '昨天',
-            default => $date->isoFormat('dddd'),
-        };
+        $isRange = ! $startDate->isSameDay($endDate);
+
+        if ($isRange) {
+            $days = (int) $startDate->diffInDays($endDate) + 1;
+            $title = 'Stake 體育投注｜區間損益與紀錄';
+            $subtitle = sprintf('區間｜%s ~ %s（共 %d 天）・台灣時間', $startDate->format('Y-m-d'), $endDate->format('Y-m-d'), $days);
+        } else {
+            $dateDesc = match (true) {
+                $startDate->isSameDay($now) => '今天',
+                $startDate->isSameDay($now->subDay()) => '昨天',
+                default => $startDate->isoFormat('dddd'),
+            };
+            $title = 'Stake 體育投注｜每日損益與紀錄';
+            $subtitle = sprintf('日期｜%s（%s）・台灣時間', $startDate->format('Y-m-d'), $dateDesc);
+        }
 
         $lines = [
-            'Stake 體育投注｜每日損益與紀錄',
-            sprintf('日期｜%s（%s）・台灣時間', $date->format('Y-m-d'), $dateDesc),
+            $title,
+            $subtitle,
             '',
             '【📊 損益總覽】',
             sprintf('・總投注額：%s USDT（%d 筆注單）', $this->formatNumber($summary['total_staked']), $summary['total_count']),
@@ -1351,13 +1586,14 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         if ($bets === []) {
             $lines[] = '';
             $lines[] = '──────────';
-            $lines[] = '該日期查無投注紀錄。';
+            $lines[] = $isRange ? '該區間查無投注紀錄。' : '該日期查無投注紀錄。';
             $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
 
             return implode("\n", $lines);
         }
 
-        foreach ($bets as $index => $bet) {
+        $displayBets = array_slice($bets, 0, 20);
+        foreach ($displayBets as $index => $bet) {
             $lines[] = "\n──────────";
             $typeLabel = $bet['is_parlay'] ? "{$bet['leg_count']} 關串關" : '單注';
             $iid = $bet['iid'] !== '' ? "｜#{$bet['iid']}" : '';
@@ -1369,12 +1605,13 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 default => '⏳',
             };
 
+            $timeStr = $isRange ? $bet['created_at_formatted'] : $bet['created_time_only'];
             $lines[] = sprintf(
                 '【注單 %d】%s%s｜%s',
                 $index + 1,
                 $typeLabel,
                 $iid,
-                $bet['created_time_only']
+                $timeStr
             );
             $lines[] = sprintf('・狀態：%s %s', $bet['status_label'], $statusEmoji);
 
@@ -1444,6 +1681,10 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             }
         }
 
+        if (count($bets) > count($displayBets)) {
+            $lines[] = sprintf("\n另有 %d 筆注單，請至 Stake 查看。", count($bets) - count($displayBets));
+        }
+
         $lines[] = '';
         $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
 
@@ -1457,21 +1698,37 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
      * @return array<string, mixed>
      */
     public function buildBetHistoryImageData(
-        CarbonImmutable $date,
+        CarbonImmutable $startDate,
+        ?CarbonImmutable $endDate,
         array $bets,
         array $summary,
         ?array $balance = null,
         string $timezone = 'Asia/Taipei'
     ): array {
+        $endDate = $endDate ?? $startDate;
         $now = CarbonImmutable::now($timezone);
-        $dateDesc = match (true) {
-            $date->isSameDay($now) => '今天',
-            $date->isSameDay($now->subDay()) => '昨天',
-            default => $date->isoFormat('dddd'),
-        };
+        $isRange = ! $startDate->isSameDay($endDate);
 
+        if ($isRange) {
+            $days = (int) $startDate->diffInDays($endDate) + 1;
+            $title = 'Stake 體育投注｜區間損益與紀錄';
+            $subtitle = sprintf('區間｜%s ~ %s（共 %d 天）・台灣時間', $startDate->format('Y-m-d'), $endDate->format('Y-m-d'), $days);
+            $dateFormatted = sprintf('%s ~ %s', $startDate->format('m/d'), $endDate->format('m/d'));
+            $dateDesc = sprintf('%d 天', $days);
+        } else {
+            $dateDesc = match (true) {
+                $startDate->isSameDay($now) => '今天',
+                $startDate->isSameDay($now->subDay()) => '昨天',
+                default => $startDate->isoFormat('dddd'),
+            };
+            $title = 'Stake 體育投注｜每日損益與紀錄';
+            $subtitle = sprintf('日期｜%s（%s）・台灣時間', $startDate->format('Y-m-d'), $dateDesc);
+            $dateFormatted = $startDate->format('Y-m-d');
+        }
+
+        $displayBets = array_slice($bets, 0, 20);
         $formattedBets = [];
-        foreach ($bets as $bet) {
+        foreach ($displayBets as $bet) {
             $formattedBets[] = [
                 'id' => $bet['id'],
                 'iid' => $bet['iid'],
@@ -1480,7 +1737,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 'is_parlay' => $bet['is_parlay'],
                 'leg_count' => $bet['leg_count'],
                 'created_at_formatted' => $bet['created_at_formatted'],
-                'created_time_only' => $bet['created_time_only'],
+                'created_time_only' => $isRange ? $bet['created_at_formatted'] : $bet['created_time_only'],
                 'amount_formatted' => $this->formatNumber($bet['amount']).' '.$bet['currency'],
                 'odds_formatted' => sprintf('%.3f', $bet['potential_multiplier']),
                 'payout_formatted' => $bet['status'] === 'pending'
@@ -1496,9 +1753,10 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
         return [
             'type' => 'bet_history',
-            'title' => 'Stake 體育投注｜每日損益與紀錄',
-            'subtitle' => sprintf('日期｜%s（%s）・台灣時間', $date->format('Y-m-d'), $dateDesc),
-            'date_formatted' => $date->format('Y-m-d'),
+            'title' => $title,
+            'subtitle' => $subtitle,
+            'is_range' => $isRange,
+            'date_formatted' => $dateFormatted,
             'date_desc' => $dateDesc,
             'summary' => [
                 'total_staked' => $this->formatNumber($summary['total_staked']).' USDT',
@@ -1525,6 +1783,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             ],
             'bets' => $formattedBets,
             'balance_formatted' => $balance ? $this->formatBalanceLine($balance) : null,
+            'omitted_count' => max(0, count($bets) - count($displayBets)),
         ];
     }
 

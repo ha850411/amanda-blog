@@ -39,10 +39,21 @@ class LineScheduleBot
         if (preg_match('/^!(?:bet|bets|stake|投注)(?:\s+(.*))?$/iu', $message, $matches)) {
             $argument = trim($matches[1] ?? '');
             if (mb_strtolower($argument) === 'help') {
-                return new LineBotReply("指令格式：\n!bet\n查詢 Stake 進行中的體育投注、即時賽況與兌現。\n\n!bet history [日期] 或 !bet 紀錄 [日期]\n查詢指定日期的投注紀錄與損益統計圖（預設為今天，可輸入昨天、2026-09-06 或 09-06）。\n\n!bet balance\n查詢 Stake 帳號 USDT 即時資金水位。");
+                return new LineBotReply("指令格式：\n!bet\n查詢 Stake 進行中的體育投注、即時賽況與兌現。\n\n!r 或 !record [日期或區間]\n查詢指定日期或區間之投注紀錄與損益統計圖（支援 09-06、09-01~09-06、近7天、本週等）。\n\n!bet balance\n查詢 Stake 帳號 USDT 即時資金水位。");
             }
 
             return ($this->stake ?? app(StakeBetService::class))->reply($argument);
+        }
+
+        if (preg_match('/^!(?:record|records|history|pnl|損益|紀錄|記錄|r)(?:\s+(.*))?$/iu', $message, $matches)) {
+            $argument = trim($matches[1] ?? '');
+            if (mb_strtolower($argument) === 'help') {
+                return new LineBotReply("指令格式：\n!r 或 !record [日期或區間]\n查詢 Stake 投注紀錄與損益統計圖。\n\n支援範例：\n・!r（預設今天）\n・!r 昨天 或 !r 09-06 或 !r 9/6\n・!r 09-01~09-06（區間統計）\n・!r 近7天 或 !r 7d（近 7 天統計）\n・!r 本週、上週、本月\n・加 text 查看純文字（例如 !r 7d text）");
+            }
+
+            $fullArg = $argument === '' ? 'record' : 'record '.$argument;
+
+            return ($this->stake ?? app(StakeBetService::class))->reply($fullArg);
         }
 
         $command = $this->parseCommand($message);

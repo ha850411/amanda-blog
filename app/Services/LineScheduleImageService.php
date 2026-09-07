@@ -1629,8 +1629,9 @@ class LineScheduleImageService
     {
         $bets = $data['bets'] ?? [];
         $summary = $data['summary'] ?? [];
+        $omittedCount = (int) ($data['omitted_count'] ?? 0);
         $isEmpty = empty($bets);
-        $canvasHeight = $this->betHistoryCanvasHeight($bets, $isEmpty);
+        $canvasHeight = $this->betHistoryCanvasHeight($bets, $isEmpty, $omittedCount);
 
         $image = new Imagick;
         $image->newImage(self::CANVAS_WIDTH, $canvasHeight, '#090d16', 'png');
@@ -1980,6 +1981,16 @@ class LineScheduleImageService
             $y += $cardHeight + 16;
         }
 
+        if ($omittedCount > 0) {
+            $draw->setFillColor('#94a3b8');
+            $draw->setFontSize(20);
+            $draw->setFontWeight(500);
+            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+            $draw->annotation((int) round(self::CANVAS_WIDTH / 2), $y + 36, sprintf('另有 %d 筆注單未列出，請至 Stake 官網查看完整明細', $omittedCount));
+            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            $y += 56;
+        }
+
         $image->drawImage($draw);
         $draw->clear();
 
@@ -1991,7 +2002,7 @@ class LineScheduleImageService
         return 112 + ($legCount * 46);
     }
 
-    private function betHistoryCanvasHeight(array $bets, bool $isEmpty): int
+    private function betHistoryCanvasHeight(array $bets, bool $isEmpty, int $omittedCount = 0): int
     {
         $height = 146 + 156 + 24;
 
@@ -2002,6 +2013,10 @@ class LineScheduleImageService
         foreach ($bets as $bet) {
             $legCount = max(1, count($bet['legs'] ?? []));
             $height += $this->betHistoryCardHeight($legCount) + 16;
+        }
+
+        if ($omittedCount > 0) {
+            $height += 56;
         }
 
         return $height + self::CANVAS_BOTTOM_PADDING;
