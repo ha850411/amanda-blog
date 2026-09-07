@@ -639,6 +639,10 @@ query FetchSportBetList($limit: Int, $offset: Int, $status: [SportBetStatusEnum!
 }
 GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
+    public const MAX_HISTORY_DAYS = 30;
+
+    public const MAX_DISPLAY_RECORD_BETS = 10;
+
     public function reply(string $argument = ''): LineBotReply
     {
         $token = trim((string) config('services.stake.access_token'));
@@ -1030,7 +1034,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             // 1. 相對區間：近N天 / Nd / Ndays / 一週 / 一個月 / 本週 / 上週 / 本月 / 上月
             if (preg_match('/^(?:近|過去)?\s*(\d{1,3})\s*(?:天|日|d|days)$/iu', $ld, $m)) {
                 $days = (int) $m[1];
-                if ($days >= 1 && $days <= 180) {
+                if ($days >= 1) {
                     $startDate = $today->subDays($days - 1);
                     $endDate = $today;
                     $isRange = $days > 1;
@@ -1038,7 +1042,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 }
             } elseif ($isHistory && preg_match('/^(\d{1,3})$/', $ld, $m)) {
                 $days = (int) $m[1];
-                if ($days >= 1 && $days <= 180) {
+                if ($days >= 1) {
                     $startDate = $today->subDays($days - 1);
                     $endDate = $today;
                     $isRange = $days > 1;
@@ -1056,11 +1060,17 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             } elseif (in_array($ld, ['本月', 'this month', 'month', 'thismonth'], true)) {
                 $startDate = $today->startOfMonth();
                 $endDate = $today;
+                if ($startDate->diffInDays($endDate) + 1 > self::MAX_HISTORY_DAYS) {
+                    $startDate = $endDate->subDays(self::MAX_HISTORY_DAYS - 1);
+                }
                 $isRange = true;
                 $isHistory = true;
             } elseif (in_array($ld, ['上月', 'last month', 'lastmonth'], true)) {
-                $startDate = $today->subMonth()->startOfMonth();
                 $endDate = $today->subMonth()->endOfMonth();
+                $startDate = $today->subMonth()->startOfMonth();
+                if ($startDate->diffInDays($endDate) + 1 > self::MAX_HISTORY_DAYS) {
+                    $startDate = $endDate->subDays(self::MAX_HISTORY_DAYS - 1);
+                }
                 $isRange = true;
                 $isHistory = true;
             } elseif (in_array($ld, ['一週', '一周'], true)) {
@@ -1069,7 +1079,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 $isRange = true;
                 $isHistory = true;
             } elseif (in_array($ld, ['一個月', '一个月'], true)) {
-                $startDate = $today->subDays(29);
+                $startDate = $today->subDays(self::MAX_HISTORY_DAYS - 1);
                 $endDate = $today;
                 $isRange = true;
                 $isHistory = true;
@@ -1168,6 +1178,11 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
         if ($endDate->lt($startDate)) {
             [$startDate, $endDate] = [$endDate, $startDate];
+        }
+
+        $days = (int) $startDate->startOfDay()->diffInDays($endDate->startOfDay()) + 1;
+        if ($days > self::MAX_HISTORY_DAYS) {
+            return new LineBotReply(sprintf('查詢區間最多只能查詢 %d 天，請縮小日期範圍再試。', self::MAX_HISTORY_DAYS));
         }
 
         try {
@@ -1592,7 +1607,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             return implode("\n", $lines);
         }
 
-        $displayBets = array_slice($bets, 0, 20);
+        $displayBets = array_slice($bets, 0, self::MAX_DISPLAY_RECORD_BETS);
         foreach ($displayBets as $index => $bet) {
             $lines[] = "\n──────────";
             $typeLabel = $bet['is_parlay'] ? "{$bet['leg_count']} 關串關" : '單注';
@@ -1726,7 +1741,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             $dateFormatted = $startDate->format('Y-m-d');
         }
 
-        $displayBets = array_slice($bets, 0, 20);
+        $displayBets = array_slice($bets, 0, self::MAX_DISPLAY_RECORD_BETS);
         $formattedBets = [];
         foreach ($displayBets as $bet) {
             $formattedBets[] = [

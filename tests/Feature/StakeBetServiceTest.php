@@ -766,6 +766,97 @@ class StakeBetServiceTest extends TestCase
         $weekReply = $bot->reply('!r 本週');
         $this->assertNotNull($weekReply);
         $this->assertStringContainsString('Stake 體育投注｜', $weekReply->text);
+
+        // Exactly 30 days
+        $thirtyDaysReply = $bot->reply('!r 30d');
+        $this->assertNotNull($thirtyDaysReply);
+        $this->assertStringContainsString('共 30 天', $thirtyDaysReply->text);
+    }
+
+    public function test_bet_history_rejects_ranges_exceeding_30_days(): void
+    {
+        Http::fake();
+
+        $bot = app(LineScheduleBot::class);
+
+        // 31 days relative
+        $reply31d = $bot->reply('!r 31d');
+        $this->assertNotNull($reply31d);
+        $this->assertSame('查詢區間最多只能查詢 30 天，請縮小日期範圍再試。', $reply31d->text);
+
+        // 60 days relative
+        $reply60d = $bot->reply('!r 近60天');
+        $this->assertNotNull($reply60d);
+        $this->assertSame('查詢區間最多只能查詢 30 天，請縮小日期範圍再試。', $reply60d->text);
+
+        // Standalone record with explicit range exceeding 30 days
+        $replyRange = $bot->reply('!record 2026-07-01~2026-08-15');
+        $this->assertNotNull($replyRange);
+        $this->assertSame('查詢區間最多只能查詢 30 天，請縮小日期範圍再試。', $replyRange->text);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_bet_history_displays_at_most_ten_records_and_calculates_omitted_count(): void
+    {
+        // Generate 15 sample settled bets
+        $fifteenBets = [];
+        for ($i = 1; $i <= 15; $i++) {
+            $fifteenBets[] = [
+                'id' => "hist-bet-{$i}",
+                'status' => 'settled',
+                'amount' => 10.0,
+                'payout' => 20.0,
+                'currency' => 'usdt',
+                'potentialMultiplier' => 2.0,
+                'createdAt' => sprintf('Sun, 06 Sep 2026 %02d:00:00 GMT', ($i % 24)),
+                'bet' => ['iid' => "sport:{$i}"],
+                'outcomes' => [
+                    [
+                        'status' => 'won',
+                        'odds' => 2.0,
+                        'market' => ['name' => '获胜'],
+                        'outcome' => ['name' => "Team {$i}", 'odds' => 2.0],
+                        'fixture' => [
+                            'name' => "Team {$i} vs Rival {$i}",
+                            'tournament' => [
+                                'name' => 'Championship',
+                                'category' => ['sport' => ['name' => '英雄联盟']],
+                            ],
+                        ],
+                    ],
+                ],
+            ];
+        }
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($fifteenBets) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response(['data' => ['user' => ['activeSportBets' => []]]], 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse($fifteenBets), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $bot = app(LineScheduleBot::class);
+        $reply = $bot->reply('!r 09-06');
+
+        $this->assertNotNull($reply);
+        // Summary has all 15 bets
+        $this->assertStringContainsString('15 筆注單', $reply->text);
+        // Text lists at most 10 bets
+        $this->assertStringContainsString('【注單 10】', $reply->text);
+        $this->assertStringNotContainsString('【注單 11】', $reply->text);
+        $this->assertStringContainsString('另有 5 筆注單，請至 Stake 查看。', $reply->text);
+
+        // Image data has at most 10 bets and omitted count is 5
+        $this->assertNotNull($reply->imageData);
+        $this->assertCount(10, $reply->imageData['bets']);
+        $this->assertSame(5, $reply->imageData['omitted_count']);
     }
 
     public function test_parse_history_argument_variations(): void

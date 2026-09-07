@@ -48,7 +48,7 @@ class LineScheduleBot
         if (preg_match('/^!(?:record|records|history|pnl|損益|紀錄|記錄|r)(?:\s+(.*))?$/iu', $message, $matches)) {
             $argument = trim($matches[1] ?? '');
             if (mb_strtolower($argument) === 'help') {
-                return new LineBotReply("指令格式：\n!r 或 !record [日期或區間]\n查詢 Stake 投注紀錄與損益統計圖。\n\n支援範例：\n・!r（預設今天）\n・!r 昨天 或 !r 09-06 或 !r 9/6\n・!r 09-01~09-06（區間統計）\n・!r 近7天 或 !r 7d（近 7 天統計）\n・!r 本週、上週、本月\n・加 text 查看純文字（例如 !r 7d text）");
+                return new LineBotReply("指令格式：\n!r 或 !record [日期或區間]\n查詢 Stake 投注紀錄與損益統計圖。\n\n支援範例：\n・!r（預設今天）\n・!r 昨天 或 !r 09-06 或 !r 9/6\n・!r 09-01~09-06（區間統計，最多 30 天）\n・!r 近7天 或 !r 7d（最多 30 天）\n・!r 本週、上週、本月\n・加 text 查看純文字（例如 !r 7d text）\n\n備註：\n・查詢區間最多 30 天\n・注單明細最多顯示 10 筆");
             }
 
             $fullArg = $argument === '' ? 'record' : 'record '.$argument;
