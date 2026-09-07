@@ -46,16 +46,7 @@ query UserBalances {
 }
 GRAPHQL;
 
-    public const FETCH_ACTIVE_SPORT_BETS_QUERY = <<<'GRAPHQL'
-query FetchActiveSportBets($limit: Int!, $offset: Int!, $name: String) {
-  user(name: $name) {
-    id
-    activeSportBets(limit: $limit, offset: $offset, sort: placedTime) {
-      ...SportBetPreview_SportBet
-    }
-  }
-}
-
+    public const SPORT_BET_FRAGMENTS = <<<'GRAPHQL'
 fragment SportBetPreview_SportBet on SportBet {
   __typename
   id
@@ -621,6 +612,33 @@ fragment EsportFixtureEventStatus on EsportFixtureEventStatus {
 }
 GRAPHQL;
 
+    public const FETCH_ACTIVE_SPORT_BETS_QUERY = <<<'GRAPHQL'
+query FetchActiveSportBets($limit: Int!, $offset: Int!, $name: String) {
+  user(name: $name) {
+    id
+    activeSportBets(limit: $limit, offset: $offset, sort: placedTime) {
+      ...SportBetPreview_SportBet
+    }
+  }
+}
+GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
+
+    public const FETCH_SPORT_BET_LIST_QUERY = <<<'GRAPHQL'
+query FetchSportBetList($limit: Int, $offset: Int, $status: [SportBetStatusEnum!]) {
+  user {
+    id
+    sportBetList(limit: $limit, offset: $offset, status: $status) {
+      id
+      iid
+      bet {
+        __typename
+        ...SportBetPreview_SportBet
+      }
+    }
+  }
+}
+GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
+
     public function reply(string $argument = ''): LineBotReply
     {
         $token = trim((string) config('services.stake.access_token'));
@@ -656,6 +674,12 @@ GRAPHQL;
 
                 return new LineBotReply('目前無法取得 Stake 帳號資金水位，請稍後再試。');
             }
+        }
+
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+        $historyParams = $this->parseHistoryArgument($trimmedArg, $timezone);
+        if ($historyParams !== null) {
+            return $this->handleBetHistoryReply($historyParams['date'], $historyParams['force_text'], $timezone);
         }
 
         try {
@@ -839,6 +863,669 @@ GRAPHQL;
         }
 
         return array_values(array_filter($bets, 'is_array'));
+    }
+
+    /**
+     * @return array{date: CarbonImmutable, force_text: bool}|null
+     */
+    public function parseHistoryArgument(string $argument, string $timezone): ?array
+    {
+        $trimmed = trim($argument);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $lower = mb_strtolower($trimmed);
+        if (in_array($lower, ['balance', 'bal', '水位', '資金', '餘額', 'usdt', 'text', 'txt', '文字'], true)) {
+            return null;
+        }
+        if (ctype_digit($trimmed)) {
+            return null;
+        }
+
+        $historyKeywords = ['history', 'record', 'records', '紀錄', '記錄', '歷史', '損益', 'pnl'];
+        $parts = preg_split('/\s+/u', $trimmed);
+        if ($parts === false || $parts === []) {
+            return null;
+        }
+
+        $isHistory = false;
+        $forceText = false;
+        $datePart = null;
+
+        foreach ($parts as $p) {
+            $lp = mb_strtolower($p);
+            if (in_array($lp, ['text', 'txt', '文字'], true)) {
+                $forceText = true;
+
+                continue;
+            }
+            if (in_array($lp, $historyKeywords, true)) {
+                $isHistory = true;
+
+                continue;
+            }
+            if ($datePart === null) {
+                $datePart = $p;
+            }
+        }
+
+        if ($datePart !== null) {
+            $ld = mb_strtolower($datePart);
+            if (
+                in_array($ld, ['today', '今天', 'yesterday', '昨天'], true)
+                || preg_match('/^\d{4}[-\/]?\d{1,2}[-\/]?\d{1,2}$/', $datePart)
+                || preg_match('/^\d{1,2}[-\/]\d{1,2}$/', $datePart)
+            ) {
+                $isHistory = true;
+            }
+        }
+
+        if (! $isHistory) {
+            return null;
+        }
+
+        $date = CarbonImmutable::today($timezone);
+        if ($datePart !== null) {
+            $ld = mb_strtolower($datePart);
+            if (in_array($ld, ['yesterday', '昨天'], true)) {
+                $date = CarbonImmutable::yesterday($timezone);
+            } elseif (in_array($ld, ['today', '今天'], true)) {
+                $date = CarbonImmutable::today($timezone);
+            } else {
+                try {
+                    if (preg_match('/^(\d{1,2})[-\/](\d{1,2})$/', $datePart, $m)) {
+                        $year = $date->year;
+                        $date = CarbonImmutable::createFromDate($year, (int) $m[1], (int) $m[2], $timezone)->startOfDay();
+                    } else {
+                        $date = CarbonImmutable::parse($datePart, $timezone)->startOfDay();
+                    }
+                } catch (Throwable) {
+                    return null;
+                }
+            }
+        }
+
+        return [
+            'date' => $date,
+            'force_text' => $forceText,
+        ];
+    }
+
+    public function handleBetHistoryReply(CarbonImmutable $date, bool $forceText, string $timezone): LineBotReply
+    {
+        try {
+            $rawBets = $this->getBetsForDate($date);
+            $pnlData = $this->calculateDatePnL($rawBets, $timezone);
+            $bets = $pnlData['bets'];
+            $summary = $pnlData['summary'];
+
+            $balance = null;
+            try {
+                $balance = $this->getUsdtBalance();
+            } catch (Throwable $e) {
+                Log::warning('Stake USDT balance fetch failed during history reply.', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            $text = $this->formatBetHistoryMessage($date, $bets, $summary, $balance, $timezone);
+            $linkUrl = 'https://stake.com/zh/my-bets/sports';
+
+            $imageData = null;
+            if (! $forceText) {
+                $imageData = $this->buildBetHistoryImageData($date, $bets, $summary, $balance, $timezone);
+            }
+
+            return new LineBotReply($text, $linkUrl, $imageData);
+        } catch (RequestException $exception) {
+            return $this->handleRequestException($exception);
+        } catch (ConnectionException $exception) {
+            return $this->handleConnectionException($exception);
+        } catch (Throwable $exception) {
+            report($exception);
+            Log::warning('Stake API bet history processing failed.', [
+                'type' => $exception::class,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return new LineBotReply('目前無法取得 Stake 投注紀錄，請稍後再試。');
+        }
+    }
+
+    /**
+     * @param  array<int, string>|null  $status
+     * @return array<int, array<string, mixed>>
+     */
+    public function getSportBetList(int $limit = 50, int $offset = 0, ?array $status = null): array
+    {
+        $variables = [
+            'limit' => $limit,
+            'offset' => $offset,
+        ];
+        if ($status !== null && $status !== []) {
+            $variables['status'] = $status;
+        }
+
+        $response = $this->sendGraphQLRequest(
+            'FetchSportBetList',
+            self::FETCH_SPORT_BET_LIST_QUERY,
+            $variables
+        );
+
+        $items = $response['data']['user']['sportBetList'] ?? [];
+        if (! is_array($items)) {
+            return [];
+        }
+
+        $bets = [];
+        foreach ($items as $item) {
+            if (isset($item['bet']) && is_array($item['bet'])) {
+                $bet = $item['bet'];
+                if (isset($item['iid']) && ! isset($bet['bet']['iid'])) {
+                    $bet['bet'] = ['iid' => $item['iid'], '__typename' => 'Bet'];
+                }
+                $bets[] = $bet;
+            }
+        }
+
+        return $bets;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getBetsForDate(CarbonImmutable $targetDate): array
+    {
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+        $targetDay = $targetDate->setTimezone($timezone);
+        $targetYmd = $targetDay->format('Y-m-d');
+        $todayYmd = CarbonImmutable::now($timezone)->format('Y-m-d');
+
+        $seenIds = [];
+        $matchedBets = [];
+
+        // 1. 若目標日期為今天，先嘗試包含進行中的即時注單
+        if ($targetYmd === $todayYmd) {
+            try {
+                $activeBets = $this->getActiveSportBets(50);
+                foreach ($activeBets as $bet) {
+                    $createdAtStr = (string) ($bet['createdAt'] ?? '');
+                    if ($createdAtStr === '') {
+                        continue;
+                    }
+                    $created = CarbonImmutable::parse($createdAtStr)->setTimezone($timezone);
+                    if ($created->format('Y-m-d') === $targetYmd) {
+                        $id = (string) ($bet['id'] ?? '');
+                        if ($id !== '' && ! isset($seenIds[$id])) {
+                            $seenIds[$id] = true;
+                            $matchedBets[] = $bet;
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                Log::warning('Failed fetching active bets for date filter.', ['error' => $e->getMessage()]);
+            }
+        }
+
+        // 2. 獲取已結算/歷史注單
+        $offset = 0;
+        $limit = 50;
+        $maxPages = 3;
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $list = $this->getSportBetList($limit, $offset);
+            if ($list === []) {
+                break;
+            }
+
+            $hasOlderBets = false;
+            foreach ($list as $bet) {
+                $createdAtStr = (string) ($bet['createdAt'] ?? '');
+                if ($createdAtStr === '') {
+                    continue;
+                }
+                $created = CarbonImmutable::parse($createdAtStr)->setTimezone($timezone);
+                $betYmd = $created->format('Y-m-d');
+
+                if ($betYmd === $targetYmd) {
+                    $id = (string) ($bet['id'] ?? '');
+                    if ($id !== '' && ! isset($seenIds[$id])) {
+                        $seenIds[$id] = true;
+                        $matchedBets[] = $bet;
+                    }
+                } elseif ($created->lt($targetDay->startOfDay())) {
+                    $hasOlderBets = true;
+                }
+            }
+
+            if ($hasOlderBets || count($list) < $limit) {
+                break;
+            }
+
+            $offset += $limit;
+        }
+
+        usort($matchedBets, function (array $a, array $b): int {
+            $tA = CarbonImmutable::parse((string) ($a['createdAt'] ?? ''))->getTimestamp();
+            $tB = CarbonImmutable::parse((string) ($b['createdAt'] ?? ''))->getTimestamp();
+
+            return $tB <=> $tA;
+        });
+
+        return $matchedBets;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rawBets
+     * @return array{
+     *     bets: array<int, array<string, mixed>>,
+     *     summary: array<string, mixed>
+     * }
+     */
+    public function calculateDatePnL(array $rawBets, string $timezone): array
+    {
+        $totalStaked = 0.0;
+        $settledStaked = 0.0;
+        $activeStaked = 0.0;
+        $totalPayout = 0.0;
+        $wonCount = 0;
+        $lostCount = 0;
+        $cashoutCount = 0;
+        $voidCount = 0;
+        $activeCount = 0;
+
+        $standardizedBets = [];
+
+        foreach ($rawBets as $bet) {
+            $amount = (float) ($bet['amount'] ?? 0);
+            $payout = (float) ($bet['payout'] ?? 0);
+            $currency = mb_strtoupper((string) ($bet['currency'] ?? 'USDT'));
+            $potentialMultiplier = (float) ($bet['potentialMultiplier'] ?? 1);
+            $rawStatus = mb_strtolower((string) ($bet['status'] ?? 'pending'));
+            $isActive = (bool) ($bet['active'] ?? false);
+
+            $createdAtStr = (string) ($bet['createdAt'] ?? '');
+            $created = $createdAtStr !== ''
+                ? CarbonImmutable::parse($createdAtStr)->setTimezone($timezone)
+                : CarbonImmutable::now($timezone);
+
+            if ($isActive || $rawStatus === 'confirmed') {
+                $status = 'pending';
+                $statusLabel = '進行中';
+                $profit = 0.0;
+                $activeStaked += $amount;
+                $activeCount++;
+            } elseif ($rawStatus === 'cashout') {
+                $status = 'cashout';
+                $statusLabel = '已兌現';
+                $profit = $payout - $amount;
+                $settledStaked += $amount;
+                $totalPayout += $payout;
+                $cashoutCount++;
+            } elseif (in_array($rawStatus, ['cancelled', 'void', 'refund', 'refunded'], true) || (abs($payout - $amount) < 0.001 && $rawStatus === 'settled')) {
+                $status = 'void';
+                $statusLabel = '退款';
+                $profit = 0.0;
+                $settledStaked += $amount;
+                $totalPayout += $payout;
+                $voidCount++;
+            } elseif ($rawStatus === 'settled' && $payout > 0) {
+                $status = 'won';
+                $statusLabel = '獲勝';
+                $profit = $payout - $amount;
+                $settledStaked += $amount;
+                $totalPayout += $payout;
+                $wonCount++;
+            } else {
+                $status = 'lost';
+                $statusLabel = '未中獎';
+                $profit = -$amount;
+                $settledStaked += $amount;
+                $totalPayout += 0.0;
+                $lostCount++;
+            }
+
+            $totalStaked += $amount;
+
+            $outcomes = is_array($bet['outcomes'] ?? null) ? $bet['outcomes'] : [];
+            $legCount = count($outcomes);
+            $isParlay = $legCount > 1;
+
+            $legs = [];
+            foreach ($outcomes as $outcome) {
+                $marketOutcome = is_array($outcome['outcome'] ?? null) ? $outcome['outcome'] : [];
+                $market = is_array($outcome['market'] ?? null) ? $outcome['market'] : [];
+                $fixture = is_array($outcome['fixture'] ?? null) ? $outcome['fixture'] : [];
+                $tournament = is_array($fixture['tournament'] ?? null) ? $fixture['tournament'] : [];
+                $category = is_array($tournament['category'] ?? null) ? $tournament['category'] : [];
+                $sport = is_array($category['sport'] ?? null) ? $category['sport'] : [];
+
+                $sportName = (string) ($sport['name'] ?? '');
+                $sportSlug = (string) ($sport['slug'] ?? '');
+                $tournamentName = (string) ($tournament['name'] ?? '');
+                $fixtureName = (string) ($fixture['name'] ?? '');
+                $marketName = (string) ($market['name'] ?? '');
+                $outcomeName = (string) ($marketOutcome['name'] ?? '');
+                $odds = (float) ($outcome['odds'] ?? ($marketOutcome['odds'] ?? 1.0));
+                $legRawStatus = mb_strtolower((string) ($outcome['status'] ?? 'pending'));
+
+                $legStatus = match ($legRawStatus) {
+                    'won' => 'won',
+                    'lost' => 'lost',
+                    'void', 'refund', 'refunded', 'cancelled' => 'void',
+                    default => 'pending',
+                };
+                $legSymbol = match ($legStatus) {
+                    'won' => '✔️',
+                    'lost' => '❌',
+                    'void' => '⚪',
+                    default => '⏳',
+                };
+
+                $legs[] = [
+                    'sport_name' => ChineseConverter::toTraditional($sportName),
+                    'sport_slug' => $sportSlug,
+                    'tournament_name' => ChineseConverter::toTraditional($tournamentName),
+                    'fixture_name' => ChineseConverter::toTraditional($fixtureName),
+                    'market_name' => ChineseConverter::toTraditional($marketName),
+                    'outcome_name' => ChineseConverter::toTraditional($outcomeName),
+                    'odds' => $odds,
+                    'status' => $legStatus,
+                    'status_symbol' => $legSymbol,
+                ];
+            }
+
+            $standardizedBets[] = [
+                'id' => (string) ($bet['id'] ?? ''),
+                'iid' => (string) ($bet['bet']['iid'] ?? ''),
+                'amount' => $amount,
+                'payout' => $payout,
+                'profit' => $profit,
+                'currency' => $currency,
+                'potential_multiplier' => $potentialMultiplier,
+                'status' => $status,
+                'status_label' => $statusLabel,
+                'is_parlay' => $isParlay,
+                'leg_count' => $legCount,
+                'created_at' => $created,
+                'created_at_formatted' => $created->format('m/d H:i'),
+                'created_time_only' => $created->format('H:i'),
+                'legs' => $legs,
+            ];
+        }
+
+        $netProfit = $totalPayout - $settledStaked;
+        $roi = $settledStaked > 0 ? (($netProfit / $settledStaked) * 100) : 0.0;
+        $decidedCount = $wonCount + $lostCount;
+        $winRate = $decidedCount > 0 ? (($wonCount / $decidedCount) * 100) : 0.0;
+
+        $summary = [
+            'total_staked' => $totalStaked,
+            'settled_staked' => $settledStaked,
+            'active_staked' => $activeStaked,
+            'total_payout' => $totalPayout,
+            'net_profit' => $netProfit,
+            'roi' => $roi,
+            'won_count' => $wonCount,
+            'lost_count' => $lostCount,
+            'cashout_count' => $cashoutCount,
+            'void_count' => $voidCount,
+            'active_count' => $activeCount,
+            'total_count' => count($standardizedBets),
+            'win_rate' => $winRate,
+        ];
+
+        return [
+            'bets' => $standardizedBets,
+            'summary' => $summary,
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $bets
+     * @param  array<string, mixed>  $summary
+     * @param  array{available: float, vault: float, total: float}|null  $balance
+     */
+    public function formatBetHistoryMessage(
+        CarbonImmutable $date,
+        array $bets,
+        array $summary,
+        ?array $balance = null,
+        string $timezone = 'Asia/Taipei'
+    ): string {
+        $now = CarbonImmutable::now($timezone);
+        $dateDesc = match (true) {
+            $date->isSameDay($now) => '今天',
+            $date->isSameDay($now->subDay()) => '昨天',
+            default => $date->isoFormat('dddd'),
+        };
+
+        $lines = [
+            'Stake 體育投注｜每日損益與紀錄',
+            sprintf('日期｜%s（%s）・台灣時間', $date->format('Y-m-d'), $dateDesc),
+            '',
+            '【📊 損益總覽】',
+            sprintf('・總投注額：%s USDT（%d 筆注單）', $this->formatNumber($summary['total_staked']), $summary['total_count']),
+            sprintf('・總返還額：%s USDT', $this->formatNumber($summary['total_payout'])),
+        ];
+
+        $netProfit = $summary['net_profit'];
+        $profitSign = $netProfit > 0.001 ? '+' : '';
+        $profitTag = match (true) {
+            $netProfit > 0.001 => '（盈）📈',
+            $netProfit < -0.001 => '（虧）📉',
+            default => '（平）⚖️',
+        };
+        $lines[] = sprintf('・淨損益：%s%s USDT%s', $profitSign, $this->formatNumber($netProfit), $profitTag);
+
+        $roi = $summary['roi'];
+        $roiSign = $roi > 0.001 ? '+' : '';
+        $lines[] = sprintf('・投資報酬率（ROI）：%s%.1f%%', $roiSign, $roi);
+
+        $recordParts = [
+            sprintf('%d 勝', $summary['won_count']),
+            sprintf('%d 負', $summary['lost_count']),
+        ];
+        if ($summary['cashout_count'] > 0) {
+            $recordParts[] = sprintf('%d 兌現', $summary['cashout_count']);
+        }
+        if ($summary['void_count'] > 0) {
+            $recordParts[] = sprintf('%d 退款', $summary['void_count']);
+        }
+        if ($summary['active_count'] > 0) {
+            $recordParts[] = sprintf('%d 進行中', $summary['active_count']);
+        }
+
+        $decidedCount = $summary['won_count'] + $summary['lost_count'];
+        $recordLine = implode(' ', $recordParts);
+        if ($decidedCount > 0) {
+            $recordLine .= sprintf('（勝率 %.1f%%）', $summary['win_rate']);
+        }
+        $lines[] = '・戰績：'.$recordLine;
+
+        if ($balance !== null) {
+            $lines[] = '・資金水位：'.$this->formatBalanceLine($balance);
+        }
+
+        if ($bets === []) {
+            $lines[] = '';
+            $lines[] = '──────────';
+            $lines[] = '該日期查無投注紀錄。';
+            $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
+
+            return implode("\n", $lines);
+        }
+
+        foreach ($bets as $index => $bet) {
+            $lines[] = "\n──────────";
+            $typeLabel = $bet['is_parlay'] ? "{$bet['leg_count']} 關串關" : '單注';
+            $iid = $bet['iid'] !== '' ? "｜#{$bet['iid']}" : '';
+            $statusEmoji = match ($bet['status']) {
+                'won' => '🏆',
+                'lost' => '❌',
+                'cashout' => '💰',
+                'void' => '⚪',
+                default => '⏳',
+            };
+
+            $lines[] = sprintf(
+                '【注單 %d】%s%s｜%s',
+                $index + 1,
+                $typeLabel,
+                $iid,
+                $bet['created_time_only']
+            );
+            $lines[] = sprintf('・狀態：%s %s', $bet['status_label'], $statusEmoji);
+
+            $multiplierStr = sprintf('%.3f', $bet['potential_multiplier']);
+            $lines[] = sprintf(
+                '・投注：%s %s @ %s',
+                $this->formatNumber($bet['amount']),
+                $bet['currency'],
+                $multiplierStr
+            );
+
+            if ($bet['status'] === 'pending') {
+                $lines[] = '・返還：待結算 ⏳';
+            } else {
+                $bProfit = $bet['profit'];
+                $bProfitSign = $bProfit > 0.001 ? '+' : '';
+                $lines[] = sprintf(
+                    '・返還：%s %s（盈虧：%s%s %s）',
+                    $this->formatNumber($bet['payout']),
+                    $bet['currency'],
+                    $bProfitSign,
+                    $this->formatNumber($bProfit),
+                    $bet['currency']
+                );
+            }
+
+            $legs = $bet['legs'];
+            if ($bet['is_parlay']) {
+                $lines[] = '・賽事關卡：';
+                foreach ($legs as $legIdx => $leg) {
+                    $prefix = $leg['sport_name'] !== '' ? "【{$leg['sport_name']}】" : '';
+                    $lines[] = sprintf(
+                        '  %d. %s%s｜%s',
+                        $legIdx + 1,
+                        $prefix,
+                        $leg['tournament_name'] ?: $leg['fixture_name'],
+                        $leg['fixture_name']
+                    );
+                    $lines[] = sprintf(
+                        '     選項：%s @ %.2f（%s）',
+                        $leg['outcome_name'] ?: $leg['market_name'],
+                        $leg['odds'],
+                        $leg['status_symbol']
+                    );
+                }
+            } else {
+                $leg = $legs[0] ?? null;
+                if ($leg !== null) {
+                    $prefix = $leg['sport_name'] !== '' ? "【{$leg['sport_name']}】" : '';
+                    $lines[] = sprintf(
+                        '・賽事：%s%s',
+                        $prefix,
+                        $leg['tournament_name'] ?: $leg['fixture_name']
+                    );
+                    if ($leg['fixture_name'] !== '') {
+                        $lines[] = "  {$leg['fixture_name']}";
+                    }
+                    $marketDesc = $leg['market_name'] !== '' ? "（{$leg['market_name']}）" : '';
+                    $lines[] = sprintf(
+                        '  選項：%s @ %.2f%s（%s）',
+                        $leg['outcome_name'],
+                        $leg['odds'],
+                        $marketDesc,
+                        $leg['status_symbol']
+                    );
+                }
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $bets
+     * @param  array<string, mixed>  $summary
+     * @param  array{available: float, vault: float, total: float}|null  $balance
+     * @return array<string, mixed>
+     */
+    public function buildBetHistoryImageData(
+        CarbonImmutable $date,
+        array $bets,
+        array $summary,
+        ?array $balance = null,
+        string $timezone = 'Asia/Taipei'
+    ): array {
+        $now = CarbonImmutable::now($timezone);
+        $dateDesc = match (true) {
+            $date->isSameDay($now) => '今天',
+            $date->isSameDay($now->subDay()) => '昨天',
+            default => $date->isoFormat('dddd'),
+        };
+
+        $formattedBets = [];
+        foreach ($bets as $bet) {
+            $formattedBets[] = [
+                'id' => $bet['id'],
+                'iid' => $bet['iid'],
+                'status' => $bet['status'],
+                'status_label' => $bet['status_label'],
+                'is_parlay' => $bet['is_parlay'],
+                'leg_count' => $bet['leg_count'],
+                'created_at_formatted' => $bet['created_at_formatted'],
+                'created_time_only' => $bet['created_time_only'],
+                'amount_formatted' => $this->formatNumber($bet['amount']).' '.$bet['currency'],
+                'odds_formatted' => sprintf('%.3f', $bet['potential_multiplier']),
+                'payout_formatted' => $bet['status'] === 'pending'
+                    ? '待結算'
+                    : $this->formatNumber($bet['payout']).' '.$bet['currency'],
+                'profit_formatted' => $bet['status'] === 'pending'
+                    ? '浮動中'
+                    : ($bet['profit'] >= 0 ? '+' : '').$this->formatNumber($bet['profit']).' '.$bet['currency'],
+                'profit_val' => $bet['profit'],
+                'legs' => $bet['legs'],
+            ];
+        }
+
+        return [
+            'type' => 'bet_history',
+            'title' => 'Stake 體育投注｜每日損益與紀錄',
+            'subtitle' => sprintf('日期｜%s（%s）・台灣時間', $date->format('Y-m-d'), $dateDesc),
+            'date_formatted' => $date->format('Y-m-d'),
+            'date_desc' => $dateDesc,
+            'summary' => [
+                'total_staked' => $this->formatNumber($summary['total_staked']).' USDT',
+                'total_payout' => $this->formatNumber($summary['total_payout']).' USDT',
+                'net_profit' => ($summary['net_profit'] >= 0 ? '+' : '').$this->formatNumber($summary['net_profit']).' USDT',
+                'net_profit_val' => $summary['net_profit'],
+                'roi' => ($summary['roi'] >= 0 ? '+' : '').sprintf('%.1f%%', $summary['roi']),
+                'roi_val' => $summary['roi'],
+                'win_rate' => sprintf('%.1f%%', $summary['win_rate']),
+                'win_rate_val' => $summary['win_rate'],
+                'won_count' => $summary['won_count'],
+                'lost_count' => $summary['lost_count'],
+                'cashout_count' => $summary['cashout_count'],
+                'void_count' => $summary['void_count'],
+                'active_count' => $summary['active_count'],
+                'total_count' => $summary['total_count'],
+                'record_text' => sprintf(
+                    '%d勝 %d負%s%s',
+                    $summary['won_count'],
+                    $summary['lost_count'],
+                    $summary['cashout_count'] > 0 ? " {$summary['cashout_count']}兌現" : '',
+                    $summary['active_count'] > 0 ? " {$summary['active_count']}進行中" : ''
+                ),
+            ],
+            'bets' => $formattedBets,
+            'balance_formatted' => $balance ? $this->formatBalanceLine($balance) : null,
+        ];
     }
 
     /**

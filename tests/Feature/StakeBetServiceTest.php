@@ -618,6 +618,277 @@ class StakeBetServiceTest extends TestCase
         $original->clear();
     }
 
+    public function test_bet_history_defaults_to_today(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'ActiveBetCount_User' => Http::response($this->sampleActiveBetCountResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(100.0, 50.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet history');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('Stake 體育投注｜每日損益與紀錄', $reply->text);
+        $this->assertStringContainsString('日期｜2026-09-06（今天）', $reply->text);
+        $this->assertStringContainsString('總投注額：', $reply->text);
+        $this->assertStringContainsString('淨損益：', $reply->text);
+        $this->assertStringContainsString('投資報酬率（ROI）：', $reply->text);
+        $this->assertTrue($reply->prefersImage());
+        $this->assertSame('bet_history', $reply->imageData['type']);
+    }
+
+    public function test_bet_history_supports_specified_date_and_aliases(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet record 2026-09-06');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('Stake 體育投注｜每日損益與紀錄', $reply->text);
+        $this->assertStringContainsString('2026-09-06', $reply->text);
+        $this->assertStringContainsString('Team Spirit vs Heroic', $reply->text);
+    }
+
+    public function test_bet_history_force_text_mode(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet 紀錄 2026-09-06 text');
+
+        $this->assertNotNull($reply);
+        $this->assertFalse($reply->prefersImage());
+        $this->assertNull($reply->imageData);
+        $this->assertStringContainsString('Stake 體育投注｜每日損益與紀錄', $reply->text);
+    }
+
+    public function test_bet_history_handles_empty_records(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse([]), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet history 2026-01-01');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('該日期查無投注紀錄', $reply->text);
+        $this->assertTrue($reply->prefersImage());
+        $this->assertSame([], $reply->imageData['bets']);
+    }
+
+    public function test_bet_history_image_rendering(): void
+    {
+        if (! extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick is required to test bet history image rendering.');
+        }
+
+        $font = collect([
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        ])->first(fn (string $path): bool => is_readable($path));
+
+        if ($font === null) {
+            $this->markTestSkipped('A readable font is required to verify image rendering.');
+        }
+
+        config([
+            'services.line.schedule_image_disk' => 'test-disk',
+            'services.line.schedule_image_font' => $font,
+        ]);
+        \Illuminate\Support\Facades\Storage::fake('test-disk');
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(100.0, 50.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet record 2026-09-06');
+        $this->assertNotNull($reply);
+        $this->assertTrue($reply->prefersImage());
+
+        $url = app(\App\Services\LineScheduleImageService::class)->create($reply->imageData, $reply->linkUrl);
+        $this->assertNotEmpty($url);
+
+        $files = \Illuminate\Support\Facades\Storage::disk('test-disk')->allFiles('line-schedules');
+        $originalPath = collect($files)->first(fn (string $path): bool => str_ends_with($path, '/1440'));
+        $this->assertNotNull($originalPath);
+
+        $original = new \Imagick;
+        $original->readImageBlob(\Illuminate\Support\Facades\Storage::disk('test-disk')->get($originalPath));
+        $this->assertSame(1440, $original->getImageWidth());
+        $this->assertGreaterThan(400, $original->getImageHeight());
+        $original->clear();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $customBets
+     * @return array<string, mixed>
+     */
+    private function sampleSportBetListResponse(array $customBets = []): array
+    {
+        if ($customBets !== []) {
+            $items = array_map(fn (array $b): array => [
+                'id' => $b['id'] ?? 'test-id',
+                'iid' => $b['bet']['iid'] ?? 'sport:123',
+                'bet' => $b,
+            ], $customBets);
+
+            return [
+                'data' => [
+                    'user' => [
+                        'id' => '2ca2dc66-5764-4ddc-9981-9c2c5575e8ad',
+                        'sportBetList' => $items,
+                    ],
+                ],
+            ];
+        }
+
+        return [
+            'data' => [
+                'user' => [
+                    'id' => '2ca2dc66-5764-4ddc-9981-9c2c5575e8ad',
+                    'sportBetList' => [
+                        [
+                            'id' => 'hist-bet-1',
+                            'iid' => 'sport:649736389',
+                            'bet' => [
+                                'id' => 'hist-bet-1',
+                                'status' => 'settled',
+                                'amount' => 68.0,
+                                'payout' => 182.08,
+                                'currency' => 'usdt',
+                                'potentialMultiplier' => 2.678,
+                                'createdAt' => 'Sun, 06 Sep 2026 13:16:03 GMT',
+                                'bet' => ['iid' => 'sport:649736389'],
+                                'outcomes' => [
+                                    [
+                                        'status' => 'won',
+                                        'odds' => 1.4,
+                                        'market' => ['name' => '获胜'],
+                                        'outcome' => ['name' => 'Team Spirit', 'odds' => 1.4],
+                                        'fixture' => [
+                                            'name' => 'Team Spirit vs Heroic',
+                                            'tournament' => [
+                                                'name' => 'ESL Pro League',
+                                                'category' => ['sport' => ['name' => '反恐精英']],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            'id' => 'hist-bet-2',
+                            'iid' => 'sport:649642793',
+                            'bet' => [
+                                'id' => 'hist-bet-2',
+                                'status' => 'settled',
+                                'amount' => 64.0,
+                                'payout' => 0.0,
+                                'currency' => 'usdt',
+                                'potentialMultiplier' => 1.472,
+                                'createdAt' => 'Sun, 06 Sep 2026 00:45:53 GMT',
+                                'bet' => ['iid' => 'sport:649642793'],
+                                'outcomes' => [
+                                    [
+                                        'status' => 'lost',
+                                        'odds' => 1.472,
+                                        'market' => ['name' => '比赛获胜者'],
+                                        'outcome' => ['name' => 'Team Vitality', 'odds' => 1.472],
+                                        'fixture' => [
+                                            'name' => 'Vitality vs G2',
+                                            'tournament' => [
+                                                'name' => 'LEC',
+                                                'category' => ['sport' => ['name' => '英雄联盟']],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            'id' => 'hist-bet-3',
+                            'iid' => 'sport:649642794',
+                            'bet' => [
+                                'id' => 'hist-bet-3',
+                                'status' => 'cashout',
+                                'amount' => 50.0,
+                                'payout' => 78.19,
+                                'currency' => 'usdt',
+                                'potentialMultiplier' => 5.0,
+                                'createdAt' => 'Sun, 06 Sep 2026 05:58:48 GMT',
+                                'bet' => ['iid' => 'sport:649642794'],
+                                'outcomes' => [
+                                    [
+                                        'status' => 'won',
+                                        'odds' => 1.6,
+                                        'market' => ['name' => '比赛获胜者'],
+                                        'outcome' => ['name' => 'Invictus Gaming', 'odds' => 1.6],
+                                        'fixture' => [
+                                            'name' => 'Invictus Gaming vs WE',
+                                            'tournament' => [
+                                                'name' => 'LPL',
+                                                'category' => ['sport' => ['name' => '英雄联盟']],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+    }
+
     /**
      * @return array<string, mixed>
      */
