@@ -184,4 +184,96 @@ class LineScheduleImageServiceTest extends TestCase
         $this->assertSame(4, $service->seriesWinSlots('BO7'));
         $this->assertSame(2, $service->seriesWinSlots('未知'));
     }
+
+    public function test_it_renders_bets_with_mobile_friendly_layout_and_dimensions(): void
+    {
+        if (! extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick is required to verify schedule image layout.');
+        }
+
+        $font = collect([
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        ])->first(fn (string $path): bool => is_readable($path));
+
+        if ($font === null) {
+            $this->markTestSkipped('A readable font is required to verify schedule image layout.');
+        }
+
+        config([
+            'services.line.schedule_image_disk' => 'schedule-images',
+            'services.line.schedule_image_font' => $font,
+        ]);
+        Storage::fake('schedule-images');
+
+        $betData = [
+            'type' => 'bets',
+            'title' => 'Stake 體育投注',
+            'subtitle' => '台灣時間｜共 1 筆進行中注單',
+            'total_count' => 1,
+            'total_staked' => '71.8 USDT',
+            'balance_formatted' => '100 USDT',
+            'bets' => [
+                [
+                    'type_label' => '2 關串關',
+                    'is_parlay' => true,
+                    'iid' => '#123456',
+                    'amount_formatted' => '71.8 USDT',
+                    'multiplier_formatted' => '2.145',
+                    'payout_formatted' => '154.01 USDT',
+                    'cashout_formatted' => '92.41 USDT（1.287x）',
+                    'cashout_disabled' => false,
+                    'cashout_multiplier' => 1.287,
+                    'created_at_formatted' => '09/06 14:25',
+                    'legs' => [
+                        [
+                            'leg_index' => 1,
+                            'total_legs' => 2,
+                            'status' => 'pending',
+                            'status_label' => '進行中 ⏳',
+                            'game' => 'lol',
+                            'sport_name' => '英雄聯盟',
+                            'tournament' => 'LCK 2026 Season Playoffs',
+                            'match_name' => 'T1 Esports vs Dplus KIA',
+                            'match_status' => '滾球中（0-0）',
+                            'is_live' => true,
+                            'selection' => 'T1 Esports',
+                            'odds' => '1.65',
+                            'market' => '比賽獲勝者 - Two 路線',
+                        ],
+                        [
+                            'leg_index' => 2,
+                            'total_legs' => 2,
+                            'status' => 'won',
+                            'status_label' => '已過 ✅',
+                            'game' => 'lol',
+                            'sport_name' => '英雄聯盟',
+                            'tournament' => 'LPL 2026 Grand Finals',
+                            'match_name' => 'Invictus Gaming vs Team WE',
+                            'match_status' => '已結束',
+                            'is_live' => false,
+                            'selection' => 'Over 3.5',
+                            'odds' => '1.30',
+                            'market' => '比賽地圖數',
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $service = app(LineScheduleImageService::class);
+        $url = $service->create($betData, 'https://stake.com');
+        $this->assertNotEmpty($url);
+
+        $originalPath = collect(Storage::disk('schedule-images')->allFiles('line-schedules'))
+            ->first(fn (string $path): bool => str_ends_with($path, '/1440'));
+        $this->assertNotNull($originalPath);
+
+        $image = new Imagick;
+        $image->readImageBlob(Storage::disk('schedule-images')->get($originalPath));
+        $this->assertSame(1440, $image->getImageWidth());
+        $this->assertGreaterThan(600, $image->getImageHeight());
+        $image->clear();
+    }
 }

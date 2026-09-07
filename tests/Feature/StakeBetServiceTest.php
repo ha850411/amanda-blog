@@ -15,11 +15,20 @@ class StakeBetServiceTest extends TestCase
     {
         parent::setUp();
 
+        CarbonImmutable::setTestNow('2026-09-06 12:00:00');
+
         config([
             'services.stake.access_token' => 'test-stake-token-123',
             'services.stake.api_url' => 'https://stake.com/_api/graphql',
             'services.bo3.timezone' => 'Asia/Taipei',
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        CarbonImmutable::setTestNow();
+
+        parent::tearDown();
     }
 
     public function test_bet_command_returns_formatted_bets_when_active_bets_exist(): void
