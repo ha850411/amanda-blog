@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Services\LineScheduleBot;
-use App\Services\StakeBetService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -319,6 +318,81 @@ class StakeBetServiceTest extends TestCase
         $this->assertNotNull($reply);
         $this->assertStringContainsString('・即時兌現：暫停兌現 ⏸️', $reply->text);
         $this->assertTrue($reply->imageData['bets'][0]['cashout_disabled']);
+    }
+
+    public function test_bet_command_handles_suspended_market_or_inactive_outcome_cashout(): void
+    {
+        $betsResponse = $this->sampleActiveSportBetsResponse();
+        $betsResponse['data']['user']['activeSportBets'][0]['cashoutDisabled'] = false;
+        // Suspend leg 1 market
+        $betsResponse['data']['user']['activeSportBets'][0]['outcomes'][0]['market']['status'] = 'suspended';
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push($this->sampleActiveBetCountResponse(), 200)
+                ->push($betsResponse, 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('・即時兌現：暫停兌現 ⏸️', $reply->text);
+        $this->assertTrue($reply->imageData['bets'][0]['cashout_disabled']);
+    }
+
+    public function test_bet_command_calculates_dynamic_live_cashout_with_probabilities(): void
+    {
+        $betsResponse = $this->sampleActiveSportBetsResponse();
+        // Set single bet with amount 100, odds 1.45, live probability 0.523 (matches real Over 3.5 live bet)
+        $bet = [
+            '__typename' => 'SportBet',
+            'id' => 'test-bet-live-1',
+            'active' => true,
+            'status' => 'confirmed',
+            'customBet' => false,
+            'cashoutDisabled' => false,
+            'amount' => 100,
+            'currency' => 'usdt',
+            'potentialMultiplier' => 1.45,
+            'cashoutMultiplier' => 0.99, // default un-updated placement multiplier
+            'createdAt' => 'Sun, 06 Sep 2026 06:25:15 GMT',
+            'bet' => ['iid' => 'sport:999001'],
+            'outcomes' => [
+                [
+                    'status' => 'pending',
+                    'odds' => 1.45,
+                    'fixture' => [
+                        'status' => 'live',
+                        'cashoutEnabled' => true,
+                    ],
+                    'market' => [
+                        'status' => 'active',
+                    ],
+                    'outcome' => [
+                        'name' => 'Over 3.5',
+                        'odds' => 1.78,
+                        'active' => true,
+                        'probabilities' => 0.523,
+                    ],
+                ],
+            ],
+        ];
+
+        $betsResponse['data']['user']['activeSportBets'] = [$bet];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push(['data' => ['user' => ['activeSportBetCount' => 1]]], 200)
+                ->push($betsResponse, 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+
+        $this->assertNotNull($reply);
+        // 145 * 0.523 * (1 - (0.038 + 0.029*0.523)) = 71.80 USDT (0.718x)
+        $this->assertStringContainsString('・即時兌現：71.8 USDT（0.718x）', $reply->text);
+        $this->assertFalse($reply->imageData['bets'][0]['cashout_disabled']);
+        $this->assertSame('71.8 USDT（0.718x）', $reply->imageData['bets'][0]['cashout_formatted']);
     }
 
     public function test_bet_command_displays_in_progress_period_scores(): void

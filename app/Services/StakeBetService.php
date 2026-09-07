@@ -46,7 +46,6 @@ query UserBalances {
 }
 GRAPHQL;
 
-
     public const FETCH_ACTIVE_SPORT_BETS_QUERY = <<<'GRAPHQL'
 query FetchActiveSportBets($limit: Int!, $offset: Int!, $name: String) {
   user(name: $name) {
@@ -1014,18 +1013,11 @@ GRAPHQL;
                 $currency
             );
 
-            $cashoutMultiplier = (float) ($bet['cashoutMultiplier'] ?? 0);
-            $cashoutDisabled = (bool) ($bet['cashoutDisabled'] ?? false);
-            if ($cashoutDisabled) {
+            $cashoutState = $this->resolveCashoutState($bet);
+            if ($cashoutState['disabled']) {
                 $lines[] = '・即時兌現：暫停兌現 ⏸️';
-            } elseif ($cashoutMultiplier > 0) {
-                $cashoutAmount = $amount * $cashoutMultiplier;
-                $lines[] = sprintf(
-                    '・即時兌現：%s %s（%.3fx）',
-                    $this->formatNumber($cashoutAmount),
-                    $currency,
-                    $cashoutMultiplier
-                );
+            } elseif ($cashoutState['available'] && $cashoutState['formatted'] !== null) {
+                $lines[] = '・即時兌現：'.$cashoutState['formatted'];
             }
 
             if (! empty($bet['createdAt'])) {
@@ -1147,18 +1139,12 @@ GRAPHQL;
 
             $totalAmounts[$currency] = ($totalAmounts[$currency] ?? 0.0) + $amount;
 
-            $cashoutMultiplier = (float) ($bet['cashoutMultiplier'] ?? 0);
-            $cashoutDisabled = (bool) ($bet['cashoutDisabled'] ?? false);
-            $cashoutFormatted = null;
-            if (! $cashoutDisabled && $cashoutMultiplier > 0) {
-                $cashoutAmount = $amount * $cashoutMultiplier;
-                $cashoutFormatted = sprintf(
-                    '%s %s（%.3fx）',
-                    $this->formatNumber($cashoutAmount),
-                    $currency,
-                    $cashoutMultiplier
-                );
-            }
+            $cashoutState = $this->resolveCashoutState($bet);
+            $cashoutFormatted = ($cashoutState['available'] && ! $cashoutState['disabled'])
+                ? $cashoutState['formatted']
+                : null;
+            $cashoutDisabled = $cashoutState['disabled'];
+            $cashoutMultiplier = $cashoutState['multiplier'];
 
             $createdAtFormatted = null;
             if (! empty($bet['createdAt'])) {
@@ -1449,5 +1435,184 @@ GRAPHQL;
         }
 
         return sprintf('%s USDT', $availStr);
+    }
+
+    /**
+     * @param  array<string, mixed>  $bet
+     * @return array{
+     *     available: bool,
+     *     disabled: bool,
+     *     multiplier: float,
+     *     amount: float,
+     *     formatted: ?string
+     * }
+     */
+    public function resolveCashoutState(array $bet): array
+    {
+        $amount = (float) ($bet['amount'] ?? 0);
+        $currency = mb_strtoupper((string) ($bet['currency'] ?? 'USDT'));
+        $potentialMultiplier = (float) ($bet['potentialMultiplier'] ?? 1);
+        $payout = $amount * $potentialMultiplier;
+
+        $rawCashoutMultiplier = (float) ($bet['cashoutMultiplier'] ?? 0);
+        $rawCashoutDisabled = (bool) ($bet['cashoutDisabled'] ?? false);
+
+        $outcomes = is_array($bet['outcomes'] ?? null) ? $bet['outcomes'] : [];
+
+        if ($rawCashoutDisabled) {
+            return [
+                'available' => false,
+                'disabled' => true,
+                'multiplier' => 0.0,
+                'amount' => 0.0,
+                'formatted' => null,
+            ];
+        }
+
+        $isAnyLegLive = false;
+        $hasSuspendedLeg = false;
+        $hasLiveProbabilities = false;
+        $hasOddsMoved = false;
+        $combinedProb = 1.0;
+        $pendingLegCount = 0;
+
+        foreach ($outcomes as $outcome) {
+            $rawStatus = mb_strtolower((string) ($outcome['status'] ?? 'pending'));
+
+            if ($rawStatus === 'lost') {
+                return [
+                    'available' => false,
+                    'disabled' => false,
+                    'multiplier' => 0.0,
+                    'amount' => 0.0,
+                    'formatted' => null,
+                ];
+            }
+
+            if (in_array($rawStatus, ['won', 'void', 'refund', 'refunded', 'cancelled'], true)) {
+                continue;
+            }
+
+            $pendingLegCount++;
+
+            $fixture = is_array($outcome['fixture'] ?? null) ? $outcome['fixture'] : [];
+            $fixtureStatus = mb_strtolower((string) ($fixture['status'] ?? ''));
+            if ($fixtureStatus === 'live') {
+                $isAnyLegLive = true;
+            }
+
+            $market = is_array($outcome['market'] ?? null) ? $outcome['market'] : [];
+            $marketStatus = mb_strtolower((string) ($market['status'] ?? 'active'));
+
+            $marketOutcome = is_array($outcome['outcome'] ?? null) ? $outcome['outcome'] : [];
+            $isOutcomeActive = $marketOutcome['active'] ?? true;
+
+            $fixtureCashout = $fixture['cashoutEnabled'] ?? true;
+            $tournamentCashout = $fixture['tournament']['cashoutEnabled'] ?? true;
+            $categoryCashout = $fixture['tournament']['category']['cashoutEnabled'] ?? true;
+            $sportCashout = $fixture['tournament']['category']['sport']['cashoutConfiguration']['cashoutEnabled'] ?? true;
+
+            $liveOdds = isset($marketOutcome['odds']) ? (float) $marketOutcome['odds'] : null;
+            $liveProb = isset($marketOutcome['probabilities']) && is_numeric($marketOutcome['probabilities'])
+                ? (float) $marketOutcome['probabilities']
+                : null;
+
+            $placedOdds = (float) ($outcome['odds'] ?? 0);
+            if ($liveOdds !== null && $liveOdds > 0 && abs($liveOdds - $placedOdds) > 0.001) {
+                $hasOddsMoved = true;
+            }
+
+            if ($liveProb !== null && $liveProb > 0) {
+                $hasLiveProbabilities = true;
+            }
+
+            if (
+                $marketStatus === 'suspended'
+                || ! $isOutcomeActive
+                || ! $fixtureCashout
+                || ! $tournamentCashout
+                || ! $categoryCashout
+                || ! $sportCashout
+                || ($liveOdds !== null && $liveOdds <= 0 && ($liveProb === null || $liveProb <= 0))
+            ) {
+                $hasSuspendedLeg = true;
+            }
+
+            if ($liveProb !== null && $liveProb > 0) {
+                $legProb = $liveProb;
+            } elseif ($liveOdds !== null && $liveOdds > 0) {
+                $legProb = 1.0 / $liveOdds;
+            } else {
+                $legProb = $placedOdds > 0 ? 1.0 / $placedOdds : 1.0;
+            }
+
+            $combinedProb *= max(0.0001, min(1.0, $legProb));
+        }
+
+        if ($hasSuspendedLeg) {
+            return [
+                'available' => false,
+                'disabled' => true,
+                'multiplier' => 0.0,
+                'amount' => 0.0,
+                'formatted' => null,
+            ];
+        }
+
+        if ($amount <= 0 || $pendingLegCount === 0) {
+            return [
+                'available' => false,
+                'disabled' => false,
+                'multiplier' => 0.0,
+                'amount' => 0.0,
+                'formatted' => null,
+            ];
+        }
+
+        $isStaleDefault = abs($rawCashoutMultiplier - 0.99) < 0.001;
+        if ($isAnyLegLive && ($hasLiveProbabilities || ($isStaleDefault && $hasOddsMoved) || $rawCashoutMultiplier <= 0)) {
+            $ev = $payout * $combinedProb;
+            $margin = 0.038 + (0.029 * $combinedProb);
+            $cashoutAmount = max(0.0, $ev * (1.0 - $margin));
+            $calcMultiplier = $cashoutAmount / $amount;
+
+            return [
+                'available' => true,
+                'disabled' => false,
+                'multiplier' => $calcMultiplier,
+                'amount' => $cashoutAmount,
+                'formatted' => sprintf(
+                    '%s %s（%.3fx）',
+                    $this->formatNumber($cashoutAmount),
+                    $currency,
+                    $calcMultiplier
+                ),
+            ];
+        }
+
+        if ($rawCashoutMultiplier > 0) {
+            $cashoutAmount = $amount * $rawCashoutMultiplier;
+
+            return [
+                'available' => true,
+                'disabled' => false,
+                'multiplier' => $rawCashoutMultiplier,
+                'amount' => $cashoutAmount,
+                'formatted' => sprintf(
+                    '%s %s（%.3fx）',
+                    $this->formatNumber($cashoutAmount),
+                    $currency,
+                    $rawCashoutMultiplier
+                ),
+            ];
+        }
+
+        return [
+            'available' => false,
+            'disabled' => false,
+            'multiplier' => 0.0,
+            'amount' => 0.0,
+            'formatted' => null,
+        ];
     }
 }
