@@ -15,7 +15,7 @@ class OddsApiService
      * @param  array<int, array<string, mixed>>  $matches
      * @return array<int, array<string, mixed>>
      */
-    public function enrich(array $matches, CarbonImmutable $date): array
+    public function enrich(array $matches, CarbonImmutable $date, ?CarbonImmutable $endDate = null): array
     {
         $apiKey = (string) config('services.odds.api_key');
 
@@ -24,7 +24,7 @@ class OddsApiService
         }
 
         try {
-            $events = $this->eventsForDate($date, $apiKey);
+            $events = $this->eventsForDate($date, $endDate ?? $date, $apiKey);
             $matchedEvents = $this->matchEvents($matches, $events);
             $odds = $this->fetchOdds($matchedEvents, $apiKey);
 
@@ -48,7 +48,7 @@ class OddsApiService
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function eventsForDate(CarbonImmutable $date, string $apiKey): array
+    private function eventsForDate(CarbonImmutable $startDate, CarbonImmutable $endDate, string $apiKey): array
     {
         $response = Http::acceptJson()
             ->withUserAgent('AmandaBlogLineBot/1.0')
@@ -61,8 +61,8 @@ class OddsApiService
                 'apiKey' => $apiKey,
                 'sport' => 'esports',
                 'status' => 'pending,live',
-                'from' => $date->startOfDay()->utc()->toIso8601String(),
-                'to' => $date->endOfDay()->utc()->toIso8601String(),
+                'from' => $startDate->startOfDay()->utc()->toIso8601String(),
+                'to' => $endDate->endOfDay()->utc()->toIso8601String(),
             ]);
 
         if (! $response->successful()) {

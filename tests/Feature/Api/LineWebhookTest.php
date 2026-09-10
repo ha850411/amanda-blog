@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Mockery;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class LineWebhookTest extends TestCase
@@ -396,7 +397,7 @@ class LineWebhookTest extends TestCase
 
             return $request['messages'][0] === [
                 'type' => 'text',
-                'text' => "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n查今天顯示滾球中和尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2",
+                'text' => "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2",
             ];
         });
     }
@@ -1082,5 +1083,126 @@ class LineWebhookTest extends TestCase
             .'<script id="micro-markup" type="application/ld+json">'
             .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
             .'</script></html>';
+    }
+
+    private function bo3HtmlForDate(string $utcDateTime, string $team1 = 'Team 1', string $team2 = 'Team 2'): string
+    {
+        $events = [
+            [
+                '@context' => 'https://schema.org',
+                '@type' => 'SportsEvent',
+                'name' => "{$team1} vs {$team2}",
+                'url' => 'https://bo3.gg/lol/matches/'.Str::slug("{$team1}-vs-{$team2}"),
+                'startDate' => $utcDateTime,
+            ],
+        ];
+
+        return '<html><div class="table-row table-row--upcoming">'
+            .'<a href="/lol/matches/'.Str::slug("{$team1}-vs-{$team2}")."\">{$team1}Bo3{$team2}</a><p class=\"tournament-name\">LCK 2026</p></div>"
+            .'<script id="micro-markup" type="application/ld+json">'
+            .json_encode($events, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+            .'</script></html>';
+    }
+
+    public function test_schedule_supports_mmdd_single_date(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!lol 0812');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('LoL｜08/12｜S Tier', $reply->text);
+        $this->assertStringContainsString('第 1 場｜07:00｜BO3', $reply->text);
+        $this->assertSame('07:00', $reply->imageData['matches'][0]['start_time']);
+
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/lol/matches/current')
+            && $request['date'] === '2026-08-12');
+    }
+
+    public function test_schedule_supports_mmdd_range_query(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => function ($request) {
+                if (str_contains($request->url(), 'date=2026-08-12')) {
+                    return Http::response($this->bo3HtmlForDate('2026-08-11T23:00:00.000+00:00', 'Day1 Alpha', 'Day1 Beta'), 200);
+                }
+                if (str_contains($request->url(), 'date=2026-08-13')) {
+                    return Http::response($this->bo3HtmlForDate('2026-08-12T23:00:00.000+00:00', 'Day2 Gamma', 'Day2 Delta'), 200);
+                }
+
+                return Http::response('', 404);
+            },
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!lol 0812~0813');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('LoL｜08/12 ~ 08/13｜S Tier', $reply->text);
+        $this->assertStringContainsString('第 1 場｜08/12 07:00｜BO3', $reply->text);
+        $this->assertStringContainsString('第 2 場｜08/13 07:00｜BO3', $reply->text);
+        $this->assertSame('08/12 07:00', $reply->imageData['matches'][0]['start_time']);
+        $this->assertSame('08/13 07:00', $reply->imageData['matches'][1]['start_time']);
+
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/lol/matches/current')
+            && str_contains($request->url(), 'date=2026-08-12'));
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bo3.gg/lol/matches/current')
+            && str_contains($request->url(), 'date=2026-08-13'));
+    }
+
+    public function test_schedule_range_with_options(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => function ($request) {
+                if (str_contains($request->url(), 'date=2026-08-12')) {
+                    return Http::response($this->bo3HtmlForDate('2026-08-11T23:00:00.000+00:00', 'T1', 'GenG'), 200);
+                }
+
+                return Http::response($this->bo3HtmlForDate('2026-08-12T23:00:00.000+00:00', 'DK', 'KT'), 200);
+            },
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!lol 0812~0813 tier=s limit=1 team=T1');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('T1', $reply->text);
+        $this->assertStringNotContainsString('DK', $reply->text);
+        $this->assertCount(1, $reply->imageData['matches']);
+    }
+
+    public function test_schedule_range_exceeding_max_days_returns_friendly_error(): void
+    {
+        Http::fake();
+
+        $reply = app(LineScheduleBot::class)->reply('!lol 0801~0830');
+
+        $this->assertNotNull($reply);
+        $this->assertSame('查詢區間最多支援 7 天，請縮小日期範圍再試。', $reply->text);
+        Http::assertNothingSent();
+    }
+
+    public function test_schedule_supports_slash_and_dash_range_and_reversed_dates(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => function ($request) {
+                if (str_contains($request->url(), 'date=2026-08-12')) {
+                    return Http::response($this->bo3HtmlForDate('2026-08-11T23:00:00.000+00:00', 'Alpha', 'Beta'), 200);
+                }
+
+                return Http::response($this->bo3HtmlForDate('2026-08-12T23:00:00.000+00:00', 'Gamma', 'Delta'), 200);
+            },
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!lol 08/13 ～ 08/12');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('LoL｜08/12 ~ 08/13｜S Tier', $reply->text);
+        $this->assertStringContainsString('第 1 場｜08/12 07:00｜BO3', $reply->text);
+        $this->assertStringContainsString('第 2 場｜08/13 07:00｜BO3', $reply->text);
     }
 }

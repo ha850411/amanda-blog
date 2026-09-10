@@ -61,7 +61,7 @@ LINE_SCHEDULE_IMAGE_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 LINE_SCHEDULE_IMAGE_RETENTION_DAYS=7
 ```
 
-輸入 `!help` 才會顯示使用說明；一般訊息與無效指令不會回覆。指令格式為 `!lol 08/11`、`!val 今天`、`!cs 明天`；只輸入 `!match`、`!lol`、`!val` 或 `!cs` 時，日期預設為台灣時間的今天。日期支援 `MM/DD`、今天、明天與後天；查詢今天時顯示滾球中和尚未開打的賽事，滾球賽事會加上標記，並在資料可取得時顯示目前比分；預設只查 S Tier。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`；未指定 `limit` 時最多顯示 19 場。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。LoL 與 VALORANT 賽程會另外透過 `BO3_API_URL` 取得最近五次 Head to Head 的系列賽勝場、小局總比分，以及每次交手的日期、BO 賽制、比分與勝方；逐場資訊會列在賽程圖中各對局的右側。資料暫時無法取得時仍會正常顯示賽程。
+輸入 `!help` 才會顯示使用說明；一般訊息與無效指令不會回覆。指令格式為 `!lol 08/11`、`!lol 0912`、`!lol 0912~0913`、`!val 今天`、`!cs 明天`；只輸入 `!match`、`!lol`、`!val` 或 `!cs` 時，日期預設為台灣時間的今天。日期支援 `MMDD`（如 `0912`）、`MM/DD`、`MMDD~MMDD` 區間（如 `0912~0913`，區間最多 7 天）、今天、明天與後天；查詢今天時顯示滾球中和尚未開打的賽事，滾球賽事會加上標記，並在資料可取得時顯示目前比分；預設只查 S Tier。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`；未指定 `limit` 時最多顯示 19 場。賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。LoL 與 VALORANT 賽程會另外透過 `BO3_API_URL` 取得最近五次 Head to Head 的系列賽勝場、小局總比分，以及每次交手的日期、BO 賽制、比分與勝方；逐場資訊會列在賽程圖中各對局的右側。資料暫時無法取得時仍會正常顯示賽程。
 
 當天 LoL 與 CS2 滾球比分不使用 Laravel Cache：設定 `ODDS_API_KEY` 後，每次指令會直接呼叫 Odds-API.io `/events/live` 更新系列賽比分。CS2 的 Odds API 資料目前只提供系列與已完成地圖的勝負，不會把 `scores.periods` 的地圖勝負誤當成當前地圖回合比分；成功匹配 Odds API 賽事時，也不再顯示可能已落後的 bo3.gg 當局回合分。LoL 當局擊殺會直接讀取 Riot LoL Esports 官網目前進行中的 game ID，再呼叫 `feed.lolesports.com/livestats/v1/window/{gameId}` 取得最新 frame。即時來源失敗時保留 bo3.gg 比分作為備援。Riot LoL Esports feed 是官網內部且未公開支援的接口，可能在 Riot 改版後需要同步調整。
 

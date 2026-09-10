@@ -8,6 +8,8 @@ use Throwable;
 
 class LineScheduleBot
 {
+    public const MAX_SCHEDULE_DAYS = 7;
+
     private const GAME_LABELS = [
         'cs' => 'CS2',
         'valorant' => 'VALORANT',
@@ -58,6 +60,10 @@ class LineScheduleBot
 
         $command = $this->parseCommand($message);
 
+        if (is_string($command)) {
+            return new LineBotReply($command);
+        }
+
         if ($command === null) {
             return null;
         }
@@ -65,18 +71,22 @@ class LineScheduleBot
         $allMatches = [];
 
         try {
-            foreach ($command['games'] as $game) {
-                $gameMatches = $this->schedules->forDate(
-                    $game,
-                    $command['date'],
-                    $command['tiers'],
-                );
+            $currentDate = $command['start_date'];
+            while ($currentDate->lessThanOrEqualTo($command['end_date'])) {
+                foreach ($command['games'] as $game) {
+                    $gameMatches = $this->schedules->forDate(
+                        $game,
+                        $currentDate,
+                        $command['tiers'],
+                    );
 
-                foreach ($gameMatches as $match) {
-                    $match['game'] = $game;
-                    $match['game_label'] = self::GAME_LABELS[$game] ?? mb_strtoupper($game);
-                    $allMatches[] = $match;
+                    foreach ($gameMatches as $match) {
+                        $match['game'] = $game;
+                        $match['game_label'] = self::GAME_LABELS[$game] ?? mb_strtoupper($game);
+                        $allMatches[] = $match;
+                    }
                 }
+                $currentDate = $currentDate->addDay();
             }
         } catch (Throwable $exception) {
             report($exception);
@@ -84,15 +94,23 @@ class LineScheduleBot
             return new LineBotReply('目前無法取得 bo3.gg 賽程，請稍後再試。');
         }
 
+        $allMatches = array_values(collect($allMatches)->unique(function (array $match): string {
+            return (string) ($match['url'] ?? ($match['game'] ?? '').$match['name'].$match['start_at']->toIso8601String());
+        })->all());
+
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         $now = CarbonImmutable::now($timezone);
 
-        if ($command['date']->isSameDay($now)) {
+        $includesToday = $command['start_date']->lessThanOrEqualTo($now)
+            && $command['end_date']->greaterThanOrEqualTo($now->startOfDay());
+
+        if ($includesToday) {
             $allMatches = $this->liveScores->enrich($allMatches);
 
             $allMatches = array_values(array_filter(
                 $allMatches,
-                fn (array $match): bool => ($match['is_live'] ?? false)
+                fn (array $match): bool => ! $match['start_at']->isSameDay($now)
+                    || ($match['is_live'] ?? false)
                     || $match['start_at']->greaterThan($now),
             ));
         }
@@ -107,24 +125,29 @@ class LineScheduleBot
             ));
         }
 
-        if (count($command['games']) > 1) {
-            $gamePriority = array_flip($command['games']);
-            usort($allMatches, function (array $a, array $b) use ($gamePriority): int {
-                $cmp = $a['start_at'] <=> $b['start_at'];
+        $gamePriority = array_flip($command['games']);
+        usort($allMatches, function (array $a, array $b) use ($gamePriority): int {
+            $cmp = $a['start_at'] <=> $b['start_at'];
 
-                if ($cmp !== 0) {
-                    return $cmp;
-                }
+            if ($cmp !== 0) {
+                return $cmp;
+            }
 
-                return ($gamePriority[$a['game'] ?? ''] ?? 99) <=> ($gamePriority[$b['game'] ?? ''] ?? 99);
-            });
-        }
+            return ($gamePriority[$a['game'] ?? ''] ?? 99) <=> ($gamePriority[$b['game'] ?? ''] ?? 99);
+        });
 
         $isMultiGame = count($command['games']) > 1;
-        $dateLabel = $command['date']->format('m/d');
+        $dateLabel = $command['is_range']
+            ? $command['start_date']->format('m/d').' ~ '.$command['end_date']->format('m/d')
+            : $command['start_date']->format('m/d');
+
         $tierLabel = $command['tiers'] === []
             ? '全部 Tier'
             : implode('/', array_map('mb_strtoupper', $command['tiers'])).' Tier';
+
+        $urlDate = ($command['start_date']->lessThanOrEqualTo($now) && $command['end_date']->greaterThanOrEqualTo($now->startOfDay()))
+            ? $now->startOfDay()
+            : $command['start_date'];
 
         if ($isMultiGame) {
             $gameNames = implode('/', array_map(
@@ -133,14 +156,14 @@ class LineScheduleBot
             ));
             $label = "綜合賽程（{$gameNames}）";
             $imageTitle = "綜合賽程｜{$dateLabel}｜{$tierLabel}";
-            $filteredUrl = $this->multiGameFilteredUrl($command['date'], $command['tiers']);
+            $filteredUrl = $this->multiGameFilteredUrl($urlDate, $command['tiers']);
         } else {
             $singleGame = $command['games'][0];
             $label = self::GAME_LABELS[$singleGame];
             $imageTitle = "{$label}｜{$dateLabel}｜{$tierLabel}";
             $filteredUrl = $this->schedules->filteredUrl(
                 $singleGame,
-                $command['date'],
+                $urlDate,
                 $command['tiers'],
             );
         }
@@ -156,7 +179,11 @@ class LineScheduleBot
 
         $visibleMatches = array_slice($allMatches, 0, $command['limit']);
         $visibleMatches = $this->headToHead->enrich($visibleMatches);
-        $visibleMatches = $this->odds->enrich($visibleMatches, $command['date']);
+        $visibleMatches = $this->odds->enrich(
+            $visibleMatches,
+            $command['start_date'],
+            $command['end_date'],
+        );
         $visibleMatches = $this->bo3Odds->enrichMissing($visibleMatches);
         $lines = [
             "{$label}｜{$dateLabel}｜{$tierLabel}",
@@ -167,12 +194,16 @@ class LineScheduleBot
             $lines[] = "\n──────────";
             $gameTag = $isMultiGame ? sprintf('【%s】', $match['game_label'] ?? '') : '';
             $liveTag = ($match['is_live'] ?? false) ? '【滾球】' : '';
+            $timeString = $command['is_range']
+                ? $match['start_at']->format('m/d H:i')
+                : $match['start_at']->format('H:i');
+
             $lines[] = sprintf(
                 "第 %d 場%s%s｜%s｜%s\n%s\nvs\n%s\n\n賽事｜%s",
                 $index + 1,
                 $gameTag,
                 $liveTag,
-                $match['start_at']->format('H:i'),
+                $timeString,
                 $match['format'],
                 $match['team1'],
                 $match['team2'],
@@ -253,7 +284,9 @@ class LineScheduleBot
                 'matches' => array_map(
                     fn (array $match): array => [
                         'game' => $match['game'] ?? ($command['games'][0] ?? null),
-                        'start_time' => $match['start_at']->format('H:i'),
+                        'start_time' => $command['is_range']
+                            ? $match['start_at']->format('m/d H:i')
+                            : $match['start_at']->format('H:i'),
                         'format' => $match['format'],
                         'is_live' => $match['is_live'] ?? false,
                         'series_score' => $match['series_score'] ?? null,
@@ -271,30 +304,57 @@ class LineScheduleBot
     }
 
     /**
-     * @return array{games: array<int, string>, date: CarbonImmutable, tiers: array<int, string>, limit: int, team: ?string}|null
+     * @return array{
+     *     games: array<int, string>,
+     *     start_date: CarbonImmutable,
+     *     end_date: CarbonImmutable,
+     *     is_range: bool,
+     *     date: CarbonImmutable,
+     *     tiers: array<int, string>,
+     *     limit: int,
+     *     team: ?string
+     * }|string|null
      */
-    private function parseCommand(string $message): ?array
+    private function parseCommand(string $message): array|string|null
     {
-        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs2|cs)(?:\s+(今天|明天|後天|\d{1,2}\/\d{1,2}))?(?:\s+(.*))?$/iu', $message, $matches)) {
-            return null;
-        }
-
-        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
-        $date = isset($matches[2]) && $matches[2] !== ''
-            ? $this->parseDate($matches[2], $timezone)
-            : CarbonImmutable::now($timezone)->startOfDay();
-
-        if ($date === null) {
-            return null;
-        }
-
-        $options = $this->parseOptions($matches[3] ?? '');
-
-        if ($options === null) {
+        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs2|cs)(?:\s+(.*))?$/iu', $message, $matches)) {
             return null;
         }
 
         $commandKey = mb_strtolower($matches[1]);
+        $rawArguments = trim($matches[2] ?? '');
+
+        $dateAtom = '(?:今天|明天|後天|\d{4}[-\/\.]\d{1,2}[-\/\.]\d{1,2}|\d{1,2}[-\/\.]\d{1,2}|\d{4})';
+        $rangePattern = '/^('.$dateAtom.'\s*(?:~|～)\s*'.$dateAtom.')(?:\s+(.*))?$/iu';
+        $singlePattern = '/^('.$dateAtom.')(?:\s+(.*))?$/iu';
+
+        if (preg_match($rangePattern, $rawArguments, $m)) {
+            $datePart = $m[1];
+            $optionsPart = $m[2] ?? '';
+        } elseif (preg_match($singlePattern, $rawArguments, $m)) {
+            $datePart = $m[1];
+            $optionsPart = $m[2] ?? '';
+        } else {
+            $datePart = null;
+            $optionsPart = $rawArguments;
+        }
+
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+        $dateInfo = $this->parseDateToken($datePart, $timezone);
+
+        if (is_string($dateInfo)) {
+            return $dateInfo;
+        }
+
+        if ($dateInfo === null) {
+            return null;
+        }
+
+        $options = $this->parseOptions($optionsPart);
+
+        if ($options === null) {
+            return null;
+        }
 
         if (in_array($commandKey, ['賽程', 'schedule', 'match', 'matches'], true)) {
             $games = $options['games'] ?? ['lol', 'valorant', 'cs'];
@@ -305,7 +365,10 @@ class LineScheduleBot
 
         return [
             'games' => $games,
-            'date' => $date,
+            'start_date' => $dateInfo['start_date'],
+            'end_date' => $dateInfo['end_date'],
+            'is_range' => $dateInfo['is_range'],
+            'date' => $dateInfo['start_date'],
             'tiers' => $options['tiers'],
             'limit' => $options['limit'],
             'team' => $options['team'],
@@ -331,9 +394,65 @@ class LineScheduleBot
         return trim($message);
     }
 
-    private function parseDate(string $value, string $timezone): ?CarbonImmutable
+    /**
+     * @return array{start_date: CarbonImmutable, end_date: CarbonImmutable, is_range: bool}|string|null
+     */
+    private function parseDateToken(?string $token, string $timezone): array|string|null
     {
         $today = CarbonImmutable::now($timezone)->startOfDay();
+
+        if ($token === null || trim($token) === '') {
+            return [
+                'start_date' => $today,
+                'end_date' => $today,
+                'is_range' => false,
+            ];
+        }
+
+        if (preg_match('/[~～]/u', $token)) {
+            $parts = preg_split('/\s*[~～]\s*/u', trim($token), 2);
+            if (! is_array($parts) || count($parts) !== 2) {
+                return null;
+            }
+
+            $startDate = $this->parseSingleDate($parts[0], $today, $timezone);
+            $endDate = $this->parseSingleDate($parts[1], $today, $timezone);
+
+            if ($startDate === null || $endDate === null) {
+                return null;
+            }
+
+            if ($endDate->lt($startDate)) {
+                [$startDate, $endDate] = [$endDate, $startDate];
+            }
+
+            $days = (int) $startDate->diffInDays($endDate) + 1;
+            if ($days > self::MAX_SCHEDULE_DAYS) {
+                return sprintf('查詢區間最多支援 %d 天，請縮小日期範圍再試。', self::MAX_SCHEDULE_DAYS);
+            }
+
+            return [
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'is_range' => ! $startDate->isSameDay($endDate),
+            ];
+        }
+
+        $date = $this->parseSingleDate($token, $today, $timezone);
+        if ($date === null) {
+            return null;
+        }
+
+        return [
+            'start_date' => $date,
+            'end_date' => $date,
+            'is_range' => false,
+        ];
+    }
+
+    private function parseSingleDate(string $value, CarbonImmutable $today, string $timezone): ?CarbonImmutable
+    {
+        $value = trim($value);
 
         if ($value === '今天') {
             return $today;
@@ -347,14 +466,38 @@ class LineScheduleBot
             return $today->addDays(2);
         }
 
-        $date = CarbonImmutable::createFromFormat('!Y/m/d', "{$today->year}/{$value}", $timezone);
-        $dateErrors = CarbonImmutable::getLastErrors();
+        if (preg_match('/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/', $value, $m)) {
+            $y = (int) $m[1];
+            $mon = (int) $m[2];
+            $d = (int) $m[3];
+            if (! checkdate($mon, $d, $y)) {
+                return null;
+            }
 
-        if ($date === false || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))) {
-            return null;
+            return CarbonImmutable::createFromDate($y, $mon, $d, $timezone)->startOfDay();
         }
 
-        return $date;
+        if (preg_match('/^(\d{1,2})[-\/\.](\d{1,2})$/', $value, $m)) {
+            $mon = (int) $m[1];
+            $d = (int) $m[2];
+            if (! checkdate($mon, $d, $today->year)) {
+                return null;
+            }
+
+            return CarbonImmutable::createFromDate($today->year, $mon, $d, $timezone)->startOfDay();
+        }
+
+        if (preg_match('/^(\d{2})(\d{2})$/', $value, $m)) {
+            $mon = (int) $m[1];
+            $d = (int) $m[2];
+            if (! checkdate($mon, $d, $today->year)) {
+                return null;
+            }
+
+            return CarbonImmutable::createFromDate($today->year, $mon, $d, $timezone)->startOfDay();
+        }
+
+        return null;
     }
 
     /**
@@ -464,6 +607,6 @@ class LineScheduleBot
 
     private function help(): string
     {
-        return "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n\n查今天顯示滾球中和尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2";
+        return "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }
