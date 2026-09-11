@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 26;
+    private const CACHE_VERSION = 27;
 
     private const CARD_HEIGHT = 180;
 
@@ -2360,17 +2360,15 @@ class LineScheduleImageService
             // 1. Balance Value
             $draw->setStrokeColor('none');
             $draw->setFillColor('#f8fafc');
-            $draw->setFontSize($barCount > 20 ? 12 : 14);
+            $draw->setFontSize($barCount > 20 ? 11 : 14);
             $draw->setFontWeight(700);
             $draw->setTextAlignment(Imagick::ALIGN_CENTER);
 
-            $balLabel = $barCount > 22
+            $balLabel = $barCount > 18
                 ? (string) round($bVal)
                 : (string) ($b['balance_formatted'] ?? round($bVal));
 
-            if ($barCount <= 22 || ($idx % 2 === 0)) {
-                $draw->annotation($centerX, $bY1 - 20, $balLabel);
-            }
+            $draw->annotation($centerX, $bY1 - 20, $balLabel);
 
             // 2. Profit badge/text above bar
             $draw->setFillColor($theme['text']);
@@ -2381,19 +2379,19 @@ class LineScheduleImageService
             // Labels below bar (X-axis):
             // Time (e.g. 15:30)
             $draw->setFillColor('#94a3b8');
-            $draw->setFontSize($barCount > 20 ? 12 : 14);
+            $draw->setFontSize($barCount > 20 ? 11 : 14);
             $draw->setFontWeight(600);
             $draw->annotation($centerX, $plotBottom + 24, (string) ($b['settled_time'] ?? ''));
 
             // Date (e.g. 09/04)
             $draw->setFillColor('#64748b');
-            $draw->setFontSize($barCount > 20 ? 11 : 13);
+            $draw->setFontSize($barCount > 20 ? 10 : 13);
             $draw->setFontWeight(500);
             $draw->annotation($centerX, $plotBottom + 46, (string) ($b['settled_date'] ?? ''));
 
             // Bet Index (e.g. #1)
             $draw->setFillColor('#475569');
-            $draw->setFontSize(12);
+            $draw->setFontSize(11);
             $draw->setFontWeight(600);
             $draw->annotation($centerX, $plotBottom + 68, '#'.$b['index']);
 

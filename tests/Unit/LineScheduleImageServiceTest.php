@@ -391,8 +391,9 @@ class LineScheduleImageServiceTest extends TestCase
         $emptyUrl = $service->create($emptyData, 'https://stake.com');
         $this->assertNotEmpty($emptyUrl);
 
+        $cacheVersion = (new \ReflectionClassConstant(LineScheduleImageService::class, 'CACHE_VERSION'))->getValue();
         $emptyFiles = Storage::disk('schedule-images')->allFiles('line-schedules');
-        $emptyPath = collect($emptyFiles)->first(fn (string $path): bool => str_contains($path, hash('sha256', json_encode([26, $emptyData, 'https://stake.com'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR))) && str_ends_with($path, '/1440'));
+        $emptyPath = collect($emptyFiles)->first(fn (string $path): bool => str_contains($path, hash('sha256', json_encode([$cacheVersion, $emptyData, 'https://stake.com'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR))) && str_ends_with($path, '/1440'));
         $this->assertNotNull($emptyPath);
 
         $emptyImg = new Imagick;

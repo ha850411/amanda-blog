@@ -1396,8 +1396,9 @@ class StakeBetServiceTest extends TestCase
         $emptyUrl = app(\App\Services\LineScheduleImageService::class)->create($emptyData, $reply->linkUrl);
         $this->assertNotEmpty($emptyUrl);
 
+        $cacheVersion = (new \ReflectionClassConstant(\App\Services\LineScheduleImageService::class, 'CACHE_VERSION'))->getValue();
         $emptyOriginalPath = collect(\Illuminate\Support\Facades\Storage::disk('test-disk')->allFiles('line-schedules'))
-            ->first(fn (string $path): bool => str_contains($path, hash('sha256', json_encode([26, $emptyData, $reply->linkUrl], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR))));
+            ->first(fn (string $path): bool => str_contains($path, hash('sha256', json_encode([$cacheVersion, $emptyData, $reply->linkUrl], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR))));
         $this->assertNotNull($emptyOriginalPath);
     }
 
