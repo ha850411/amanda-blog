@@ -12,7 +12,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 27;
+    private const CACHE_VERSION = 28;
 
     private const CARD_HEIGHT = 180;
 
@@ -2256,28 +2256,55 @@ class LineScheduleImageService
         $draw->roundRectangle($left, $chartBoxY, $left + $cardWidth, $chartBoxY + $chartBoxHeight, 16, 16);
 
         // Chart Box Header Title & Legend
+        $aggregation = $data['aggregation'] ?? 'bet';
+        if ($aggregation === 'daily') {
+            $chartTitle = '📊 每日收盤資金水位走勢（USDT）';
+        } elseif (count($bars) > 30) {
+            $chartTitle = '📊 資金水位變化走勢（USDT・顯示近 30 筆結盤）';
+        } else {
+            $chartTitle = '📊 資金水位變化走勢（USDT）';
+        }
+
         $draw->setFillColor('#f8fafc');
         $draw->setStrokeColor('none');
         $draw->setFontSize(22);
         $draw->setFontWeight(700);
-        $draw->annotation($left + 24, $chartBoxY + 38, '📊 資金水位變化走勢（USDT）');
+        $draw->annotation($left + 24, $chartBoxY + 38, $chartTitle);
 
         // Legend Pills
-        $legendItems = [
-            ['color' => '#10b981', 'label' => '獲勝'],
-            ['color' => '#ef4444', 'label' => '未中獎'],
-            ['color' => '#f59e0b', 'label' => '兌現'],
-            ['color' => '#64748b', 'label' => '退款'],
-        ];
-        $legendX = $left + $cardWidth - 360;
-        foreach ($legendItems as $item) {
-            $draw->setFillColor($item['color']);
-            $draw->roundRectangle($legendX, $chartBoxY + 22, $legendX + 14, $chartBoxY + 36, 3, 3);
-            $draw->setFillColor('#94a3b8');
-            $draw->setFontSize(16);
-            $draw->setFontWeight(600);
-            $draw->annotation($legendX + 20, $chartBoxY + 34, $item['label']);
-            $legendX += 86;
+        if ($aggregation === 'daily') {
+            $legendItems = [
+                ['color' => '#10b981', 'label' => '當日盈利'],
+                ['color' => '#ef4444', 'label' => '當日虧損'],
+                ['color' => '#64748b', 'label' => '退款/持平'],
+            ];
+            $legendX = $left + $cardWidth - 320;
+            foreach ($legendItems as $item) {
+                $draw->setFillColor($item['color']);
+                $draw->roundRectangle($legendX, $chartBoxY + 22, $legendX + 14, $chartBoxY + 36, 3, 3);
+                $draw->setFillColor('#94a3b8');
+                $draw->setFontSize(16);
+                $draw->setFontWeight(600);
+                $draw->annotation($legendX + 20, $chartBoxY + 34, $item['label']);
+                $legendX += 100;
+            }
+        } else {
+            $legendItems = [
+                ['color' => '#10b981', 'label' => '獲勝'],
+                ['color' => '#ef4444', 'label' => '未中獎'],
+                ['color' => '#f59e0b', 'label' => '兌現'],
+                ['color' => '#64748b', 'label' => '退款'],
+            ];
+            $legendX = $left + $cardWidth - 360;
+            foreach ($legendItems as $item) {
+                $draw->setFillColor($item['color']);
+                $draw->roundRectangle($legendX, $chartBoxY + 22, $legendX + 14, $chartBoxY + 36, 3, 3);
+                $draw->setFillColor('#94a3b8');
+                $draw->setFontSize(16);
+                $draw->setFontWeight(600);
+                $draw->annotation($legendX + 20, $chartBoxY + 34, $item['label']);
+                $legendX += 86;
+            }
         }
 
         // Plot Dimensions
@@ -2290,6 +2317,12 @@ class LineScheduleImageService
 
         // Compute Y Min and Y Max for Plot Scale
         $balanceValues = array_map(fn (array $b): float => (float) ($b['balance'] ?? 0), $bars);
+        if (isset($summary['max_watermark_val'])) {
+            $balanceValues[] = (float) $summary['max_watermark_val'];
+        }
+        if (isset($summary['min_watermark_val'])) {
+            $balanceValues[] = (float) $summary['min_watermark_val'];
+        }
         $minVal = min($balanceValues);
         $maxVal = max($balanceValues);
         $valRange = $maxVal - $minVal;
@@ -2347,6 +2380,7 @@ class LineScheduleImageService
                 'won' => ['bar' => '#10b981', 'border' => '#34d399', 'text' => '#34d399'],
                 'lost' => ['bar' => '#dc2626', 'border' => '#f87171', 'text' => '#f87171'],
                 'cashout' => ['bar' => '#d97706', 'border' => '#fbbf24', 'text' => '#fbbf24'],
+                'flat' => ['bar' => '#1e293b', 'border' => '#334155', 'text' => '#64748b'],
                 default => ['bar' => '#475569', 'border' => '#94a3b8', 'text' => '#cbd5e1'],
             };
 
@@ -2377,7 +2411,7 @@ class LineScheduleImageService
             $draw->annotation($centerX, $bY1 - 6, (string) ($b['profit_formatted'] ?? ''));
 
             // Labels below bar (X-axis):
-            // Time (e.g. 15:30)
+            // Time / Summary (e.g. 15:30 or "3 筆")
             $draw->setFillColor('#94a3b8');
             $draw->setFontSize($barCount > 20 ? 11 : 14);
             $draw->setFontWeight(600);
@@ -2389,11 +2423,12 @@ class LineScheduleImageService
             $draw->setFontWeight(500);
             $draw->annotation($centerX, $plotBottom + 46, (string) ($b['settled_date'] ?? ''));
 
-            // Bet Index (e.g. #1)
+            // Bet / Day Index (e.g. #1)
             $draw->setFillColor('#475569');
             $draw->setFontSize(11);
             $draw->setFontWeight(600);
-            $draw->annotation($centerX, $plotBottom + 68, '#'.$b['index']);
+            $indexLabel = isset($b['index_label']) ? (string) $b['index_label'] : '#'.$b['index'];
+            $draw->annotation($centerX, $plotBottom + 68, $indexLabel);
 
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
         }

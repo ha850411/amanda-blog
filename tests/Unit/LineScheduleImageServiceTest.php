@@ -401,5 +401,44 @@ class LineScheduleImageServiceTest extends TestCase
         $this->assertSame(1440, $emptyImg->getImageWidth());
         $this->assertSame(620, $emptyImg->getImageHeight());
         $emptyImg->clear();
+
+        // Test daily aggregation mode image rendering
+        $dailyData = [
+            'type' => 'balance_chart',
+            'aggregation' => 'daily',
+            'title' => 'Stake 體育投注｜資金水位長條圖',
+            'subtitle' => '區間｜2026-08-24 ~ 2026-09-06（近 14 天）・依每日收盤水位聚合繪製',
+            'days' => 14,
+            'current_balance_formatted' => '1,250 USDT',
+            'summary' => $chartData['summary'],
+            'bars' => [
+                [
+                    'index' => 1,
+                    'id' => 'day-2026-08-24',
+                    'date' => '2026-08-24',
+                    'settled_date' => '08/24',
+                    'settled_time' => '2 筆',
+                    'balance' => 1180.0,
+                    'balance_formatted' => '1,180',
+                    'profit' => 30.0,
+                    'profit_formatted' => '+30',
+                    'status' => 'won',
+                ],
+                [
+                    'index' => 2,
+                    'id' => 'day-2026-08-25',
+                    'date' => '2026-08-25',
+                    'settled_date' => '08/25',
+                    'settled_time' => '-',
+                    'balance' => 1180.0,
+                    'balance_formatted' => '1,180',
+                    'profit' => 0.0,
+                    'profit_formatted' => '+0.00',
+                    'status' => 'flat',
+                ],
+            ],
+        ];
+        $dailyUrl = $service->create($dailyData, 'https://stake.com');
+        $this->assertNotEmpty($dailyUrl);
     }
 }

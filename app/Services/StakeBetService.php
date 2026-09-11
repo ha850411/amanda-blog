@@ -1277,7 +1277,14 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 }
             }
 
-            $chartData = $this->calculateBalanceHistory($settledBets, $balance, $timezone);
+            $chartData = $this->calculateBalanceHistory(
+                $settledBets,
+                $balance,
+                $timezone,
+                $params['days'],
+                $params['start_date'],
+                $params['end_date']
+            );
 
             $text = $this->formatBalanceChartMessage(
                 $params['days'],
@@ -1719,13 +1726,19 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
      *     win_rate: float,
      *     roi: float,
      *     total_staked: float,
-     *     total_payout: float
+     *     total_payout: float,
+     *     aggregation?: string,
+     *     bet_bars?: array<int, array<string, mixed>>,
+     *     daily_bars?: array<int, array<string, mixed>>
      * }
      */
     public function calculateBalanceHistory(
         array $settledBets,
         ?array $balance = null,
-        string $timezone = 'Asia/Taipei'
+        string $timezone = 'Asia/Taipei',
+        ?int $days = null,
+        ?CarbonImmutable $startDate = null,
+        ?CarbonImmutable $endDate = null
     ): array {
         $standardizedBets = [];
         foreach ($settledBets as $bet) {
@@ -1791,6 +1804,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 'leg_count' => $legCount,
                 'settled_at' => $settledTime->format('m/d H:i'),
                 'settled_date' => $settledTime->format('m/d'),
+                'settled_ymd' => $settledTime->format('Y-m-d'),
                 'settled_time' => $settledTime->format('H:i'),
                 'settled_timestamp' => $settledTime->getTimestamp(),
                 'sport_name' => $sportName,
@@ -1873,8 +1887,26 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         $netChange = $currentBalance - $startBalance;
         $roi = $totalStaked > 0 ? (($netChange / $totalStaked) * 100) : 0.0;
 
+        $aggregation = ($days !== null && $days > 7) ? 'daily' : 'bet';
+        $dailyBars = [];
+        if ($startDate !== null && $endDate !== null) {
+            $dailyBars = $this->aggregateDailyBars(
+                $bars,
+                $startBalance,
+                $currentBalance,
+                $startDate,
+                $endDate,
+                $timezone
+            );
+        }
+
+        $displayBars = $aggregation === 'daily' ? $dailyBars : $bars;
+
         return [
-            'bars' => $bars,
+            'aggregation' => $aggregation,
+            'bars' => $displayBars,
+            'bet_bars' => $bars,
+            'daily_bars' => $dailyBars,
             'start_balance' => $startBalance,
             'current_balance' => $currentBalance,
             'net_change' => $netChange,
@@ -1893,6 +1925,144 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $bars
+     * @return array<int, array<string, mixed>>
+     */
+    public function aggregateDailyBars(
+        array $bars,
+        float $startBalance,
+        float $currentBalance,
+        CarbonImmutable $startDate,
+        CarbonImmutable $endDate,
+        string $timezone = 'Asia/Taipei'
+    ): array {
+        if ($bars === []) {
+            return [];
+        }
+
+        $betsByDate = [];
+        foreach ($bars as $b) {
+            $ymd = (string) ($b['settled_ymd'] ?? '');
+            if ($ymd !== '') {
+                $betsByDate[$ymd][] = $b;
+            }
+        }
+
+        $dates = [];
+        $cursor = $startDate->setTimezone($timezone)->startOfDay();
+        $endDay = $endDate->setTimezone($timezone)->startOfDay();
+
+        while ($cursor <= $endDay) {
+            $dates[] = $cursor->format('Y-m-d');
+            $cursor = $cursor->addDay();
+        }
+
+        $dailyBars = [];
+        $runningWatermark = $startBalance;
+        $dayIndex = 1;
+
+        foreach ($dates as $ymd) {
+            $carbonDate = CarbonImmutable::parse($ymd, $timezone);
+            $dayBets = $betsByDate[$ymd] ?? [];
+            $dayBetsCount = count($dayBets);
+
+            if ($dayBetsCount > 0) {
+                $dayProfit = 0.0;
+                $dayStaked = 0.0;
+                $dayPayout = 0.0;
+                $dayWonCount = 0;
+                $dayLostCount = 0;
+                $dayCashoutCount = 0;
+                $dayVoidCount = 0;
+
+                foreach ($dayBets as $b) {
+                    $dayProfit += (float) ($b['profit'] ?? 0.0);
+                    $dayStaked += (float) ($b['amount'] ?? 0.0);
+                    $dayPayout += (float) ($b['payout'] ?? 0.0);
+                    match ($b['status'] ?? '') {
+                        'won' => $dayWonCount++,
+                        'lost' => $dayLostCount++,
+                        'cashout' => $dayCashoutCount++,
+                        'void' => $dayVoidCount++,
+                        default => null,
+                    };
+                }
+
+                $lastBet = end($dayBets);
+                $closingBalance = (float) ($lastBet['balance'] ?? $runningWatermark);
+                $runningWatermark = $closingBalance;
+
+                if ($dayProfit > 0.001) {
+                    $status = 'won';
+                    $statusLabel = '當日盈利';
+                } elseif ($dayProfit < -0.001) {
+                    $status = 'lost';
+                    $statusLabel = '當日虧損';
+                } elseif ($dayCashoutCount > 0) {
+                    $status = 'cashout';
+                    $statusLabel = '當日兌現';
+                } else {
+                    $status = 'void';
+                    $statusLabel = '當日持平';
+                }
+            } else {
+                $dayProfit = 0.0;
+                $dayStaked = 0.0;
+                $dayPayout = 0.0;
+                $dayWonCount = 0;
+                $dayLostCount = 0;
+                $dayCashoutCount = 0;
+                $dayVoidCount = 0;
+                $closingBalance = $runningWatermark;
+                $status = 'flat';
+                $statusLabel = '無結盤';
+            }
+
+            $profitFormatted = ($dayProfit >= 0.001 ? '+' : '').$this->formatBalanceAmount($dayProfit);
+
+            $dailyBars[] = [
+                'id' => 'day-'.$ymd,
+                'index' => $dayIndex,
+                'date' => $ymd,
+                'settled_date' => $carbonDate->format('m/d'),
+                'settled_time' => $dayBetsCount > 0 ? "{$dayBetsCount} 筆" : '-',
+                'day_of_week' => $this->chineseDayOfWeek($carbonDate->dayOfWeek),
+                'balance' => $closingBalance,
+                'balance_formatted' => $this->formatBalanceAmount($closingBalance),
+                'profit' => $dayProfit,
+                'profit_formatted' => $profitFormatted,
+                'amount' => $dayStaked,
+                'payout' => $dayPayout,
+                'status' => $status,
+                'status_label' => $statusLabel,
+                'total_bets' => $dayBetsCount,
+                'won_count' => $dayWonCount,
+                'lost_count' => $dayLostCount,
+                'cashout_count' => $dayCashoutCount,
+                'void_count' => $dayVoidCount,
+            ];
+
+            $dayIndex++;
+        }
+
+        return $dailyBars;
+    }
+
+    private function chineseDayOfWeek(int $dayOfWeek): string
+    {
+        return match ($dayOfWeek) {
+            0 => '日',
+            1 => '一',
+            2 => '二',
+            3 => '三',
+            4 => '四',
+            5 => '五',
+            6 => '六',
+            default => '',
+        };
+    }
+
+    /**
      * @param  array<string, mixed>  $chartData
      * @param  array{available: float, vault: float, total: float}|null  $balance
      */
@@ -1905,9 +2075,12 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         bool $exceededMax = false,
         string $timezone = 'Asia/Taipei'
     ): string {
+        $aggregation = $chartData['aggregation'] ?? ($days > 7 ? 'daily' : 'bet');
+        $modeDesc = $aggregation === 'daily' ? '依每日收盤水位聚合' : '依結盤時間點';
+
         $lines = [
             'Stake 體育投注｜資金水位走勢',
-            sprintf('區間｜%s ~ %s（近 %d 天）・依結盤時間點', $startDate->format('Y-m-d'), $endDate->format('Y-m-d'), $days),
+            sprintf('區間｜%s ~ %s（近 %d 天）・%s', $startDate->format('Y-m-d'), $endDate->format('Y-m-d'), $days, $modeDesc),
         ];
 
         if ($exceededMax) {
@@ -1937,48 +2110,99 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         $lines[] = sprintf('・水位極值：最高 %s USDT / 最低 %s USDT', $this->formatBalanceAmount($chartData['max_watermark']), $this->formatBalanceAmount($chartData['min_watermark']));
         $lines[] = sprintf('・結盤戰績：%d 勝  %d 負（勝率 %.1f%%）', $chartData['won_count'], $chartData['lost_count'], $chartData['win_rate']);
 
-        $bars = $chartData['bars'];
-        if ($bars === []) {
-            $lines[] = '';
-            $lines[] = sprintf('近 %d 天內查無結盤之體育注單。', $days);
-        } else {
-            $lines[] = '';
-            $lines[] = sprintf('【📊 結盤水位明細（共 %d 筆）】', count($bars));
+        if ($aggregation === 'daily') {
+            $dailyBars = $chartData['daily_bars'] ?? $chartData['bars'];
+            if ($dailyBars === [] || ($chartData['total_bets'] ?? 0) === 0) {
+                $lines[] = '';
+                $lines[] = sprintf('近 %d 天內查無結盤之體育注單。', $days);
+            } else {
+                $lines[] = '';
+                $lines[] = sprintf('【📊 每日收盤水位明細（共 %d 天，%d 筆結盤）】', count($dailyBars), $chartData['total_bets']);
 
-            $displayBars = array_slice($bars, -20);
-            if (count($bars) > 20) {
-                $lines[] = sprintf('（僅列出最近 20 筆結盤明細，前 %d 筆請參閱圖表）', count($bars) - 20);
-            }
+                foreach ($dailyBars as $b) {
+                    $statusEmoji = match ($b['status'] ?? '') {
+                        'won' => '📈',
+                        'lost' => '📉',
+                        'cashout' => '💰',
+                        'void' => '⚪',
+                        default => '➖',
+                    };
 
-            foreach ($displayBars as $b) {
-                $statusEmoji = match ($b['status']) {
-                    'won' => '🏆',
-                    'lost' => '❌',
-                    'cashout' => '💰',
-                    'void' => '⚪',
-                    default => '⏳',
-                };
-                $iidStr = $b['iid'] !== '' ? "｜{$b['iid']}" : '';
-                $lines[] = sprintf(
-                    '%d. %s%s',
-                    $b['index'],
-                    $b['settled_at'],
-                    $iidStr
-                );
-                $sportTag = $b['sport_name'] !== '' ? "【{$b['sport_name']}】" : '';
-                if ($b['match_name'] !== '') {
-                    $lines[] = "   賽事：{$sportTag}{$b['match_name']}";
+                    if (($b['total_bets'] ?? 0) > 0) {
+                        $lines[] = sprintf(
+                            '%d. %s（%s）%s %s',
+                            $b['index'],
+                            $b['settled_date'],
+                            $b['day_of_week'] ?? '',
+                            $b['status_label'] ?? '',
+                            $statusEmoji
+                        );
+                        $lines[] = sprintf(
+                            '   結盤 %d 筆（%d勝 %d負）｜當日損益：%s USDT',
+                            $b['total_bets'],
+                            $b['won_count'] ?? 0,
+                            $b['lost_count'] ?? 0,
+                            $b['profit_formatted']
+                        );
+                        $lines[] = sprintf(
+                            '   日終水位：%s USDT',
+                            $b['balance_formatted']
+                        );
+                    } else {
+                        $lines[] = sprintf(
+                            '%d. %s（%s）無結盤｜日終水位：%s USDT',
+                            $b['index'],
+                            $b['settled_date'],
+                            $b['day_of_week'] ?? '',
+                            $b['balance_formatted']
+                        );
+                    }
                 }
-                $lines[] = sprintf(
-                    '   結果：%s %s（%s USDT）',
-                    $b['status_label'],
-                    $statusEmoji,
-                    $b['profit_formatted']
-                );
-                $lines[] = sprintf(
-                    '   結盤後水位：%s USDT',
-                    $b['balance_formatted']
-                );
+            }
+        } else {
+            $bars = $chartData['bars'];
+            if ($bars === []) {
+                $lines[] = '';
+                $lines[] = sprintf('近 %d 天內查無結盤之體育注單。', $days);
+            } else {
+                $lines[] = '';
+                $lines[] = sprintf('【📊 結盤水位明細（共 %d 筆）】', count($bars));
+
+                $displayBars = array_slice($bars, -20);
+                if (count($bars) > 20) {
+                    $lines[] = sprintf('（僅列出最近 20 筆結盤明細，前 %d 筆請參閱圖表）', count($bars) - 20);
+                }
+
+                foreach ($displayBars as $b) {
+                    $statusEmoji = match ($b['status']) {
+                        'won' => '🏆',
+                        'lost' => '❌',
+                        'cashout' => '💰',
+                        'void' => '⚪',
+                        default => '⏳',
+                    };
+                    $iidStr = $b['iid'] !== '' ? "｜{$b['iid']}" : '';
+                    $lines[] = sprintf(
+                        '%d. %s%s',
+                        $b['index'],
+                        $b['settled_at'],
+                        $iidStr
+                    );
+                    $sportTag = $b['sport_name'] !== '' ? "【{$b['sport_name']}】" : '';
+                    if ($b['match_name'] !== '') {
+                        $lines[] = "   賽事：{$sportTag}{$b['match_name']}";
+                    }
+                    $lines[] = sprintf(
+                        '   結果：%s %s（%s USDT）',
+                        $b['status_label'],
+                        $statusEmoji,
+                        $b['profit_formatted']
+                    );
+                    $lines[] = sprintf(
+                        '   結盤後水位：%s USDT',
+                        $b['balance_formatted']
+                    );
+                }
             }
         }
 
@@ -2001,10 +2225,14 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         ?array $balance = null,
         string $timezone = 'Asia/Taipei'
     ): array {
+        $aggregation = $chartData['aggregation'] ?? ($days > 7 ? 'daily' : 'bet');
+        $modeDesc = $aggregation === 'daily' ? '依每日收盤水位聚合繪製' : '依每單結盤時間繪製';
+
         return [
             'type' => 'balance_chart',
+            'aggregation' => $aggregation,
             'title' => 'Stake 體育投注｜資金水位長條圖',
-            'subtitle' => sprintf('區間｜%s ~ %s（近 %d 天）・依每單結盤時間繪製', $startDate->format('Y-m-d'), $endDate->format('Y-m-d'), $days),
+            'subtitle' => sprintf('區間｜%s ~ %s（近 %d 天）・%s', $startDate->format('Y-m-d'), $endDate->format('Y-m-d'), $days, $modeDesc),
             'days' => $days,
             'current_balance_formatted' => $balance !== null ? $this->formatBalanceForImage($balance) : null,
             'summary' => [
@@ -2014,6 +2242,8 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 'net_change_val' => $chartData['net_change'],
                 'max_watermark' => $this->formatBalanceAmount($chartData['max_watermark']).' USDT',
                 'min_watermark' => $this->formatBalanceAmount($chartData['min_watermark']).' USDT',
+                'max_watermark_val' => $chartData['max_watermark'] ?? null,
+                'min_watermark_val' => $chartData['min_watermark'] ?? null,
                 'total_bets' => $chartData['total_bets'],
                 'won_count' => $chartData['won_count'],
                 'lost_count' => $chartData['lost_count'],

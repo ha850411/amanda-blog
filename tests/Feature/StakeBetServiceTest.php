@@ -1507,6 +1507,46 @@ class StakeBetServiceTest extends TestCase
         $this->assertSame(1, $requestCount, 'Second and third calls within TTL should hit cache and make 0 HTTP requests');
     }
 
+    public function test_balance_command_aggregates_daily_when_exceeding_seven_days(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(200.0, 0.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        // 7 days or less: bet-level aggregation
+        $reply7d = app(LineScheduleBot::class)->reply('!balance 7d');
+        $this->assertNotNull($reply7d);
+        $this->assertSame('bet', $reply7d->imageData['aggregation']);
+        $this->assertStringContainsString('依每單結盤時間繪製', $reply7d->imageData['subtitle']);
+        $this->assertStringContainsString('依結盤時間點', $reply7d->text);
+
+        // 14 days (> 7 days): daily aggregation
+        $reply14d = app(LineScheduleBot::class)->reply('!balance 14d');
+        $this->assertNotNull($reply14d);
+        $this->assertSame('daily', $reply14d->imageData['aggregation']);
+        $this->assertCount(14, $reply14d->imageData['bars']);
+        $this->assertStringContainsString('依每日收盤水位聚合繪製', $reply14d->imageData['subtitle']);
+        $this->assertStringContainsString('依每日收盤水位聚合', $reply14d->text);
+        $this->assertStringContainsString('【📊 每日收盤水位明細（共 14 天，3 筆結盤）】', $reply14d->text);
+
+        // Verify daily bar structure
+        $firstBar = $reply14d->imageData['bars'][0];
+        $lastBar = $reply14d->imageData['bars'][13];
+        $this->assertSame(1, $firstBar['index']);
+        $this->assertSame(14, $lastBar['index']);
+        $this->assertArrayHasKey('day_of_week', $firstBar);
+        $this->assertArrayHasKey('balance_formatted', $firstBar);
+        $this->assertArrayHasKey('profit_formatted', $firstBar);
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $customBets
      * @return array<string, mixed>
