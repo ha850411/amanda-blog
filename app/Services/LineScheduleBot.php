@@ -41,7 +41,7 @@ class LineScheduleBot
         if (preg_match('/^!(?:bet|bets|stake|投注)(?:\s+(.*))?$/iu', $message, $matches)) {
             $argument = trim($matches[1] ?? '');
             if (mb_strtolower($argument) === 'help') {
-                return new LineBotReply("指令格式：\n!bet\n查詢 Stake 進行中的體育投注、即時賽況與兌現。\n\n!r 或 !record [日期或區間]\n查詢指定日期或區間之投注紀錄與損益統計圖（支援 09-06、09-01~09-06、近7天、本週等）。\n\n!bet balance\n查詢 Stake 帳號 USDT 即時資金水位。");
+                return new LineBotReply("指令格式：\n!bet\n查詢 Stake 進行中的體育投注、即時賽況與兌現。\n\n!r 或 !record [日期或區間]\n查詢指定日期或區間之投注紀錄與損益統計圖（支援 09-06、09-01~09-06、近7天、本週等）。\n\n!balance 或 !bal [天數]\n查詢資金水位長條圖（預設 3 天，最多 30 天，依每單結盤時間點繪製）。\n\n!bet balance\n查詢 Stake 帳號 USDT 即時資金水位。");
             }
 
             return ($this->stake ?? app(StakeBetService::class))->reply($argument);
@@ -56,6 +56,15 @@ class LineScheduleBot
             $fullArg = $argument === '' ? 'record' : 'record '.$argument;
 
             return ($this->stake ?? app(StakeBetService::class))->reply($fullArg);
+        }
+
+        if (preg_match('/^!(?:balance|bal|equity|water|chart|水位|資金水位|資金)(?:\s+(.*))?$/iu', $message, $matches)) {
+            $argument = trim($matches[1] ?? '');
+            if (mb_strtolower($argument) === 'help') {
+                return new LineBotReply("指令格式：\n!balance 或 !bal 或 !水位 [天數]\n查詢 Stake 資金水位的長條圖（根據每一單結盤時間點繪製）。\n\n預設回傳近 3 天，最多可查詢 30 天。\n\n支援範例：\n・!balance（預設 3 天）\n・!bal 7d 或 !bal 7天\n・!水位 30d\n・加 text 查看純文字（例如 !balance 3d text）");
+            }
+
+            return ($this->stake ?? app(StakeBetService::class))->handleBalanceChartReply($argument);
         }
 
         $command = $this->parseCommand($message);

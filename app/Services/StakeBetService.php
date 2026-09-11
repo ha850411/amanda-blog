@@ -680,6 +680,13 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             }
         }
 
+        if (preg_match('/^(?:balance|bal|水位|資金水位|資金|chart)\s+(.+)$/iu', $trimmedArg, $balMatches)) {
+            $balSubArg = trim($balMatches[1] ?? '');
+            if ($balSubArg !== '' && mb_strtolower($balSubArg) !== 'now' && mb_strtolower($balSubArg) !== '即時') {
+                return $this->handleBalanceChartReply($balSubArg);
+            }
+        }
+
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         $historyParams = $this->parseHistoryArgument($trimmedArg, $timezone);
         if ($historyParams !== null) {
@@ -1222,6 +1229,558 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
             return new LineBotReply('目前無法取得 Stake 投注紀錄，請稍後再試。');
         }
+    }
+
+    public function handleBalanceChartReply(string $argument = ''): LineBotReply
+    {
+        $token = trim((string) config('services.stake.access_token'));
+
+        if ($token === '') {
+            return new LineBotReply('尚未設定 Stake Access Token，請在環境變數中設定 STAKE_ACCESS_TOKEN。');
+        }
+
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+        $params = $this->parseBalanceArgument($argument, $timezone);
+
+        if ($params['is_help']) {
+            return new LineBotReply(
+                "指令格式：\n!balance 或 !bal 或 !水位 [天數]\n查詢 Stake 資金水位的長條圖（根據每一單結盤時間點繪製）。\n\n預設回傳近 3 天，最多可查詢 30 天。\n\n支援範例：\n・!balance（預設 3 天）\n・!bal 7d 或 !bal 7天\n・!水位 30d\n・加 text 查看純文字（例如 !balance 3d text）"
+            );
+        }
+
+        try {
+            $settledBets = $this->getSettledBetsForDays($params['days'], $timezone);
+
+            $balance = null;
+            try {
+                $balance = $this->getUsdtBalance();
+            } catch (Throwable $e) {
+                Log::warning('Stake USDT balance fetch failed during balance chart reply.', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            $chartData = $this->calculateBalanceHistory($settledBets, $balance, $timezone);
+
+            $text = $this->formatBalanceChartMessage(
+                $params['days'],
+                $params['start_date'],
+                $params['end_date'],
+                $chartData,
+                $balance,
+                $params['exceeded_max'],
+                $timezone
+            );
+
+            $linkUrl = 'https://stake.com/zh/my-bets/sports';
+
+            $imageData = null;
+            if (! $params['force_text']) {
+                $imageData = $this->buildBalanceChartImageData(
+                    $params['days'],
+                    $params['start_date'],
+                    $params['end_date'],
+                    $chartData,
+                    $balance,
+                    $timezone
+                );
+            }
+
+            return new LineBotReply($text, $linkUrl, $imageData);
+        } catch (RequestException $exception) {
+            return $this->handleRequestException($exception);
+        } catch (ConnectionException $exception) {
+            return $this->handleConnectionException($exception);
+        } catch (Throwable $exception) {
+            report($exception);
+            Log::warning('Stake API balance chart processing failed.', [
+                'type' => $exception::class,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return new LineBotReply('目前無法取得 Stake 資金水位資訊，請稍後再試。');
+        }
+    }
+
+    /**
+     * @return array{
+     *     days: int,
+     *     start_date: CarbonImmutable,
+     *     end_date: CarbonImmutable,
+     *     force_text: bool,
+     *     is_help: bool,
+     *     exceeded_max: bool
+     * }
+     */
+    public function parseBalanceArgument(string $argument, string $timezone = 'Asia/Taipei'): array
+    {
+        $raw = trim($argument);
+        $lower = mb_strtolower($raw);
+
+        if ($lower === 'help') {
+            $now = CarbonImmutable::now($timezone);
+
+            return [
+                'days' => 3,
+                'start_date' => $now->subDays(2)->startOfDay(),
+                'end_date' => $now->endOfDay(),
+                'force_text' => false,
+                'is_help' => true,
+                'exceeded_max' => false,
+            ];
+        }
+
+        $forceText = false;
+        if (preg_match('/\b(text|txt|文字)\b/iu', $raw)) {
+            $forceText = true;
+            $raw = trim(preg_replace('/\b(text|txt|文字)\b/iu', '', $raw));
+        }
+
+        $days = 3;
+        $exceededMax = false;
+
+        if (preg_match('/(?:近\s*)?(\d+)\s*(?:d|天|日)?/iu', $raw, $m)) {
+            $parsedDays = (int) $m[1];
+            if ($parsedDays > 30) {
+                $days = 30;
+                $exceededMax = true;
+            } elseif ($parsedDays < 1) {
+                $days = 1;
+            } else {
+                $days = $parsedDays;
+            }
+        }
+
+        $now = CarbonImmutable::now($timezone);
+        $startDate = $now->subDays($days - 1)->startOfDay();
+        $endDate = $now->endOfDay();
+
+        return [
+            'days' => $days,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'force_text' => $forceText,
+            'is_help' => false,
+            'exceeded_max' => $exceededMax,
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getSettledBetsForDays(int $days, string $timezone = 'Asia/Taipei'): array
+    {
+        $days = min(30, max(1, $days));
+        $now = CarbonImmutable::now($timezone);
+        $startDay = $now->subDays($days - 1)->startOfDay();
+        $endDay = $now->endOfDay();
+
+        $offset = 0;
+        $limit = 50;
+        $maxPages = 20;
+        $seenIds = [];
+        $settledBets = [];
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $list = $this->getSportBetList($limit, $offset);
+            if ($list === []) {
+                break;
+            }
+
+            $consecutiveOlderCount = 0;
+            foreach ($list as $bet) {
+                $rawStatus = mb_strtolower((string) ($bet['status'] ?? 'pending'));
+                $isActive = (bool) ($bet['active'] ?? false);
+
+                if ($isActive || $rawStatus === 'confirmed' || $rawStatus === 'pending') {
+                    continue;
+                }
+
+                $settledTime = $this->getBetSettlementTime($bet, $timezone);
+                $createdTimeStr = (string) ($bet['createdAt'] ?? '');
+                $createdTime = $createdTimeStr !== ''
+                    ? CarbonImmutable::parse($createdTimeStr)->setTimezone($timezone)
+                    : $settledTime;
+
+                if ($settledTime->greaterThanOrEqualTo($startDay) && $settledTime->lessThanOrEqualTo($endDay)) {
+                    $id = (string) ($bet['id'] ?? '');
+                    if ($id !== '' && ! isset($seenIds[$id])) {
+                        $seenIds[$id] = true;
+                        $settledBets[] = $bet;
+                    }
+                } elseif ($settledTime->lt($startDay) && $createdTime->lt($startDay)) {
+                    $consecutiveOlderCount++;
+                }
+            }
+
+            if ($consecutiveOlderCount >= count($list) || count($list) < $limit) {
+                break;
+            }
+
+            $offset += $limit;
+        }
+
+        usort($settledBets, function (array $a, array $b) use ($timezone): int {
+            $tA = $this->getBetSettlementTime($a, $timezone)->getTimestamp();
+            $tB = $this->getBetSettlementTime($b, $timezone)->getTimestamp();
+
+            if ($tA === $tB) {
+                return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+            }
+
+            return $tA <=> $tB;
+        });
+
+        return $settledBets;
+    }
+
+    /**
+     * @param  array<string, mixed>  $bet
+     */
+    public function getBetSettlementTime(array $bet, string $timezone = 'Asia/Taipei'): CarbonImmutable
+    {
+        $timeStr = (string) (
+            $bet['settledAt']
+            ?? $bet['settled_at']
+            ?? $bet['updatedAt']
+            ?? $bet['updated_at']
+            ?? ($bet['cashouts'][0]['createdAt'] ?? null)
+            ?? ($bet['cashouts'][0]['created_at'] ?? null)
+            ?? ($bet['adjustments'][0]['updatedAt'] ?? null)
+            ?? ($bet['adjustments'][0]['created_at'] ?? null)
+            ?? ($bet['createdAt'] ?? '')
+        );
+
+        if ($timeStr === '') {
+            return CarbonImmutable::now($timezone);
+        }
+
+        return CarbonImmutable::parse($timeStr)->setTimezone($timezone);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $settledBets
+     * @param  array{available: float, vault: float, total: float}|null  $balance
+     * @return array{
+     *     bars: array<int, array<string, mixed>>,
+     *     start_balance: float,
+     *     current_balance: float,
+     *     net_change: float,
+     *     max_watermark: float,
+     *     min_watermark: float,
+     *     total_bets: int,
+     *     won_count: int,
+     *     lost_count: int,
+     *     cashout_count: int,
+     *     void_count: int,
+     *     win_rate: float,
+     *     roi: float,
+     *     total_staked: float,
+     *     total_payout: float
+     * }
+     */
+    public function calculateBalanceHistory(
+        array $settledBets,
+        ?array $balance = null,
+        string $timezone = 'Asia/Taipei'
+    ): array {
+        $standardizedBets = [];
+        foreach ($settledBets as $bet) {
+            $amount = (float) ($bet['amount'] ?? 0);
+            $payout = (float) ($bet['payout'] ?? 0);
+            $currency = mb_strtoupper((string) ($bet['currency'] ?? 'USDT'));
+            $rawStatus = mb_strtolower((string) ($bet['status'] ?? 'pending'));
+            $potentialMultiplier = (float) ($bet['potentialMultiplier'] ?? 1);
+
+            if ($rawStatus === 'cashout') {
+                $status = 'cashout';
+                $statusLabel = '已兌現';
+                $profit = $payout - $amount;
+            } elseif (in_array($rawStatus, ['cancelled', 'void', 'refund', 'refunded'], true) || (abs($payout - $amount) < 0.001 && $rawStatus === 'settled')) {
+                $status = 'void';
+                $statusLabel = '退款';
+                $profit = 0.0;
+            } elseif ($rawStatus === 'settled' && $payout > 0) {
+                $status = 'won';
+                $statusLabel = '獲勝';
+                $profit = $payout - $amount;
+            } else {
+                $status = 'lost';
+                $statusLabel = '未中獎';
+                $profit = -$amount;
+            }
+
+            $settledTime = $this->getBetSettlementTime($bet, $timezone);
+
+            $outcomes = is_array($bet['outcomes'] ?? null) ? $bet['outcomes'] : [];
+            $legCount = count($outcomes);
+            $isParlay = $legCount > 1;
+
+            $sportName = '';
+            $matchName = '';
+            if ($legCount === 1 && isset($outcomes[0])) {
+                $fixture = is_array($outcomes[0]['fixture'] ?? null) ? $outcomes[0]['fixture'] : [];
+                $tournament = is_array($fixture['tournament'] ?? null) ? $fixture['tournament'] : [];
+                $category = is_array($tournament['category'] ?? null) ? $tournament['category'] : [];
+                $sport = is_array($category['sport'] ?? null) ? $category['sport'] : [];
+                $sportName = ChineseConverter::toTraditional((string) ($sport['name'] ?? ''));
+                $matchName = ChineseConverter::toTraditional((string) ($fixture['name'] ?? ''));
+            } elseif ($isParlay) {
+                $matchName = "{$legCount} 關串關";
+            }
+
+            $iid = (string) ($bet['bet']['iid'] ?? ($bet['iid'] ?? ''));
+            if ($iid !== '' && ! str_starts_with($iid, '#')) {
+                $iid = '#'.preg_replace('/^sport:/', '', $iid);
+            }
+
+            $standardizedBets[] = [
+                'id' => (string) ($bet['id'] ?? ''),
+                'iid' => $iid,
+                'amount' => $amount,
+                'payout' => $payout,
+                'profit' => $profit,
+                'currency' => $currency,
+                'potential_multiplier' => $potentialMultiplier,
+                'status' => $status,
+                'status_label' => $statusLabel,
+                'is_parlay' => $isParlay,
+                'leg_count' => $legCount,
+                'settled_at' => $settledTime->format('m/d H:i'),
+                'settled_date' => $settledTime->format('m/d'),
+                'settled_time' => $settledTime->format('H:i'),
+                'settled_timestamp' => $settledTime->getTimestamp(),
+                'sport_name' => $sportName,
+                'match_name' => $matchName,
+            ];
+        }
+
+        usort($standardizedBets, function (array $a, array $b): int {
+            if ($a['settled_timestamp'] === $b['settled_timestamp']) {
+                return strcmp($a['id'], $b['id']);
+            }
+
+            return $a['settled_timestamp'] <=> $b['settled_timestamp'];
+        });
+
+        $count = count($standardizedBets);
+        $currentTotal = $balance !== null ? (float) ($balance['total'] ?? 0.0) : null;
+
+        $balances = [];
+        if ($currentTotal !== null) {
+            $running = $currentTotal;
+            for ($i = $count - 1; $i >= 0; $i--) {
+                $balances[$i] = $running;
+                $running -= $standardizedBets[$i]['profit'];
+            }
+            $startBalance = $running;
+            $currentBalance = $currentTotal;
+        } else {
+            $startBalance = 0.0;
+            $running = 0.0;
+            for ($i = 0; $i < $count; $i++) {
+                $running += $standardizedBets[$i]['profit'];
+                $balances[$i] = $running;
+            }
+            $currentBalance = $running;
+        }
+
+        $wonCount = 0;
+        $lostCount = 0;
+        $cashoutCount = 0;
+        $voidCount = 0;
+        $totalStaked = 0.0;
+        $totalPayout = 0.0;
+        $maxWatermark = $startBalance;
+        $minWatermark = $startBalance;
+        $bars = [];
+
+        foreach ($standardizedBets as $idx => $sBet) {
+            $b = $balances[$idx];
+            if ($b > $maxWatermark) {
+                $maxWatermark = $b;
+            }
+            if ($b < $minWatermark) {
+                $minWatermark = $b;
+            }
+
+            $totalStaked += $sBet['amount'];
+            $totalPayout += $sBet['payout'];
+
+            match ($sBet['status']) {
+                'won' => $wonCount++,
+                'lost' => $lostCount++,
+                'cashout' => $cashoutCount++,
+                'void' => $voidCount++,
+                default => null,
+            };
+
+            $profitFormatted = ($sBet['profit'] >= 0 ? '+' : '').$this->formatBalanceAmount($sBet['profit']);
+
+            $bars[] = array_merge($sBet, [
+                'index' => $idx + 1,
+                'balance' => $b,
+                'balance_formatted' => $this->formatBalanceAmount($b),
+                'profit_formatted' => $profitFormatted,
+            ]);
+        }
+
+        $decided = $wonCount + $lostCount;
+        $winRate = $decided > 0 ? (($wonCount / $decided) * 100) : 0.0;
+        $netChange = $currentBalance - $startBalance;
+        $roi = $totalStaked > 0 ? (($netChange / $totalStaked) * 100) : 0.0;
+
+        return [
+            'bars' => $bars,
+            'start_balance' => $startBalance,
+            'current_balance' => $currentBalance,
+            'net_change' => $netChange,
+            'max_watermark' => $maxWatermark,
+            'min_watermark' => $minWatermark,
+            'total_bets' => $count,
+            'won_count' => $wonCount,
+            'lost_count' => $lostCount,
+            'cashout_count' => $cashoutCount,
+            'void_count' => $voidCount,
+            'win_rate' => $winRate,
+            'roi' => $roi,
+            'total_staked' => $totalStaked,
+            'total_payout' => $totalPayout,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $chartData
+     * @param  array{available: float, vault: float, total: float}|null  $balance
+     */
+    public function formatBalanceChartMessage(
+        int $days,
+        CarbonImmutable $startDate,
+        CarbonImmutable $endDate,
+        array $chartData,
+        ?array $balance = null,
+        bool $exceededMax = false,
+        string $timezone = 'Asia/Taipei'
+    ): string {
+        $lines = [
+            'Stake 體育投注｜資金水位走勢',
+            sprintf('區間｜%s ~ %s（近 %d 天）・依結盤時間點', $startDate->format('Y-m-d'), $endDate->format('Y-m-d'), $days),
+        ];
+
+        if ($exceededMax) {
+            $lines[] = '提示｜查詢上限為 30 天，已自動為您呈現近 30 天數據。';
+        }
+
+        $lines[] = '時間基準｜台灣時間';
+        $lines[] = '';
+        $lines[] = '【💰 資金水位總覽】';
+
+        if ($balance !== null) {
+            $lines[] = '・目前水位：'.$this->formatBalanceLine($balance);
+        } else {
+            $lines[] = sprintf('・目前水位：%s USDT', $this->formatBalanceAmount($chartData['current_balance']));
+        }
+
+        $lines[] = sprintf('・期初水位：%s USDT', $this->formatBalanceAmount($chartData['start_balance']));
+
+        $netChange = $chartData['net_change'];
+        $netSign = $netChange > 0.001 ? '+' : '';
+        $tag = match (true) {
+            $netChange > 0.001 => '▲ 盈利',
+            $netChange < -0.001 => '▼ 虧損',
+            default => '持平',
+        };
+        $lines[] = sprintf('・區間損益：%s%s USDT（%s）', $netSign, $this->formatBalanceAmount($netChange), $tag);
+        $lines[] = sprintf('・水位極值：最高 %s USDT / 最低 %s USDT', $this->formatBalanceAmount($chartData['max_watermark']), $this->formatBalanceAmount($chartData['min_watermark']));
+        $lines[] = sprintf('・結盤戰績：%d 勝  %d 負（勝率 %.1f%%）', $chartData['won_count'], $chartData['lost_count'], $chartData['win_rate']);
+
+        $bars = $chartData['bars'];
+        if ($bars === []) {
+            $lines[] = '';
+            $lines[] = sprintf('近 %d 天內查無結盤之體育注單。', $days);
+        } else {
+            $lines[] = '';
+            $lines[] = sprintf('【📊 結盤水位明細（共 %d 筆）】', count($bars));
+
+            $displayBars = array_slice($bars, -20);
+            if (count($bars) > 20) {
+                $lines[] = sprintf('（僅列出最近 20 筆結盤明細，前 %d 筆請參閱圖表）', count($bars) - 20);
+            }
+
+            foreach ($displayBars as $b) {
+                $statusEmoji = match ($b['status']) {
+                    'won' => '🏆',
+                    'lost' => '❌',
+                    'cashout' => '💰',
+                    'void' => '⚪',
+                    default => '⏳',
+                };
+                $iidStr = $b['iid'] !== '' ? "｜{$b['iid']}" : '';
+                $lines[] = sprintf(
+                    '%d. %s%s',
+                    $b['index'],
+                    $b['settled_at'],
+                    $iidStr
+                );
+                $sportTag = $b['sport_name'] !== '' ? "【{$b['sport_name']}】" : '';
+                if ($b['match_name'] !== '') {
+                    $lines[] = "   賽事：{$sportTag}{$b['match_name']}";
+                }
+                $lines[] = sprintf(
+                    '   結果：%s %s（%s USDT）',
+                    $b['status_label'],
+                    $statusEmoji,
+                    $b['profit_formatted']
+                );
+                $lines[] = sprintf(
+                    '   結盤後水位：%s USDT',
+                    $b['balance_formatted']
+                );
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param  array<string, mixed>  $chartData
+     * @param  array{available: float, vault: float, total: float}|null  $balance
+     * @return array<string, mixed>
+     */
+    public function buildBalanceChartImageData(
+        int $days,
+        CarbonImmutable $startDate,
+        CarbonImmutable $endDate,
+        array $chartData,
+        ?array $balance = null,
+        string $timezone = 'Asia/Taipei'
+    ): array {
+        return [
+            'type' => 'balance_chart',
+            'title' => 'Stake 體育投注｜資金水位長條圖',
+            'subtitle' => sprintf('區間｜%s ~ %s（近 %d 天）・依每單結盤時間繪製', $startDate->format('Y-m-d'), $endDate->format('Y-m-d'), $days),
+            'days' => $days,
+            'current_balance_formatted' => $balance !== null ? $this->formatBalanceForImage($balance) : null,
+            'summary' => [
+                'current_balance' => $this->formatBalanceAmount($chartData['current_balance']).' USDT',
+                'start_balance' => $this->formatBalanceAmount($chartData['start_balance']).' USDT',
+                'net_change' => ($chartData['net_change'] >= 0 ? '+' : '').$this->formatBalanceAmount($chartData['net_change']).' USDT',
+                'net_change_val' => $chartData['net_change'],
+                'max_watermark' => $this->formatBalanceAmount($chartData['max_watermark']).' USDT',
+                'min_watermark' => $this->formatBalanceAmount($chartData['min_watermark']).' USDT',
+                'total_bets' => $chartData['total_bets'],
+                'won_count' => $chartData['won_count'],
+                'lost_count' => $chartData['lost_count'],
+                'cashout_count' => $chartData['cashout_count'],
+                'void_count' => $chartData['void_count'],
+                'win_rate' => sprintf('%.1f%%', $chartData['win_rate']),
+                'roi' => sprintf('%s%.1f%%', $chartData['roi'] >= 0 ? '+' : '', $chartData['roi']),
+            ],
+            'bars' => $chartData['bars'],
+        ];
     }
 
     /**

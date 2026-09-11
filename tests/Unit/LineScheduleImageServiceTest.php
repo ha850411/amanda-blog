@@ -276,4 +276,129 @@ class LineScheduleImageServiceTest extends TestCase
         $this->assertGreaterThan(600, $image->getImageHeight());
         $image->clear();
     }
+
+    public function test_it_renders_balance_chart_with_bars_and_empty_state(): void
+    {
+        if (! extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick is required to test balance chart image rendering.');
+        }
+
+        $font = collect([
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        ])->first(fn (string $path): bool => is_readable($path));
+
+        if ($font === null) {
+            $this->markTestSkipped('A readable font is required to verify image rendering.');
+        }
+
+        config([
+            'services.line.schedule_image_disk' => 'schedule-images',
+            'services.line.schedule_image_font' => $font,
+        ]);
+        Storage::fake('schedule-images');
+
+        $chartData = [
+            'type' => 'balance_chart',
+            'title' => 'Stake 體育投注｜資金水位長條圖',
+            'subtitle' => '區間｜2026-09-04 ~ 2026-09-06（近 3 天）・依每單結盤時間繪製',
+            'days' => 3,
+            'current_balance_formatted' => '1,250 USDT',
+            'summary' => [
+                'current_balance' => '1,250 USDT',
+                'start_balance' => '1,150 USDT',
+                'net_change' => '+100 USDT',
+                'net_change_val' => 100.0,
+                'max_watermark' => '1,300 USDT',
+                'min_watermark' => '1,100 USDT',
+                'total_bets' => 3,
+                'won_count' => 2,
+                'lost_count' => 1,
+                'cashout_count' => 0,
+                'void_count' => 0,
+                'win_rate' => '66.7%',
+                'roi' => '+8.7%',
+            ],
+            'bars' => [
+                [
+                    'index' => 1,
+                    'id' => 'bet-1',
+                    'iid' => '#101',
+                    'amount' => 50.0,
+                    'payout' => 100.0,
+                    'profit' => 50.0,
+                    'profit_formatted' => '+50',
+                    'status' => 'won',
+                    'balance' => 1200.0,
+                    'balance_formatted' => '1,200',
+                    'settled_at' => '09/04 14:00',
+                    'settled_date' => '09/04',
+                    'settled_time' => '14:00',
+                ],
+                [
+                    'index' => 2,
+                    'id' => 'bet-2',
+                    'iid' => '#102',
+                    'amount' => 30.0,
+                    'payout' => 0.0,
+                    'profit' => -30.0,
+                    'profit_formatted' => '-30',
+                    'status' => 'lost',
+                    'balance' => 1170.0,
+                    'balance_formatted' => '1,170',
+                    'settled_at' => '09/05 16:30',
+                    'settled_date' => '09/05',
+                    'settled_time' => '16:30',
+                ],
+                [
+                    'index' => 3,
+                    'id' => 'bet-3',
+                    'iid' => '#103',
+                    'amount' => 40.0,
+                    'payout' => 120.0,
+                    'profit' => 80.0,
+                    'profit_formatted' => '+80',
+                    'status' => 'won',
+                    'balance' => 1250.0,
+                    'balance_formatted' => '1,250',
+                    'settled_at' => '09/06 18:00',
+                    'settled_date' => '09/06',
+                    'settled_time' => '18:00',
+                ],
+            ],
+        ];
+
+        $service = app(LineScheduleImageService::class);
+        $url = $service->create($chartData, 'https://stake.com');
+        $this->assertNotEmpty($url);
+
+        $files = Storage::disk('schedule-images')->allFiles('line-schedules');
+        $originalPath = collect($files)->first(fn (string $path): bool => str_ends_with($path, '/1440'));
+        $previewPath = collect($files)->first(fn (string $path): bool => str_ends_with($path, '/700'));
+
+        $this->assertNotNull($originalPath);
+        $this->assertNotNull($previewPath);
+
+        $original = new Imagick;
+        $original->readImageBlob(Storage::disk('schedule-images')->get($originalPath));
+        $this->assertSame(1440, $original->getImageWidth());
+        $this->assertSame(1080, $original->getImageHeight());
+        $original->clear();
+
+        // Test empty state
+        $emptyData = array_merge($chartData, ['bars' => []]);
+        $emptyUrl = $service->create($emptyData, 'https://stake.com');
+        $this->assertNotEmpty($emptyUrl);
+
+        $emptyFiles = Storage::disk('schedule-images')->allFiles('line-schedules');
+        $emptyPath = collect($emptyFiles)->first(fn (string $path): bool => str_contains($path, hash('sha256', json_encode([26, $emptyData, 'https://stake.com'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR))) && str_ends_with($path, '/1440'));
+        $this->assertNotNull($emptyPath);
+
+        $emptyImg = new Imagick;
+        $emptyImg->readImageBlob(Storage::disk('schedule-images')->get($emptyPath));
+        $this->assertSame(1440, $emptyImg->getImageWidth());
+        $this->assertSame(620, $emptyImg->getImageHeight());
+        $emptyImg->clear();
+    }
 }

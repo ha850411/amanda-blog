@@ -1058,6 +1058,289 @@ class StakeBetServiceTest extends TestCase
         $original->clear();
     }
 
+    public function test_balance_command_defaults_to_3_days(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(100.0, 50.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $aliases = ['!balance', '!bal', '!水位', '!資金水位', '!資金', '!equity'];
+
+        foreach ($aliases as $alias) {
+            $reply = app(LineScheduleBot::class)->reply($alias);
+            $this->assertNotNull($reply, "Failed asserting alias {$alias} was handled.");
+            $this->assertTrue($reply->prefersImage());
+            $this->assertSame('https://stake.com/zh/my-bets/sports', $reply->linkUrl);
+
+            $this->assertStringContainsString('Stake 體育投注｜資金水位走勢', $reply->text);
+            $this->assertStringContainsString('近 3 天', $reply->text);
+            $this->assertStringContainsString('依結盤時間點', $reply->text);
+            $this->assertStringContainsString('目前水位：可用：100 USDT（金庫：50 USDT / 總計：150 USDT）', $reply->text);
+
+            $imageData = $reply->imageData;
+            $this->assertNotNull($imageData);
+            $this->assertSame('balance_chart', $imageData['type']);
+            $this->assertSame(3, $imageData['days']);
+            $this->assertCount(3, $imageData['bars']);
+
+            // Chronological order: hist-bet-2 (00:45) -> hist-bet-3 (05:58) -> hist-bet-1 (13:16)
+            $this->assertSame('hist-bet-2', $imageData['bars'][0]['id']);
+            $this->assertSame('hist-bet-3', $imageData['bars'][1]['id']);
+            $this->assertSame('hist-bet-1', $imageData['bars'][2]['id']);
+
+            // Math check: current balance = 150
+            // bet 1 (won +114.08): after = 150
+            // bet 3 (cashout +28.19): after = 150 - 114.08 = 35.92
+            // bet 2 (lost -64.0): after = 35.92 - 28.19 = 7.73
+            // start = 7.73 - (-64.0) = 71.73
+            $this->assertEqualsWithDelta(35.92, $imageData['bars'][1]['balance'], 0.01);
+            $this->assertEqualsWithDelta(150.0, $imageData['bars'][2]['balance'], 0.01);
+            $this->assertEqualsWithDelta(78.27, $imageData['summary']['net_change_val'], 0.01);
+            $this->assertEqualsWithDelta(71.73, (float) filter_var($imageData['summary']['start_balance'], FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION), 0.01);
+        }
+    }
+
+    public function test_balance_command_supports_custom_days_up_to_30(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(200.0, 0.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $cases = [
+            '!balance 7d' => 7,
+            '!bal 14天' => 14,
+            '!水位 30d' => 30,
+            '!資金 5' => 5,
+        ];
+
+        foreach ($cases as $cmd => $expectedDays) {
+            $reply = app(LineScheduleBot::class)->reply($cmd);
+            $this->assertNotNull($reply);
+            $this->assertTrue($reply->prefersImage());
+            $this->assertSame($expectedDays, $reply->imageData['days']);
+            $this->assertStringContainsString("近 {$expectedDays} 天", $reply->text);
+        }
+    }
+
+    public function test_balance_command_caps_at_30_days_when_exceeded(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(100.0, 0.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!balance 60天');
+        $this->assertNotNull($reply);
+        $this->assertSame(30, $reply->imageData['days']);
+        $this->assertStringContainsString('提示｜查詢上限為 30 天，已自動為您呈現近 30 天數據。', $reply->text);
+        $this->assertStringContainsString('近 30 天', $reply->text);
+    }
+
+    public function test_balance_command_draws_according_to_settlement_time(): void
+    {
+        // Bet A: placed 5 days ago (09-01), settled 1 day ago (09-05 18:00) -> should be INCLUDED
+        // Bet B: placed 2 days ago (09-04 10:00), settled 2 days ago (09-04 12:00) -> should be INCLUDED and FIRST
+        // Bet C: placed 10 days ago, settled 8 days ago (08-29) -> should be EXCLUDED
+        $customBets = [
+            [
+                'id' => 'bet-c',
+                'status' => 'settled',
+                'amount' => 50.0,
+                'payout' => 100.0,
+                'currency' => 'usdt',
+                'potentialMultiplier' => 2.0,
+                'createdAt' => 'Sun, 25 Aug 2026 10:00:00 GMT',
+                'settledAt' => 'Thu, 29 Aug 2026 12:00:00 GMT',
+                'bet' => ['iid' => 'sport:001'],
+                'outcomes' => [],
+            ],
+            [
+                'id' => 'bet-a',
+                'status' => 'settled',
+                'amount' => 50.0,
+                'payout' => 80.0,
+                'currency' => 'usdt',
+                'potentialMultiplier' => 1.6,
+                'createdAt' => 'Tue, 01 Sep 2026 10:00:00 GMT',
+                'settledAt' => 'Sat, 05 Sep 2026 18:00:00 GMT',
+                'bet' => ['iid' => 'sport:002'],
+                'outcomes' => [],
+            ],
+            [
+                'id' => 'bet-b',
+                'status' => 'settled',
+                'amount' => 40.0,
+                'payout' => 0.0,
+                'currency' => 'usdt',
+                'potentialMultiplier' => 1.5,
+                'createdAt' => 'Fri, 04 Sep 2026 10:00:00 GMT',
+                'settledAt' => 'Fri, 04 Sep 2026 12:00:00 GMT',
+                'bet' => ['iid' => 'sport:003'],
+                'outcomes' => [],
+            ],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($customBets) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse($customBets), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(500.0, 0.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!balance 3d');
+        $this->assertNotNull($reply);
+        $bars = $reply->imageData['bars'];
+
+        $this->assertCount(2, $bars, 'Bet C outside 3-day window must be excluded.');
+        // Bet B settled on 09-04 12:00 (earlier) -> must be index 0
+        $this->assertSame('bet-b', $bars[0]['id']);
+        $this->assertSame('09/04 20:00', $bars[0]['settled_at']); // GMT 12:00 = Asia/Taipei 20:00
+
+        // Bet A settled on 09-05 18:00 (later) -> must be index 1
+        $this->assertSame('bet-a', $bars[1]['id']);
+        $this->assertSame('09/06 02:00', $bars[1]['settled_at']); // GMT 18:00 = Asia/Taipei 02:00 next day
+    }
+
+    public function test_balance_command_force_text_mode(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(100.0, 0.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!balance text');
+        $this->assertNotNull($reply);
+        $this->assertFalse($reply->prefersImage());
+        $this->assertNull($reply->imageData);
+        $this->assertStringContainsString('Stake 體育投注｜資金水位走勢', $reply->text);
+        $this->assertStringContainsString('結盤水位明細', $reply->text);
+    }
+
+    public function test_balance_command_handles_empty_records(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response(['data' => ['user' => ['sportBetList' => []]]], 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(100.0, 0.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!balance');
+        $this->assertNotNull($reply);
+        $this->assertTrue($reply->prefersImage());
+        $this->assertEmpty($reply->imageData['bars']);
+        $this->assertStringContainsString('近 3 天內查無結盤之體育注單。', $reply->text);
+    }
+
+    public function test_balance_help_command(): void
+    {
+        $reply = app(LineScheduleBot::class)->reply('!balance help');
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('!balance 或 !bal 或 !水位 [天數]', $reply->text);
+        $this->assertStringContainsString('預設回傳近 3 天，最多可查詢 30 天。', $reply->text);
+    }
+
+    public function test_balance_command_image_rendering(): void
+    {
+        if (! extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick is required to test balance chart image rendering.');
+        }
+
+        $font = collect([
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        ])->first(fn (string $path): bool => is_readable($path));
+
+        if ($font === null) {
+            $this->markTestSkipped('A readable font is required to verify image rendering.');
+        }
+
+        config([
+            'services.line.schedule_image_disk' => 'test-disk',
+            'services.line.schedule_image_font' => $font,
+        ]);
+        \Illuminate\Support\Facades\Storage::fake('test-disk');
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse(), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(100.0, 50.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!balance');
+        $this->assertNotNull($reply);
+        $this->assertTrue($reply->prefersImage());
+
+        $url = app(\App\Services\LineScheduleImageService::class)->create($reply->imageData, $reply->linkUrl);
+        $this->assertNotEmpty($url);
+
+        $files = \Illuminate\Support\Facades\Storage::disk('test-disk')->allFiles('line-schedules');
+        $originalPath = collect($files)->first(fn (string $path): bool => str_ends_with($path, '/1440'));
+        $this->assertNotNull($originalPath);
+
+        $original = new \Imagick;
+        $original->readImageBlob(\Illuminate\Support\Facades\Storage::disk('test-disk')->get($originalPath));
+        $this->assertSame(1440, $original->getImageWidth());
+        $this->assertSame(1080, $original->getImageHeight());
+        $original->clear();
+
+        // Also test empty state image rendering
+        $emptyData = array_merge($reply->imageData, ['bars' => []]);
+        $emptyUrl = app(\App\Services\LineScheduleImageService::class)->create($emptyData, $reply->linkUrl);
+        $this->assertNotEmpty($emptyUrl);
+
+        $emptyOriginalPath = collect(\Illuminate\Support\Facades\Storage::disk('test-disk')->allFiles('line-schedules'))
+            ->first(fn (string $path): bool => str_contains($path, hash('sha256', json_encode([26, $emptyData, $reply->linkUrl], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR))));
+        $this->assertNotNull($emptyOriginalPath);
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $customBets
      * @return array<string, mixed>
