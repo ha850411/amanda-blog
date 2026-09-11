@@ -1229,6 +1229,66 @@ class StakeBetServiceTest extends TestCase
         $this->assertSame('09/06 02:00', $bars[1]['settled_at']); // GMT 18:00 = Asia/Taipei 02:00 next day
     }
 
+    public function test_balance_command_uses_updated_at_and_cashout_created_at_as_settlement_time(): void
+    {
+        $customBets = [
+            [
+                'id' => 'bet-regular-settled',
+                'status' => 'settled',
+                'amount' => 100.0,
+                'payout' => 200.0,
+                'currency' => 'usdt',
+                'createdAt' => 'Tue, 01 Sep 2026 03:00:00 GMT', // Placed 5 days ago (outside 3d window)
+                'updatedAt' => 'Sat, 05 Sep 2026 14:30:00 GMT', // Settled within 3d window -> Taipei 09/05 22:30
+                'bet' => ['iid' => 'sport:reg'],
+                'outcomes' => [],
+            ],
+            [
+                'id' => 'bet-cashed-out',
+                'status' => 'cashout',
+                'amount' => 50.0,
+                'payout' => 45.0,
+                'currency' => 'usdt',
+                'createdAt' => 'Wed, 02 Sep 2026 10:00:00 GMT',
+                'updatedAt' => 'Fri, 04 Sep 2026 08:00:00 GMT',
+                'cashouts' => [
+                    ['createdAt' => 'Fri, 04 Sep 2026 08:00:00 GMT'], // Taipei 09/04 16:00
+                ],
+                'bet' => ['iid' => 'sport:cash'],
+                'outcomes' => [],
+            ],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($customBets) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse($customBets), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(300.0, 0.0), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!balance 3d');
+        $this->assertNotNull($reply);
+        $bars = $reply->imageData['bars'];
+
+        $this->assertCount(2, $bars);
+        // Cashout was 09-04 16:00 Taipei -> index 0
+        $this->assertSame('bet-cashed-out', $bars[0]['id']);
+        $this->assertSame('09/04 16:00', $bars[0]['settled_at']);
+        $this->assertSame('16:00', $bars[0]['settled_time']);
+        $this->assertSame('09/04', $bars[0]['settled_date']);
+
+        // Regular settled was 09-05 22:30 Taipei -> index 1
+        $this->assertSame('bet-regular-settled', $bars[1]['id']);
+        $this->assertSame('09/05 22:30', $bars[1]['settled_at']);
+        $this->assertSame('22:30', $bars[1]['settled_time']);
+        $this->assertSame('09/05', $bars[1]['settled_date']);
+    }
+
     public function test_balance_command_force_text_mode(): void
     {
         Http::fake([

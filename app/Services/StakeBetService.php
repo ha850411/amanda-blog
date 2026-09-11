@@ -87,8 +87,10 @@ fragment SportBetPreview_SportBet on SportBet {
   cashouts {
     __typename
     cashoutAmount
+    createdAt
   }
   createdAt
+  updatedAt
   bet {
     __typename
     iid
@@ -1413,7 +1415,23 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 }
             }
 
-            if ($consecutiveOlderCount >= count($list) || count($list) < $limit) {
+            $olderTailCount = 0;
+            for ($i = count($list) - 1; $i >= 0; $i--) {
+                $b = $list[$i];
+                $sTime = $this->getBetSettlementTime($b, $timezone);
+                $cTimeStr = (string) ($b['createdAt'] ?? '');
+                $cTime = $cTimeStr !== ''
+                    ? CarbonImmutable::parse($cTimeStr)->setTimezone($timezone)
+                    : $sTime;
+
+                if ($sTime->lt($startDay) && $cTime->lt($startDay)) {
+                    $olderTailCount++;
+                } else {
+                    break;
+                }
+            }
+
+            if ($olderTailCount >= 10 || count($list) < $limit) {
                 break;
             }
 
@@ -1439,9 +1457,12 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
      */
     public function getBetSettlementTime(array $bet, string $timezone = 'Asia/Taipei'): CarbonImmutable
     {
+        $rawStatus = mb_strtolower((string) ($bet['status'] ?? ''));
+
         $timeStr = (string) (
             $bet['settledAt']
             ?? $bet['settled_at']
+            ?? ($rawStatus === 'cashout' ? ($bet['cashouts'][0]['createdAt'] ?? null) : null)
             ?? $bet['updatedAt']
             ?? $bet['updated_at']
             ?? ($bet['cashouts'][0]['createdAt'] ?? null)
