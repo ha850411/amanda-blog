@@ -1402,6 +1402,111 @@ class StakeBetServiceTest extends TestCase
         $this->assertNotNull($emptyOriginalPath);
     }
 
+    public function test_balance_command_uses_batched_query_in_single_http_request(): void
+    {
+        $customBets = [
+            [
+                'id' => 'batched-bet-1',
+                'status' => 'settled',
+                'amount' => 50.0,
+                'payout' => 120.0,
+                'currency' => 'usdt',
+                'createdAt' => 'Fri, 04 Sep 2026 10:00:00 GMT',
+                'updatedAt' => 'Fri, 04 Sep 2026 12:00:00 GMT',
+                'bet' => ['iid' => 'sport:batched1'],
+                'outcomes' => [],
+            ],
+            [
+                'id' => 'batched-bet-2',
+                'status' => 'settled',
+                'amount' => 30.0,
+                'payout' => 0.0,
+                'currency' => 'usdt',
+                'createdAt' => 'Sat, 05 Sep 2026 10:00:00 GMT',
+                'updatedAt' => 'Sat, 05 Sep 2026 14:00:00 GMT',
+                'bet' => ['iid' => 'sport:batched2'],
+                'outcomes' => [],
+            ],
+        ];
+
+        $requestCount = 0;
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use (&$requestCount, $customBets) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+                if ($op === 'FetchBatchedBalanceAndBets') {
+                    $requestCount++;
+                    $items = array_map(fn (array $b): array => [
+                        'id' => $b['id'],
+                        'iid' => $b['bet']['iid'],
+                        'bet' => $b,
+                    ], $customBets);
+
+                    return Http::response([
+                        'data' => [
+                            'user' => [
+                                'id' => 'user-test',
+                                'balances' => [
+                                    [
+                                        'available' => ['amount' => 250.0, 'currency' => 'usdt'],
+                                        'vault' => ['amount' => 50.0, 'currency' => 'usdt'],
+                                    ],
+                                ],
+                                'p0' => $items,
+                                'p1' => [],
+                            ],
+                        ],
+                    ], 200);
+                }
+
+                return Http::response([], 404);
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!balance 7d');
+        $this->assertNotNull($reply);
+        $this->assertSame(1, $requestCount, 'Should fetch both balance and bets in exactly 1 batched HTTP request');
+        $this->assertCount(2, $reply->imageData['bars']);
+        $this->assertSame('300 USDT', $reply->imageData['summary']['current_balance']);
+    }
+
+    public function test_balance_command_short_lived_cache_avoids_duplicate_api_calls(): void
+    {
+        $requestCount = 0;
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use (&$requestCount) {
+                $requestCount++;
+
+                return Http::response([
+                    'data' => [
+                        'user' => [
+                            'id' => 'user-test',
+                            'balances' => [
+                                [
+                                    'available' => ['amount' => 100.0, 'currency' => 'usdt'],
+                                    'vault' => ['amount' => 0.0, 'currency' => 'usdt'],
+                                ],
+                            ],
+                            'p0' => [],
+                            'p1' => [],
+                        ],
+                    ],
+                ], 200);
+            },
+        ]);
+
+        \Illuminate\Support\Facades\Cache::flush();
+
+        $bot = app(LineScheduleBot::class);
+        $reply1 = $bot->reply('!balance 3d');
+        $reply2 = $bot->reply('!balance 3d');
+        $reply3 = $bot->reply('!balance 3d text');
+
+        $this->assertNotNull($reply1);
+        $this->assertNotNull($reply2);
+        $this->assertNotNull($reply3);
+        $this->assertSame(1, $requestCount, 'Second and third calls within TTL should hit cache and make 0 HTTP requests');
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $customBets
      * @return array<string, mixed>

@@ -1251,15 +1251,30 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         }
 
         try {
-            $settledBets = $this->getSettledBetsForDays($params['days'], $timezone);
-
-            $balance = null;
+            $cacheKey = sprintf('stake:balance_chart_data:days_%d:tz_%s', $params['days'], $timezone);
+            $cachedData = null;
             try {
-                $balance = $this->getUsdtBalance();
-            } catch (Throwable $e) {
-                Log::warning('Stake USDT balance fetch failed during balance chart reply.', [
-                    'error' => $e->getMessage(),
-                ]);
+                $cachedData = Cache::get($cacheKey);
+            } catch (Throwable) {
+                // non-blocking cache retrieval
+            }
+
+            if (is_array($cachedData) && isset($cachedData['bets'])) {
+                $settledBets = $cachedData['bets'];
+                $balance = $cachedData['balance'];
+            } else {
+                $data = $this->getSettledBetsAndBalanceForDays($params['days'], $timezone);
+                $settledBets = $data['bets'];
+                $balance = $data['balance'];
+
+                try {
+                    $ttlSeconds = (int) config('services.stake.chart_cache_ttl', 30);
+                    if ($ttlSeconds > 0) {
+                        Cache::put($cacheKey, ['bets' => $settledBets, 'balance' => $balance], now()->addSeconds($ttlSeconds));
+                    }
+                } catch (Throwable) {
+                    // non-blocking cache storage
+                }
             }
 
             $chartData = $this->calculateBalanceHistory($settledBets, $balance, $timezone);
@@ -1364,6 +1379,213 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             'force_text' => $forceText,
             'is_help' => false,
             'exceeded_max' => $exceededMax,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     bets: array<int, array<string, mixed>>,
+     *     balance: array{available: float, vault: float, total: float}|null
+     * }
+     */
+    public function getSettledBetsAndBalanceForDays(int $days, string $timezone = 'Asia/Taipei'): array
+    {
+        $days = min(30, max(1, $days));
+        $now = CarbonImmutable::now($timezone);
+        $startDay = $now->subDays($days - 1)->startOfDay();
+        $endDay = $now->endOfDay();
+
+        // 1. 優先嘗試 GraphQL 批次查詢（在單一 HTTP 請求中合併多頁注單與餘額）
+        try {
+            $batched = $this->fetchBatchedBetsAndBalance($days, $startDay, $endDay, $timezone);
+            if ($batched !== null) {
+                return $batched;
+            }
+        } catch (Throwable $e) {
+            Log::debug('Stake GraphQL batched balance query failed, falling back to sequential fetch.', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // 2. 降級回退至既有的序列查詢
+        $settledBets = $this->getSettledBetsForDays($days, $timezone);
+        $balance = null;
+        try {
+            $balance = $this->getUsdtBalance();
+        } catch (Throwable $e) {
+            Log::warning('Stake USDT balance fetch failed during sequential fallback.', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return [
+            'bets' => $settledBets,
+            'balance' => $balance,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     bets: array<int, array<string, mixed>>,
+     *     balance: array{available: float, vault: float, total: float}|null
+     * }|null
+     */
+    public function fetchBatchedBetsAndBalance(
+        int $days,
+        CarbonImmutable $startDay,
+        CarbonImmutable $endDay,
+        string $timezone = 'Asia/Taipei'
+    ): ?array {
+        $pageCount = match (true) {
+            $days <= 3 => 2,
+            $days <= 7 => 2,
+            $days <= 14 => 3,
+            default => 4,
+        };
+
+        $fields = '';
+        for ($i = 0; $i < $pageCount; $i++) {
+            $offset = $i * 50;
+            $fields .= "    p{$i}: sportBetList(limit: 50, offset: {$offset}) {\n      id\n      iid\n      bet {\n        __typename\n        ...SportBetPreview_SportBet\n      }\n    }\n";
+        }
+
+        $query = "query FetchBatchedBalanceAndBets {\n  user {\n    id\n    balances {\n      available {\n        amount\n        currency\n      }\n      vault {\n        amount\n        currency\n      }\n    }\n{$fields}  }\n}\n".self::SPORT_BET_FRAGMENTS;
+
+        $response = $this->sendGraphQLRequest('FetchBatchedBalanceAndBets', $query, []);
+
+        $userData = $response['data']['user'] ?? null;
+        if (! is_array($userData) || ! isset($userData['p0'])) {
+            return null;
+        }
+
+        $balance = isset($userData['balances']) && is_array($userData['balances'])
+            ? $this->extractUsdtBalance($userData['balances'])
+            : null;
+
+        $seenIds = [];
+        $settledBets = [];
+        $lastPageFull = false;
+        $allTailOlder = false;
+
+        for ($i = 0; $i < $pageCount; $i++) {
+            $rawList = $userData["p{$i}"] ?? [];
+            if (! is_array($rawList) || $rawList === []) {
+                $lastPageFull = false;
+                break;
+            }
+
+            $list = [];
+            foreach ($rawList as $item) {
+                if (isset($item['bet']) && is_array($item['bet'])) {
+                    $bet = $item['bet'];
+                    if (isset($item['iid']) && ! isset($bet['bet']['iid'])) {
+                        $bet['bet'] = ['iid' => $item['iid'], '__typename' => 'Bet'];
+                    }
+                    $list[] = $bet;
+                }
+            }
+
+            $lastPageFull = count($list) >= 50;
+
+            foreach ($list as $bet) {
+                $rawStatus = mb_strtolower((string) ($bet['status'] ?? 'pending'));
+                $isActive = (bool) ($bet['active'] ?? false);
+
+                if ($isActive || $rawStatus === 'confirmed' || $rawStatus === 'pending') {
+                    continue;
+                }
+
+                $settledTime = $this->getBetSettlementTime($bet, $timezone);
+                if ($settledTime->greaterThanOrEqualTo($startDay) && $settledTime->lessThanOrEqualTo($endDay)) {
+                    $id = (string) ($bet['id'] ?? '');
+                    if ($id !== '' && ! isset($seenIds[$id])) {
+                        $seenIds[$id] = true;
+                        $settledBets[] = $bet;
+                    }
+                }
+            }
+
+            $olderTailCount = 0;
+            for ($j = count($list) - 1; $j >= 0; $j--) {
+                $b = $list[$j];
+                $sTime = $this->getBetSettlementTime($b, $timezone);
+                $cTimeStr = (string) ($b['createdAt'] ?? '');
+                $cTime = $cTimeStr !== ''
+                    ? CarbonImmutable::parse($cTimeStr)->setTimezone($timezone)
+                    : $sTime;
+
+                if ($sTime->lt($startDay) && $cTime->lt($startDay)) {
+                    $olderTailCount++;
+                } else {
+                    break;
+                }
+            }
+
+            if ($olderTailCount >= 10 || count($list) < 50) {
+                $allTailOlder = true;
+                break;
+            }
+        }
+
+        // 若批次取回的最後一頁已滿 50 筆且尾端仍未抵達歷史早停，則順延序列獲取後續頁數
+        if ($lastPageFull && ! $allTailOlder) {
+            $offset = $pageCount * 50;
+            for ($p = 0; $p < 10; $p++) {
+                $more = $this->getSportBetList(50, $offset);
+                if ($more === []) {
+                    break;
+                }
+                foreach ($more as $bet) {
+                    $rawStatus = mb_strtolower((string) ($bet['status'] ?? 'pending'));
+                    $isActive = (bool) ($bet['active'] ?? false);
+                    if ($isActive || $rawStatus === 'confirmed' || $rawStatus === 'pending') {
+                        continue;
+                    }
+                    $settledTime = $this->getBetSettlementTime($bet, $timezone);
+                    if ($settledTime->greaterThanOrEqualTo($startDay) && $settledTime->lessThanOrEqualTo($endDay)) {
+                        $id = (string) ($bet['id'] ?? '');
+                        if ($id !== '' && ! isset($seenIds[$id])) {
+                            $seenIds[$id] = true;
+                            $settledBets[] = $bet;
+                        }
+                    }
+                }
+
+                $olderTailCount = 0;
+                for ($j = count($more) - 1; $j >= 0; $j--) {
+                    $b = $more[$j];
+                    $sTime = $this->getBetSettlementTime($b, $timezone);
+                    $cTimeStr = (string) ($b['createdAt'] ?? '');
+                    $cTime = $cTimeStr !== ''
+                        ? CarbonImmutable::parse($cTimeStr)->setTimezone($timezone)
+                        : $sTime;
+                    if ($sTime->lt($startDay) && $cTime->lt($startDay)) {
+                        $olderTailCount++;
+                    } else {
+                        break;
+                    }
+                }
+                if ($olderTailCount >= 10 || count($more) < 50) {
+                    break;
+                }
+                $offset += 50;
+            }
+        }
+
+        usort($settledBets, function (array $a, array $b) use ($timezone): int {
+            $tA = $this->getBetSettlementTime($a, $timezone)->getTimestamp();
+            $tB = $this->getBetSettlementTime($b, $timezone)->getTimestamp();
+
+            if ($tA === $tB) {
+                return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+            }
+
+            return $tA <=> $tB;
+        });
+
+        return [
+            'bets' => $settledBets,
+            'balance' => $balance,
         ];
     }
 
@@ -2383,6 +2605,35 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
     }
 
     /**
+     * @param  array<int, mixed>  $balances
+     * @return array{available: float, vault: float, total: float}|null
+     */
+    public function extractUsdtBalance(array $balances): ?array
+    {
+        foreach ($balances as $balance) {
+            if (! is_array($balance)) {
+                continue;
+            }
+
+            $availableCurrency = mb_strtolower((string) ($balance['available']['currency'] ?? ''));
+            $vaultCurrency = mb_strtolower((string) ($balance['vault']['currency'] ?? ''));
+
+            if ($availableCurrency === 'usdt' || $vaultCurrency === 'usdt') {
+                $available = (float) ($balance['available']['amount'] ?? 0);
+                $vault = (float) ($balance['vault']['amount'] ?? 0);
+
+                return [
+                    'available' => $available,
+                    'vault' => $vault,
+                    'total' => $available + $vault,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @return array{available: float, vault: float, total: float}|null
      */
     public function getUsdtBalance(): ?array
@@ -2408,26 +2659,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             return null;
         }
 
-        $usdtBalance = null;
-        foreach ($balances as $balance) {
-            if (! is_array($balance)) {
-                continue;
-            }
-
-            $availableCurrency = mb_strtolower((string) ($balance['available']['currency'] ?? ''));
-            $vaultCurrency = mb_strtolower((string) ($balance['vault']['currency'] ?? ''));
-
-            if ($availableCurrency === 'usdt' || $vaultCurrency === 'usdt') {
-                $available = (float) ($balance['available']['amount'] ?? 0);
-                $vault = (float) ($balance['vault']['amount'] ?? 0);
-                $usdtBalance = [
-                    'available' => $available,
-                    'vault' => $vault,
-                    'total' => $available + $vault,
-                ];
-                break;
-            }
-        }
+        $usdtBalance = $this->extractUsdtBalance($balances);
 
         if ($usdtBalance !== null && $cacheSeconds > 0) {
             try {
