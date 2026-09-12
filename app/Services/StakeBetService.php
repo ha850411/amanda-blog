@@ -1925,12 +1925,24 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             return $a['settled_timestamp'] <=> $b['settled_timestamp'];
         });
 
-        // 整理未結盤（進行中）注單本金與下注時間點
+        // 整理進行中（待結算）注單本金與資訊
         $activeItems = [];
+        $totalActiveAmount = 0.0;
+        $lastActiveTime = null;
+        $seenActiveIds = [];
+
         foreach ($activeBets as $bet) {
             if (! is_array($bet)) {
                 continue;
             }
+            $id = (string) ($bet['id'] ?? '');
+            if ($id !== '' && isset($seenActiveIds[$id])) {
+                continue;
+            }
+            if ($id !== '') {
+                $seenActiveIds[$id] = true;
+            }
+
             $currency = mb_strtolower((string) ($bet['currency'] ?? 'usdt'));
             if ($currency !== 'usdt') {
                 continue;
@@ -1944,8 +1956,13 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 ? CarbonImmutable::parse($createdAtStr)->setTimezone($timezone)
                 : null;
 
+            if ($createdTime !== null && ($lastActiveTime === null || $createdTime->greaterThan($lastActiveTime))) {
+                $lastActiveTime = $createdTime;
+            }
+
+            $totalActiveAmount += $amt;
             $activeItems[] = [
-                'id' => (string) ($bet['id'] ?? ''),
+                'id' => $id,
                 'amount' => $amt,
                 'created_timestamp' => $createdTime?->getTimestamp() ?? 0,
                 'created_at' => $createdTime,
@@ -1970,24 +1987,54 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
         $balances = [];
         if ($currentTotal !== null) {
-            // 若最後一筆結盤之後有進行中投注，代表結盤當下該投注金尚未扣除；
-            // 若進行中投注在最後一筆結盤前就已下注扣款，結盤當下水位即為扣除後的水位，不可灌水加回。
-            $running = $currentTotal + $activeAfterLastTotal;
-            for ($i = $count - 1; $i >= 0; $i--) {
-                $balances[$i] = $running;
-                $running -= $standardizedBets[$i]['profit'];
+            $anchorKey = ($startDate !== null && ! app()->environment('testing'))
+                ? 'stake_start_balance_'.$timezone.'_'.$startDate->format('Y-m-d')
+                : null;
 
-                if ($i > 0) {
-                    $prevSettledTimestamp = $standardizedBets[$i - 1]['settled_timestamp'];
+            if ($anchorKey !== null && Cache::has($anchorKey)) {
+                $startBalance = (float) Cache::get($anchorKey);
+            } else {
+                // 初次計算期初水位基準點（此基準點一旦快取後即錨定，保證歷史時序穩定）
+                $calcRunning = $currentTotal + $activeAfterLastTotal;
+                for ($i = $count - 1; $i >= 0; $i--) {
+                    $calcRunning -= $standardizedBets[$i]['profit'];
+                    if ($i > 0) {
+                        $prevSettledTimestamp = $standardizedBets[$i - 1]['settled_timestamp'];
+                        $currSettledTimestamp = $standardizedBets[$i]['settled_timestamp'];
+                        foreach ($activeItems as $item) {
+                            if ($item['created_timestamp'] > $prevSettledTimestamp && $item['created_timestamp'] <= $currSettledTimestamp) {
+                                $calcRunning += $item['amount'];
+                            }
+                        }
+                    }
+                }
+                $startBalance = $calcRunning;
+                if ($anchorKey !== null) {
+                    try {
+                        Cache::put($anchorKey, $startBalance, now()->addDays(30));
+                    } catch (Throwable) {
+                        // non-blocking cache storage
+                    }
+                }
+            }
+
+            // 正向時序累加計算（Forward Calculation）
+            // 每一筆已結盤注單的水位皆由期初水位依時序正向累加，不再依賴今天餘額往前回推
+            $running = $startBalance;
+            for ($i = 0; $i < $count; $i++) {
+                $running += $standardizedBets[$i]['profit'];
+                $balances[$i] = $running;
+
+                if ($i < $count - 1) {
                     $currSettledTimestamp = $standardizedBets[$i]['settled_timestamp'];
+                    $nextSettledTimestamp = $standardizedBets[$i + 1]['settled_timestamp'];
                     foreach ($activeItems as $item) {
-                        if ($item['created_timestamp'] > $prevSettledTimestamp && $item['created_timestamp'] <= $currSettledTimestamp) {
-                            $running += $item['amount'];
+                        if ($item['created_timestamp'] > $currSettledTimestamp && $item['created_timestamp'] <= $nextSettledTimestamp) {
+                            $running -= $item['amount'];
                         }
                     }
                 }
             }
-            $startBalance = $running;
             $currentBalance = $currentTotal;
         } else {
             $startBalance = 0.0;
@@ -2039,9 +2086,9 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             ]);
         }
 
-        // 若最後一筆結盤之後有進行中的下注，在長條圖尾端追加一根「待結算」長條圖，
-        // 清楚呈現當前扣掉待結算訂單後的真正水位
-        if ($activeAfterLastTotal > 0.0 && $currentBalance !== null) {
+        // 只要當前帳戶存在任何進行中的未結算注單，就在長條圖尾端追加一根「待結算」長條圖，
+        // 清楚呈現當前扣除待結算後的真正可用水位，避免停留在已結盤實心長條
+        if ($totalActiveAmount > 0.000001 && $currentBalance !== null) {
             if ($currentBalance > $maxWatermark) {
                 $maxWatermark = $currentBalance;
             }
@@ -2049,8 +2096,9 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 $minWatermark = $currentBalance;
             }
 
+            $pendingBets = $activeAfterLastBets !== [] ? $activeAfterLastBets : $activeItems;
             $lastActiveTime = null;
-            foreach ($activeAfterLastBets as $aItem) {
+            foreach ($pendingBets as $aItem) {
                 if ($aItem['created_at'] !== null) {
                     if ($lastActiveTime === null || $aItem['created_at']->greaterThan($lastActiveTime)) {
                         $lastActiveTime = $aItem['created_at'];
@@ -2060,14 +2108,15 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             $activeTimeStr = $lastActiveTime ? $lastActiveTime->format('H:i') : '當前';
             $activeDateStr = $lastActiveTime ? $lastActiveTime->format('m/d') : CarbonImmutable::now($timezone)->format('m/d');
             $activeDateTimeStr = $lastActiveTime ? $lastActiveTime->format('m/d H:i') : CarbonImmutable::now($timezone)->format('m/d H:i');
-            $activeCount = count($activeAfterLastBets);
+            $pendingDisplayAmount = $activeAfterLastTotal > 0.0 ? $activeAfterLastTotal : $totalActiveAmount;
+            $activeCount = count($pendingBets);
 
             $bars[] = [
                 'id' => 'active-unsettled-summary',
                 'iid' => '#進行中',
-                'amount' => $activeAfterLastTotal,
+                'amount' => $pendingDisplayAmount,
                 'payout' => 0.0,
-                'profit' => -$activeAfterLastTotal,
+                'profit' => -$pendingDisplayAmount,
                 'currency' => 'USDT',
                 'potential_multiplier' => 1.0,
                 'status' => 'pending',
@@ -2085,7 +2134,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 'index_label' => '待結',
                 'balance' => $currentBalance,
                 'balance_formatted' => $this->formatBalanceAmount($currentBalance),
-                'profit_formatted' => '-'.$this->formatBalanceAmount($activeAfterLastTotal),
+                'profit_formatted' => '-'.$this->formatBalanceAmount($pendingDisplayAmount),
             ];
         }
 
@@ -2368,12 +2417,13 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             }
         } else {
             $bars = $chartData['bars'];
-            if ($bars === []) {
+            $settledCount = count(array_filter($bars, fn (array $b): bool => ($b['status'] ?? '') !== 'pending'));
+            if ($settledCount === 0) {
                 $lines[] = '';
                 $lines[] = sprintf('近 %d 天內查無結盤之體育注單。', $days);
-            } else {
+            }
+            if ($bars !== []) {
                 $lines[] = '';
-                $settledCount = count(array_filter($bars, fn (array $b): bool => ($b['status'] ?? '') !== 'pending'));
                 $hasPending = count($bars) > $settledCount;
                 $lines[] = $hasPending
                     ? sprintf('【📊 結盤水位明細（共 %d 筆，含 1 筆待結算）】', count($bars))

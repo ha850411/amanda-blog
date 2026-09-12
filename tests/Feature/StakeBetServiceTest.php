@@ -1900,10 +1900,12 @@ class StakeBetServiceTest extends TestCase
         $this->assertSame('233.8 USDT', $reply->imageData['summary']['start_balance']);
         $this->assertEqualsWithDelta(10.0, $reply->imageData['summary']['net_change_val'], 0.000001);
 
-        // 只有 1 根長條圖（結盤比賽），且其水位為 243.804816 USDT（最後一根顯示扣掉待結算的真正水位）
-        $this->assertCount(1, $reply->imageData['bars']);
+        // 包含結盤比賽與尾端的待結算長條圖（當前仍有 5 USDT 進行中注單）
+        $this->assertCount(2, $reply->imageData['bars']);
         $this->assertSame(243.804816, $reply->imageData['bars'][0]['balance']);
         $this->assertSame('won', $reply->imageData['bars'][0]['status']);
+        $this->assertSame('pending', $reply->imageData['bars'][1]['status']);
+        $this->assertSame(243.804816, $reply->imageData['bars'][1]['balance']);
 
         // 文字訊息與圖片資訊確認
         $this->assertStringContainsString('目前水位：可用：243.8 USDT（未結盤：5 USDT）', $reply->text);
