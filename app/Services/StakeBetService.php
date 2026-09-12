@@ -883,6 +883,46 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         return array_values(array_filter($bets, 'is_array'));
     }
 
+    /**
+     * @param  array<int, array<string, mixed>>  $activeBets
+     */
+    public function calculateActiveBetsUsdtTotal(array $activeBets): float
+    {
+        $total = 0.0;
+        $seen = [];
+
+        foreach ($activeBets as $bet) {
+            $id = (string) ($bet['id'] ?? '');
+            if ($id !== '') {
+                if (isset($seen[$id])) {
+                    continue;
+                }
+                $seen[$id] = true;
+            }
+
+            $isActive = (bool) ($bet['active'] ?? true);
+            $rawStatus = mb_strtolower((string) ($bet['status'] ?? 'confirmed'));
+            if (! $isActive && ! in_array($rawStatus, ['confirmed', 'pending'], true)) {
+                continue;
+            }
+
+            $currency = mb_strtolower((string) ($bet['currency'] ?? 'usdt'));
+            if ($currency !== 'usdt') {
+                continue;
+            }
+
+            $amount = isset($bet['activeAmount']) && is_numeric($bet['activeAmount'])
+                ? (float) $bet['activeAmount']
+                : (float) ($bet['amount'] ?? 0);
+
+            if ($amount > 0) {
+                $total += $amount;
+            }
+        }
+
+        return $total;
+    }
+
     public function parseDateString(string $str, CarbonImmutable $today, string $timezone): ?CarbonImmutable
     {
         $trimmed = trim($str);
@@ -1392,7 +1432,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
     /**
      * @return array{
      *     bets: array<int, array<string, mixed>>,
-     *     balance: array{available: float, vault: float, total: float}|null
+     *     balance: array{available: float, vault: float, total: float, active?: float}|null
      * }
      */
     public function getSettledBetsAndBalanceForDays(int $days, string $timezone = 'Asia/Taipei'): array
@@ -1425,6 +1465,33 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             ]);
         }
 
+        $activeBets = [];
+        try {
+            $activeBets = $this->getActiveSportBets(50);
+            $activeCount = $this->getActiveBetCount();
+            if ($activeCount > count($activeBets)) {
+                for ($offset = 50; $offset < $activeCount; $offset += 50) {
+                    $more = $this->getActiveSportBets(50, $offset);
+                    if ($more === []) {
+                        break;
+                    }
+                    foreach ($more as $bet) {
+                        $activeBets[] = $bet;
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            Log::warning('Stake active bets fetch failed during sequential fallback.', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        if ($balance !== null) {
+            $unsettledTotal = $this->calculateActiveBetsUsdtTotal($activeBets);
+            $balance['active'] = $unsettledTotal;
+            $balance['total'] = $balance['available'] + $balance['vault'] + $unsettledTotal;
+        }
+
         return [
             'bets' => $settledBets,
             'balance' => $balance,
@@ -1434,7 +1501,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
     /**
      * @return array{
      *     bets: array<int, array<string, mixed>>,
-     *     balance: array{available: float, vault: float, total: float}|null
+     *     balance: array{available: float, vault: float, total: float, active?: float}|null
      * }|null
      */
     public function fetchBatchedBetsAndBalance(
@@ -1456,7 +1523,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             $fields .= "    p{$i}: sportBetList(limit: 50, offset: {$offset}) {\n      id\n      iid\n      bet {\n        __typename\n        ...SportBetPreview_SportBet\n      }\n    }\n";
         }
 
-        $query = "query FetchBatchedBalanceAndBets {\n  user {\n    id\n    balances {\n      available {\n        amount\n        currency\n      }\n      vault {\n        amount\n        currency\n      }\n    }\n{$fields}  }\n}\n".self::SPORT_BET_FRAGMENTS;
+        $query = "query FetchBatchedBalanceAndBets {\n  user {\n    id\n    balances {\n      available {\n        amount\n        currency\n      }\n      vault {\n        amount\n        currency\n      }\n    }\n    activeSportBetCount\n    activeSportBets(limit: 50, offset: 0, sort: placedTime) {\n      ...SportBetPreview_SportBet\n    }\n{$fields}  }\n}\n".self::SPORT_BET_FRAGMENTS;
 
         $response = $this->sendGraphQLRequest('FetchBatchedBalanceAndBets', $query, []);
 
@@ -1468,6 +1535,20 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         $balance = isset($userData['balances']) && is_array($userData['balances'])
             ? $this->extractUsdtBalance($userData['balances'])
             : null;
+
+        $activeBets = is_array($userData['activeSportBets'] ?? null) ? $userData['activeSportBets'] : [];
+        $activeCount = (int) ($userData['activeSportBetCount'] ?? count($activeBets));
+        if ($activeCount > count($activeBets)) {
+            for ($offset = 50; $offset < $activeCount; $offset += 50) {
+                $more = $this->getActiveSportBets(50, $offset);
+                if ($more === []) {
+                    break;
+                }
+                foreach ($more as $bet) {
+                    $activeBets[] = $bet;
+                }
+            }
+        }
 
         $seenIds = [];
         $settledBets = [];
@@ -1499,6 +1580,8 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 $isActive = (bool) ($bet['active'] ?? false);
 
                 if ($isActive || $rawStatus === 'confirmed' || $rawStatus === 'pending') {
+                    $activeBets[] = $bet;
+
                     continue;
                 }
 
@@ -1546,6 +1629,8 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                     $rawStatus = mb_strtolower((string) ($bet['status'] ?? 'pending'));
                     $isActive = (bool) ($bet['active'] ?? false);
                     if ($isActive || $rawStatus === 'confirmed' || $rawStatus === 'pending') {
+                        $activeBets[] = $bet;
+
                         continue;
                     }
                     $settledTime = $this->getBetSettlementTime($bet, $timezone);
@@ -1589,6 +1674,12 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
             return $tA <=> $tB;
         });
+
+        if ($balance !== null) {
+            $unsettledTotal = $this->calculateActiveBetsUsdtTotal($activeBets);
+            $balance['active'] = $unsettledTotal;
+            $balance['total'] = $balance['available'] + $balance['vault'] + $unsettledTotal;
+        }
 
         return [
             'bets' => $settledBets,
@@ -2836,7 +2927,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
     /**
      * @param  array<int, mixed>  $balances
-     * @return array{available: float, vault: float, total: float}|null
+     * @return array{available: float, vault: float, total: float, active?: float}|null
      */
     public function extractUsdtBalance(array $balances): ?array
     {
@@ -2855,6 +2946,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 return [
                     'available' => $available,
                     'vault' => $vault,
+                    'active' => 0.0,
                     'total' => $available + $vault,
                 ];
             }
@@ -3408,30 +3500,53 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
     }
 
     /**
-     * @param  array{available: float, vault: float, total: float}  $balance
+     * @param  array{available: float, vault: float, total: float, active?: float}  $balance
      */
     public function formatBalanceLine(array $balance): string
     {
         $availStr = $this->formatBalanceAmount($balance['available']);
+        $hasVault = ($balance['vault'] ?? 0.0) >= 0.0001;
+        $hasActive = ($balance['active'] ?? 0.0) >= 0.0001;
 
-        if ($balance['vault'] >= 0.0001) {
-            $vaultStr = $this->formatBalanceAmount($balance['vault']);
-            $totalStr = $this->formatBalanceAmount($balance['total']);
+        if ($hasVault || $hasActive) {
+            $parts = [];
+            if ($hasActive) {
+                $parts[] = '未結盤：'.$this->formatBalanceAmount($balance['active']).' USDT';
+            }
+            if ($hasVault) {
+                $parts[] = '金庫：'.$this->formatBalanceAmount($balance['vault']).' USDT';
+            }
+            $parts[] = '總計：'.$this->formatBalanceAmount($balance['total']).' USDT';
 
-            return sprintf('可用：%s USDT（金庫：%s USDT / 總計：%s USDT）', $availStr, $vaultStr, $totalStr);
+            return sprintf('可用：%s USDT（%s）', $availStr, implode(' / ', $parts));
         }
 
         return sprintf('可用：%s USDT', $availStr);
     }
 
     /**
-     * @param  array{available: float, vault: float, total: float}  $balance
+     * @param  array{available: float, vault: float, total: float, active?: float}  $balance
      */
     public function formatBalanceForImage(array $balance): string
     {
         $availStr = $this->formatBalanceAmount($balance['available']);
+        $hasVault = ($balance['vault'] ?? 0.0) >= 0.0001;
+        $hasActive = ($balance['active'] ?? 0.0) >= 0.0001;
 
-        if ($balance['vault'] >= 0.0001) {
+        if ($hasActive) {
+            $activeStr = $this->formatBalanceAmount($balance['active']);
+            $totalStr = $this->formatBalanceAmount($balance['total']);
+
+            if ($hasVault) {
+                $vaultStr = $this->formatBalanceAmount($balance['vault']);
+
+                return sprintf('%s USDT（未結 %s / 金庫 %s）', $totalStr, $activeStr, $vaultStr);
+            }
+
+            return sprintf('%s USDT（未結 %s）', $totalStr, $activeStr);
+        }
+
+        if ($hasVault) {
             $vaultStr = $this->formatBalanceAmount($balance['vault']);
 
             return sprintf('%s USDT（金庫 %s）', $availStr, $vaultStr);

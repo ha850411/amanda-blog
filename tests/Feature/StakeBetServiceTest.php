@@ -1547,6 +1547,268 @@ class StakeBetServiceTest extends TestCase
         $this->assertArrayHasKey('profit_formatted', $firstBar);
     }
 
+    public function test_balance_command_unsettled_bets_not_deducted_from_watermark_in_batched_query(): void
+    {
+        $settledBet = [
+            'id' => 'settled-1',
+            'status' => 'settled',
+            'amount' => 50.0,
+            'payout' => 120.0,
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 10:00:00 GMT',
+            'settledAt' => 'Sun, 06 Sep 2026 12:00:00 GMT',
+            'bet' => ['iid' => 'sport:settled1'],
+            'outcomes' => [],
+        ];
+
+        $activeBet = [
+            'id' => 'active-1',
+            'active' => true,
+            'status' => 'confirmed',
+            'amount' => 100.0,
+            'activeAmount' => null,
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 13:00:00 GMT',
+            'bet' => ['iid' => 'sport:active1'],
+            'outcomes' => [],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($settledBet, $activeBet) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+                if ($op === 'FetchBatchedBalanceAndBets') {
+                    return Http::response([
+                        'data' => [
+                            'user' => [
+                                'id' => 'user-test',
+                                'balances' => [
+                                    [
+                                        'available' => ['amount' => 500.0, 'currency' => 'usdt'],
+                                        'vault' => ['amount' => 0.0, 'currency' => 'usdt'],
+                                    ],
+                                ],
+                                'activeSportBetCount' => 1,
+                                'activeSportBets' => [$activeBet],
+                                'p0' => [
+                                    [
+                                        'id' => $settledBet['id'],
+                                        'iid' => $settledBet['bet']['iid'],
+                                        'bet' => $settledBet,
+                                    ],
+                                ],
+                                'p1' => [],
+                            ],
+                        ],
+                    ], 200);
+                }
+
+                return Http::response([], 404);
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!chart 3d');
+        $this->assertNotNull($reply);
+
+        // Active bet 100 USDT must not be deducted from watermark:
+        // Total balance = available 500 + active 100 = 600 USDT
+        // Settled bet won +70 -> balance after bet = 600 USDT, start balance = 600 - 70 = 530 USDT
+        $this->assertSame('600 USDT', $reply->imageData['summary']['current_balance']);
+        $this->assertSame('530 USDT', $reply->imageData['summary']['start_balance']);
+        $this->assertEqualsWithDelta(70.0, $reply->imageData['summary']['net_change_val'], 0.01);
+        $this->assertSame(600.0, $reply->imageData['bars'][0]['balance']);
+
+        // Check text message shows active unsettled amount
+        $this->assertStringContainsString('目前水位：可用：500 USDT（未結盤：100 USDT / 總計：600 USDT）', $reply->text);
+        $this->assertStringContainsString('期初水位：530 USDT', $reply->text);
+        $this->assertStringContainsString('區間損益：+70 USDT（▲ 盈利）', $reply->text);
+
+        // Check image formatted balance shows total watermark and unsettled part
+        $this->assertSame('600 USDT（未結 100）', $reply->imageData['current_balance_formatted']);
+    }
+
+    public function test_balance_command_unsettled_bets_not_deducted_from_watermark_in_fallback_sequential_query(): void
+    {
+        $settledBet = [
+            'id' => 'settled-seq-1',
+            'status' => 'settled',
+            'amount' => 60.0,
+            'payout' => 0.0,
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 08:00:00 GMT',
+            'settledAt' => 'Sun, 06 Sep 2026 10:00:00 GMT',
+            'bet' => ['iid' => 'sport:seq1'],
+            'outcomes' => [],
+        ];
+
+        $activeBet = [
+            'id' => 'active-seq-1',
+            'active' => true,
+            'status' => 'confirmed',
+            'amount' => 150.0,
+            'activeAmount' => null,
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 11:00:00 GMT',
+            'bet' => ['iid' => 'sport:seq_active1'],
+            'outcomes' => [],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($settledBet, $activeBet) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse([$settledBet]), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(850.0, 50.0), 200),
+                    'FetchActiveSportBets' => Http::response([
+                        'data' => [
+                            'user' => [
+                                'id' => 'user-test',
+                                'activeSportBets' => [$activeBet],
+                            ],
+                        ],
+                    ], 200),
+                    'ActiveBetCount_User' => Http::response([
+                        'data' => [
+                            'user' => [
+                                'id' => 'user-test',
+                                'activeSportBetCount' => 1,
+                            ],
+                        ],
+                    ], 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!chart');
+        $this->assertNotNull($reply);
+
+        // available: 850, vault: 50, active: 150 -> total watermark = 1050 USDT
+        // settled bet lost -60 -> balance after bet = 1050 USDT, start balance = 1050 - (-60) = 1110 USDT
+        $this->assertSame('1,050 USDT', $reply->imageData['summary']['current_balance']);
+        $this->assertSame('1,110 USDT', $reply->imageData['summary']['start_balance']);
+        $this->assertEqualsWithDelta(-60.0, $reply->imageData['summary']['net_change_val'], 0.01);
+        $this->assertSame(1050.0, $reply->imageData['bars'][0]['balance']);
+
+        $this->assertStringContainsString('目前水位：可用：850 USDT（未結盤：150 USDT / 金庫：50 USDT / 總計：1,050 USDT）', $reply->text);
+        $this->assertSame('1,050 USDT（未結 150 / 金庫 50）', $reply->imageData['current_balance_formatted']);
+    }
+
+    public function test_balance_command_unsettled_bets_with_partial_cashout_and_non_usdt(): void
+    {
+        $activeBets = [
+            [
+                'id' => 'active-part-1',
+                'active' => true,
+                'status' => 'confirmed',
+                'amount' => 100.0,
+                'activeAmount' => 60.0, // partially cashed out, remaining stake 60
+                'currency' => 'usdt',
+            ],
+            [
+                'id' => 'active-btc-1',
+                'active' => true,
+                'status' => 'confirmed',
+                'amount' => 0.5,
+                'currency' => 'btc', // non-usdt currency must be ignored
+            ],
+            [
+                'id' => 'active-part-1', // duplicate ID must be deduplicated
+                'active' => true,
+                'status' => 'confirmed',
+                'amount' => 100.0,
+                'activeAmount' => 60.0,
+                'currency' => 'usdt',
+            ],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($activeBets) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+                if ($op === 'FetchBatchedBalanceAndBets') {
+                    return Http::response([
+                        'data' => [
+                            'user' => [
+                                'id' => 'user-test',
+                                'balances' => [
+                                    [
+                                        'available' => ['amount' => 300.0, 'currency' => 'usdt'],
+                                        'vault' => ['amount' => 50.0, 'currency' => 'usdt'],
+                                    ],
+                                ],
+                                'activeSportBetCount' => 2,
+                                'activeSportBets' => $activeBets,
+                                'p0' => [],
+                                'p1' => [],
+                            ],
+                        ],
+                    ], 200);
+                }
+
+                return Http::response([], 404);
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!chart');
+        $this->assertNotNull($reply);
+
+        // available: 300 + vault: 50 + active: 60 = 410 USDT
+        $this->assertSame('410 USDT', $reply->imageData['summary']['current_balance']);
+        $this->assertSame('410 USDT', $reply->imageData['summary']['start_balance']);
+        $this->assertStringContainsString('目前水位：可用：300 USDT（未結盤：60 USDT / 金庫：50 USDT / 總計：410 USDT）', $reply->text);
+        $this->assertSame('410 USDT（未結 60 / 金庫 50）', $reply->imageData['current_balance_formatted']);
+    }
+
+    public function test_balance_command_with_unsettled_bets_and_no_settled_bets(): void
+    {
+        $activeBet = [
+            'id' => 'active-empty-1',
+            'active' => true,
+            'status' => 'confirmed',
+            'amount' => 200.0,
+            'currency' => 'usdt',
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($activeBet) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+                if ($op === 'FetchBatchedBalanceAndBets') {
+                    return Http::response([
+                        'data' => [
+                            'user' => [
+                                'id' => 'user-test',
+                                'balances' => [
+                                    [
+                                        'available' => ['amount' => 800.0, 'currency' => 'usdt'],
+                                        'vault' => ['amount' => 0.0, 'currency' => 'usdt'],
+                                    ],
+                                ],
+                                'activeSportBetCount' => 1,
+                                'activeSportBets' => [$activeBet],
+                                'p0' => [],
+                                'p1' => [],
+                            ],
+                        ],
+                    ], 200);
+                }
+
+                return Http::response([], 404);
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!chart');
+        $this->assertNotNull($reply);
+
+        // Watermark remains 1,000 USDT (800 available + 200 active), not reduced to 800
+        $this->assertSame('1,000 USDT', $reply->imageData['summary']['current_balance']);
+        $this->assertSame('1,000 USDT', $reply->imageData['summary']['start_balance']);
+        $this->assertEqualsWithDelta(0.0, $reply->imageData['summary']['net_change_val'], 0.01);
+        $this->assertStringContainsString('目前水位：可用：800 USDT（未結盤：200 USDT / 總計：1,000 USDT）', $reply->text);
+        $this->assertStringContainsString('期初水位：1,000 USDT', $reply->text);
+        $this->assertStringContainsString('近 3 天內查無結盤之體育注單。', $reply->text);
+        $this->assertSame('1,000 USDT（未結 200）', $reply->imageData['current_balance_formatted']);
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $customBets
      * @return array<string, mixed>
