@@ -10,10 +10,10 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Mockery;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
-use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class LineWebhookTest extends TestCase

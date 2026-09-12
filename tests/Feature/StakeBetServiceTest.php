@@ -1609,21 +1609,29 @@ class StakeBetServiceTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!chart 3d');
         $this->assertNotNull($reply);
 
-        // Active bet 100 USDT must not be deducted from watermark:
-        // Total balance = available 500 + active 100 = 600 USDT
-        // Settled bet won +70 -> balance after bet = 600 USDT, start balance = 600 - 70 = 530 USDT
-        $this->assertSame('600 USDT', $reply->imageData['summary']['current_balance']);
+        // Active bet 100 USDT was created AFTER settlement (11:00 > 10:00):
+        // Total balance = available 500 + vault 0 = 500 USDT (real wallet balance)
+        // Settlement at 10:00: active bet had not yet been placed, so balance at settlement was 500 + 100 = 600 USDT
+        // Settled bet won +70 -> start balance = 600 - 70 = 530 USDT
+        // Pending bar at the end represents current watermark after active bet deduction = 500 USDT
+        $this->assertSame('500 USDT', $reply->imageData['summary']['current_balance']);
         $this->assertSame('530 USDT', $reply->imageData['summary']['start_balance']);
-        $this->assertEqualsWithDelta(70.0, $reply->imageData['summary']['net_change_val'], 0.01);
+        $this->assertEqualsWithDelta(-30.0, $reply->imageData['summary']['net_change_val'], 0.01);
         $this->assertSame(600.0, $reply->imageData['bars'][0]['balance']);
+        $this->assertCount(2, $reply->imageData['bars']);
+        $this->assertSame('pending', $reply->imageData['bars'][1]['status']);
+        $this->assertSame(500.0, $reply->imageData['bars'][1]['balance']);
 
         // Check text message shows active unsettled amount
-        $this->assertStringContainsString('目前水位：可用：500 USDT（未結盤：100 USDT / 總計：600 USDT）', $reply->text);
+        $this->assertStringContainsString('目前水位：可用：500 USDT（未結盤：100 USDT）', $reply->text);
         $this->assertStringContainsString('期初水位：530 USDT', $reply->text);
-        $this->assertStringContainsString('區間損益：+70 USDT（▲ 盈利）', $reply->text);
+        $this->assertStringContainsString('區間損益：-30 USDT（▼ 虧損）', $reply->text);
+        $this->assertStringContainsString('【📊 結盤水位明細（共 2 筆，含 1 筆待結算）】', $reply->text);
+        $this->assertStringContainsString('待結. 09/06 21:00｜#進行中', $reply->text);
+        $this->assertStringContainsString('當前水位：500 USDT', $reply->text);
 
-        // Check image formatted balance shows total watermark and unsettled part
-        $this->assertSame('600 USDT（未結 100）', $reply->imageData['current_balance_formatted']);
+        // Check image formatted balance shows available and unsettled part
+        $this->assertSame('500 USDT（未結 100）', $reply->imageData['current_balance_formatted']);
     }
 
     public function test_balance_command_unsettled_bets_not_deducted_from_watermark_in_fallback_sequential_query(): void
@@ -1683,15 +1691,22 @@ class StakeBetServiceTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!chart');
         $this->assertNotNull($reply);
 
-        // available: 850, vault: 50, active: 150 -> total watermark = 1050 USDT
-        // settled bet lost -60 -> balance after bet = 1050 USDT, start balance = 1050 - (-60) = 1110 USDT
-        $this->assertSame('1,050 USDT', $reply->imageData['summary']['current_balance']);
+        // available: 850, vault: 50, active: 150 (placed at 11:00, after 10:00 settlement)
+        // Real wallet balance = 850 + 50 = 900 USDT
+        // Balance at 10:00 settlement = 900 + 150 = 1,050 USDT
+        // Settled bet lost -60 -> start balance = 1050 - (-60) = 1,110 USDT
+        // Net change = 900 - 1110 = -210 USDT
+        // Pending bar at the end has watermark 900 USDT
+        $this->assertSame('900 USDT', $reply->imageData['summary']['current_balance']);
         $this->assertSame('1,110 USDT', $reply->imageData['summary']['start_balance']);
-        $this->assertEqualsWithDelta(-60.0, $reply->imageData['summary']['net_change_val'], 0.01);
+        $this->assertEqualsWithDelta(-210.0, $reply->imageData['summary']['net_change_val'], 0.01);
         $this->assertSame(1050.0, $reply->imageData['bars'][0]['balance']);
+        $this->assertCount(2, $reply->imageData['bars']);
+        $this->assertSame('pending', $reply->imageData['bars'][1]['status']);
+        $this->assertSame(900.0, $reply->imageData['bars'][1]['balance']);
 
-        $this->assertStringContainsString('目前水位：可用：850 USDT（未結盤：150 USDT / 金庫：50 USDT / 總計：1,050 USDT）', $reply->text);
-        $this->assertSame('1,050 USDT（未結 150 / 金庫 50）', $reply->imageData['current_balance_formatted']);
+        $this->assertStringContainsString('目前水位：可用：850 USDT（未結盤：150 USDT / 金庫：50 USDT / 總計：900 USDT）', $reply->text);
+        $this->assertSame('850 USDT（未結 150 / 金庫 50）', $reply->imageData['current_balance_formatted']);
     }
 
     public function test_balance_command_unsettled_bets_with_partial_cashout_and_non_usdt(): void
@@ -1752,11 +1767,14 @@ class StakeBetServiceTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!chart');
         $this->assertNotNull($reply);
 
-        // available: 300 + vault: 50 + active: 60 = 410 USDT
-        $this->assertSame('410 USDT', $reply->imageData['summary']['current_balance']);
-        $this->assertSame('410 USDT', $reply->imageData['summary']['start_balance']);
-        $this->assertStringContainsString('目前水位：可用：300 USDT（未結盤：60 USDT / 金庫：50 USDT / 總計：410 USDT）', $reply->text);
-        $this->assertSame('410 USDT（未結 60 / 金庫 50）', $reply->imageData['current_balance_formatted']);
+        // available: 300 + vault: 50 = 350 USDT (total real balance)
+        // active: 60 USDT (activeAmount 60, duplicate ID deduped, btc ignored)
+        // no settled bets -> start balance = 350, current = 350, net = 0
+        $this->assertSame('350 USDT', $reply->imageData['summary']['current_balance']);
+        $this->assertSame('350 USDT', $reply->imageData['summary']['start_balance']);
+        $this->assertEqualsWithDelta(0.0, $reply->imageData['summary']['net_change_val'], 0.01);
+        $this->assertStringContainsString('目前水位：可用：300 USDT（未結盤：60 USDT / 金庫：50 USDT / 總計：350 USDT）', $reply->text);
+        $this->assertSame('300 USDT（未結 60 / 金庫 50）', $reply->imageData['current_balance_formatted']);
     }
 
     public function test_balance_command_with_unsettled_bets_and_no_settled_bets(): void
@@ -1799,14 +1817,217 @@ class StakeBetServiceTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!chart');
         $this->assertNotNull($reply);
 
-        // Watermark remains 1,000 USDT (800 available + 200 active), not reduced to 800
-        $this->assertSame('1,000 USDT', $reply->imageData['summary']['current_balance']);
-        $this->assertSame('1,000 USDT', $reply->imageData['summary']['start_balance']);
+        // Watermark is real wallet balance: 800 USDT (available 800 + vault 0), not inflated to 1,000
+        $this->assertSame('800 USDT', $reply->imageData['summary']['current_balance']);
+        $this->assertSame('800 USDT', $reply->imageData['summary']['start_balance']);
         $this->assertEqualsWithDelta(0.0, $reply->imageData['summary']['net_change_val'], 0.01);
-        $this->assertStringContainsString('目前水位：可用：800 USDT（未結盤：200 USDT / 總計：1,000 USDT）', $reply->text);
-        $this->assertStringContainsString('期初水位：1,000 USDT', $reply->text);
+        $this->assertStringContainsString('目前水位：可用：800 USDT（未結盤：200 USDT）', $reply->text);
+        $this->assertStringContainsString('期初水位：800 USDT', $reply->text);
         $this->assertStringContainsString('近 3 天內查無結盤之體育注單。', $reply->text);
-        $this->assertSame('1,000 USDT（未結 200）', $reply->imageData['current_balance_formatted']);
+        $this->assertSame('800 USDT（未結 200）', $reply->imageData['current_balance_formatted']);
+    }
+
+    public function test_balance_command_active_bets_placed_before_settlement_do_not_inflate_settlement_watermark(): void
+    {
+        // 橄欖球 5 USDT 在 02:00 GMT 下注（結盤前已扣款）
+        // LEC 比賽在 03:30 GMT 結盤（獲利 +10 USDT）
+        // 當前可用餘額 243.804816 USDT，金庫 0 USDT
+        // 03:30 結盤當下帳戶實際持有的就是 243.804816 USDT（因為 5 USDT 在 02:00 就扣了）
+        // 結盤長條圖水位即為 243.804816 USDT，不膨脹為 248.80，也不產生額外的待結算 bar（因為結盤後沒有新下注）
+        // 最後一根長條圖即為結盤當下且當前扣除待結算的真實水位 243.804816 USDT
+        $lecSettledBet = [
+            'id' => 'settled-lec-1',
+            'status' => 'settled',
+            'amount' => 10.0,
+            'payout' => 20.0, // profit = +10.0
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 01:00:00 GMT',
+            'settledAt' => 'Sun, 06 Sep 2026 03:30:00 GMT', // 09/06 11:30 Taipei
+            'bet' => ['iid' => 'sport:lec_final'],
+            'outcomes' => [],
+        ];
+
+        $rugbyActiveBet = [
+            'id' => 'active-rugby-1',
+            'active' => true,
+            'status' => 'confirmed',
+            'amount' => 5.0,
+            'activeAmount' => null,
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 02:00:00 GMT', // 結盤前下注
+            'bet' => ['iid' => 'sport:rugby_active'],
+            'outcomes' => [],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($lecSettledBet, $rugbyActiveBet) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+                if ($op === 'FetchBatchedBalanceAndBets') {
+                    return Http::response([
+                        'data' => [
+                            'user' => [
+                                'id' => 'user-test',
+                                'balances' => [
+                                    [
+                                        'available' => ['amount' => 243.804816, 'currency' => 'usdt'],
+                                        'vault' => ['amount' => 0.0, 'currency' => 'usdt'],
+                                    ],
+                                ],
+                                'activeSportBetCount' => 1,
+                                'activeSportBets' => [$rugbyActiveBet],
+                                'p0' => [
+                                    [
+                                        'id' => $lecSettledBet['id'],
+                                        'iid' => $lecSettledBet['bet']['iid'],
+                                        'bet' => $lecSettledBet,
+                                    ],
+                                ],
+                                'p1' => [],
+                            ],
+                        ],
+                    ], 200);
+                }
+
+                return Http::response([], 404);
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!chart');
+        $this->assertNotNull($reply);
+
+        // 結盤當下實際餘額就是 243.804816 USDT，5 USDT 橄欖球不灌水加回
+        $this->assertSame('243.8 USDT', $reply->imageData['summary']['current_balance']);
+        $this->assertSame('233.8 USDT', $reply->imageData['summary']['start_balance']);
+        $this->assertEqualsWithDelta(10.0, $reply->imageData['summary']['net_change_val'], 0.000001);
+
+        // 只有 1 根長條圖（結盤比賽），且其水位為 243.804816 USDT（最後一根顯示扣掉待結算的真正水位）
+        $this->assertCount(1, $reply->imageData['bars']);
+        $this->assertSame(243.804816, $reply->imageData['bars'][0]['balance']);
+        $this->assertSame('won', $reply->imageData['bars'][0]['status']);
+
+        // 文字訊息與圖片資訊確認
+        $this->assertStringContainsString('目前水位：可用：243.8 USDT（未結盤：5 USDT）', $reply->text);
+        $this->assertStringContainsString('結盤後水位：243.8 USDT', $reply->text);
+        $this->assertSame('243.8 USDT（未結 5）', $reply->imageData['current_balance_formatted']);
+    }
+
+    public function test_balance_command_mixed_active_bets_before_and_after_settlements(): void
+    {
+        // 賽事 1 在 10:00 GMT 結盤（獲利 +20）
+        // 未結單 A 在 09:00 GMT 下注（5 USDT，賽事 1 結盤前）
+        // 賽事 2 在 12:00 GMT 結盤（虧損 -30）
+        // 未結單 B 在 11:00 GMT 下注（15 USDT，賽事 1 結盤後、賽事 2 結盤前）
+        // 未結單 C 在 13:00 GMT 下注（25 USDT，賽事 2 結盤後）
+        // 當前可用餘額：500 USDT
+        // 推算：
+        // 當前可用 = 500 USDT
+        // 賽事 2 結盤當下：未結單 C 尚未下注，餘額 = 500 + 25 = 525 USDT
+        // 賽事 2 結盤前：525 - (-30) = 555 USDT
+        // 賽事 1 結盤當下：未結單 B 尚未下注，餘額 = 555 + 15 = 570 USDT
+        // 賽事 1 結盤前（期初）：570 - 20 = 550 USDT（未結單 A 在 09:00 早已扣除，不加回）
+        // 長條圖共 3 根：
+        // bar 0 (賽事 1): balance = 570
+        // bar 1 (賽事 2): balance = 525
+        // bar 2 (待結算): balance = 500（當前真正水位）
+        $bet1 = [
+            'id' => 'settled-mixed-1',
+            'status' => 'settled',
+            'amount' => 10.0,
+            'payout' => 30.0, // profit +20
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 08:00:00 GMT',
+            'settledAt' => 'Sun, 06 Sep 2026 10:00:00 GMT',
+            'bet' => ['iid' => 'sport:mix1'],
+            'outcomes' => [],
+        ];
+
+        $bet2 = [
+            'id' => 'settled-mixed-2',
+            'status' => 'settled',
+            'amount' => 30.0,
+            'payout' => 0.0, // profit -30
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 10:30:00 GMT',
+            'settledAt' => 'Sun, 06 Sep 2026 12:00:00 GMT',
+            'bet' => ['iid' => 'sport:mix2'],
+            'outcomes' => [],
+        ];
+
+        $activeA = [
+            'id' => 'active-a',
+            'active' => true,
+            'status' => 'confirmed',
+            'amount' => 5.0,
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 09:00:00 GMT', // Before bet 1
+            'bet' => ['iid' => 'sport:act_a'],
+            'outcomes' => [],
+        ];
+
+        $activeB = [
+            'id' => 'active-b',
+            'active' => true,
+            'status' => 'confirmed',
+            'amount' => 15.0,
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 11:00:00 GMT', // Between bet 1 and bet 2
+            'bet' => ['iid' => 'sport:act_b'],
+            'outcomes' => [],
+        ];
+
+        $activeC = [
+            'id' => 'active-c',
+            'active' => true,
+            'status' => 'confirmed',
+            'amount' => 25.0,
+            'currency' => 'usdt',
+            'createdAt' => 'Sun, 06 Sep 2026 13:00:00 GMT', // After bet 2
+            'bet' => ['iid' => 'sport:act_c'],
+            'outcomes' => [],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($bet1, $bet2, $activeA, $activeB, $activeC) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+                if ($op === 'FetchBatchedBalanceAndBets') {
+                    return Http::response([
+                        'data' => [
+                            'user' => [
+                                'id' => 'user-test',
+                                'balances' => [
+                                    [
+                                        'available' => ['amount' => 500.0, 'currency' => 'usdt'],
+                                        'vault' => ['amount' => 0.0, 'currency' => 'usdt'],
+                                    ],
+                                ],
+                                'activeSportBetCount' => 3,
+                                'activeSportBets' => [$activeA, $activeB, $activeC],
+                                'p0' => [
+                                    ['id' => $bet1['id'], 'iid' => $bet1['bet']['iid'], 'bet' => $bet1],
+                                    ['id' => $bet2['id'], 'iid' => $bet2['bet']['iid'], 'bet' => $bet2],
+                                ],
+                                'p1' => [],
+                            ],
+                        ],
+                    ], 200);
+                }
+
+                return Http::response([], 404);
+            },
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!chart');
+        $this->assertNotNull($reply);
+
+        $this->assertSame('500 USDT', $reply->imageData['summary']['current_balance']);
+        $this->assertSame('550 USDT', $reply->imageData['summary']['start_balance']);
+        $this->assertEqualsWithDelta(-50.0, $reply->imageData['summary']['net_change_val'], 0.01);
+
+        $this->assertCount(3, $reply->imageData['bars']);
+        $this->assertSame(570.0, $reply->imageData['bars'][0]['balance']);
+        $this->assertSame(525.0, $reply->imageData['bars'][1]['balance']);
+        $this->assertSame('pending', $reply->imageData['bars'][2]['status']);
+        $this->assertSame(500.0, $reply->imageData['bars'][2]['balance']);
     }
 
     /**

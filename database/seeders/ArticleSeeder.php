@@ -20,10 +20,10 @@ class ArticleSeeder extends Seeder
             $filterTags = array_rand(array_flip($tagIds), rand(1, 3));
             Article::factory()
                 ->hasAttached($filterTags, [], 'tags')->create([
-                        'title' => "文章標題 $i",
-                        'content' => "這是文章內容 $i",
-                        'status' => 1,
-                    ]);
+                    'title' => "文章標題 $i",
+                    'content' => "這是文章內容 $i",
+                    'status' => 1,
+                ]);
         }
 
         // 文章 20 -> 密碼

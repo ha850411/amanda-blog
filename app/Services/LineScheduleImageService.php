@@ -2289,13 +2289,26 @@ class LineScheduleImageService
                 $legendX += 100;
             }
         } else {
+            $hasPendingBar = false;
+            foreach ($bars as $b) {
+                if (($b['status'] ?? '') === 'pending') {
+                    $hasPendingBar = true;
+                    break;
+                }
+            }
+
             $legendItems = [
                 ['color' => '#10b981', 'label' => '獲勝'],
                 ['color' => '#ef4444', 'label' => '未中獎'],
                 ['color' => '#f59e0b', 'label' => '兌現'],
                 ['color' => '#64748b', 'label' => '退款'],
             ];
-            $legendX = $left + $cardWidth - 360;
+            if ($hasPendingBar) {
+                $legendItems[] = ['color' => '#38bdf8', 'label' => '待結算'];
+            }
+
+            $legendWidth = count($legendItems) * 82;
+            $legendX = $left + $cardWidth - $legendWidth - 10;
             foreach ($legendItems as $item) {
                 $draw->setFillColor($item['color']);
                 $draw->roundRectangle($legendX, $chartBoxY + 22, $legendX + 14, $chartBoxY + 36, 3, 3);
@@ -2303,7 +2316,7 @@ class LineScheduleImageService
                 $draw->setFontSize(16);
                 $draw->setFontWeight(600);
                 $draw->annotation($legendX + 20, $chartBoxY + 34, $item['label']);
-                $legendX += 86;
+                $legendX += 82;
             }
         }
 
@@ -2381,6 +2394,7 @@ class LineScheduleImageService
                 'lost' => ['bar' => '#dc2626', 'border' => '#f87171', 'text' => '#f87171'],
                 'cashout' => ['bar' => '#d97706', 'border' => '#fbbf24', 'text' => '#fbbf24'],
                 'flat' => ['bar' => '#1e293b', 'border' => '#334155', 'text' => '#64748b'],
+                'pending' => ['bar' => '#1e293b', 'border' => '#38bdf8', 'text' => '#38bdf8'],
                 default => ['bar' => '#475569', 'border' => '#94a3b8', 'text' => '#cbd5e1'],
             };
 

@@ -1302,15 +1302,21 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             if (is_array($cachedData) && isset($cachedData['bets'])) {
                 $settledBets = $cachedData['bets'];
                 $balance = $cachedData['balance'];
+                $activeBets = $cachedData['active_bets'] ?? [];
             } else {
                 $data = $this->getSettledBetsAndBalanceForDays($params['days'], $timezone);
                 $settledBets = $data['bets'];
                 $balance = $data['balance'];
+                $activeBets = $data['active_bets'] ?? [];
 
                 try {
                     $ttlSeconds = (int) config('services.stake.chart_cache_ttl', 30);
                     if ($ttlSeconds > 0) {
-                        Cache::put($cacheKey, ['bets' => $settledBets, 'balance' => $balance], now()->addSeconds($ttlSeconds));
+                        Cache::put($cacheKey, [
+                            'bets' => $settledBets,
+                            'balance' => $balance,
+                            'active_bets' => $activeBets,
+                        ], now()->addSeconds($ttlSeconds));
                     }
                 } catch (Throwable) {
                     // non-blocking cache storage
@@ -1323,7 +1329,8 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 $timezone,
                 $params['days'],
                 $params['start_date'],
-                $params['end_date']
+                $params['end_date'],
+                $activeBets
             );
 
             $text = $this->formatBalanceChartMessage(
@@ -1432,7 +1439,8 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
     /**
      * @return array{
      *     bets: array<int, array<string, mixed>>,
-     *     balance: array{available: float, vault: float, total: float, active?: float}|null
+     *     balance: array{available: float, vault: float, total: float, active?: float}|null,
+     *     active_bets?: array<int, array<string, mixed>>
      * }
      */
     public function getSettledBetsAndBalanceForDays(int $days, string $timezone = 'Asia/Taipei'): array
@@ -1480,28 +1488,28 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                     }
                 }
             }
-        } catch (Throwable $e) {
-            Log::warning('Stake active bets fetch failed during sequential fallback.', [
-                'error' => $e->getMessage(),
-            ]);
+        } catch (Throwable) {
+            // non-blocking active bets fetch
         }
 
         if ($balance !== null) {
             $unsettledTotal = $this->calculateActiveBetsUsdtTotal($activeBets);
             $balance['active'] = $unsettledTotal;
-            $balance['total'] = $balance['available'] + $balance['vault'] + $unsettledTotal;
+            $balance['total'] = $balance['available'] + $balance['vault'];
         }
 
         return [
             'bets' => $settledBets,
             'balance' => $balance,
+            'active_bets' => $activeBets,
         ];
     }
 
     /**
      * @return array{
      *     bets: array<int, array<string, mixed>>,
-     *     balance: array{available: float, vault: float, total: float, active?: float}|null
+     *     balance: array{available: float, vault: float, total: float, active?: float}|null,
+     *     active_bets?: array<int, array<string, mixed>>
      * }|null
      */
     public function fetchBatchedBetsAndBalance(
@@ -1678,12 +1686,13 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         if ($balance !== null) {
             $unsettledTotal = $this->calculateActiveBetsUsdtTotal($activeBets);
             $balance['active'] = $unsettledTotal;
-            $balance['total'] = $balance['available'] + $balance['vault'] + $unsettledTotal;
+            $balance['total'] = $balance['available'] + $balance['vault'];
         }
 
         return [
             'bets' => $settledBets,
             'balance' => $balance,
+            'active_bets' => $activeBets,
         ];
     }
 
@@ -1829,8 +1838,13 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         string $timezone = 'Asia/Taipei',
         ?int $days = null,
         ?CarbonImmutable $startDate = null,
-        ?CarbonImmutable $endDate = null
+        ?CarbonImmutable $endDate = null,
+        array $activeBets = []
     ): array {
+        if ($activeBets === [] && isset($balance['active_bets']) && is_array($balance['active_bets'])) {
+            $activeBets = $balance['active_bets'];
+        }
+
         $standardizedBets = [];
         foreach ($settledBets as $bet) {
             $amount = (float) ($bet['amount'] ?? 0);
@@ -1911,15 +1925,67 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             return $a['settled_timestamp'] <=> $b['settled_timestamp'];
         });
 
+        // 整理未結盤（進行中）注單本金與下注時間點
+        $activeItems = [];
+        foreach ($activeBets as $bet) {
+            if (! is_array($bet)) {
+                continue;
+            }
+            $currency = mb_strtolower((string) ($bet['currency'] ?? 'usdt'));
+            if ($currency !== 'usdt') {
+                continue;
+            }
+            $amt = (float) ($bet['activeAmount'] ?? ($bet['amount'] ?? 0));
+            if ($amt <= 0.000001) {
+                continue;
+            }
+            $createdAtStr = (string) ($bet['createdAt'] ?? '');
+            $createdTime = $createdAtStr !== ''
+                ? CarbonImmutable::parse($createdAtStr)->setTimezone($timezone)
+                : null;
+
+            $activeItems[] = [
+                'id' => (string) ($bet['id'] ?? ''),
+                'amount' => $amt,
+                'created_timestamp' => $createdTime?->getTimestamp() ?? 0,
+                'created_at' => $createdTime,
+                'bet' => $bet,
+            ];
+        }
+
         $count = count($standardizedBets);
         $currentTotal = $balance !== null ? (float) ($balance['total'] ?? 0.0) : null;
 
+        $lastSettledTimestamp = $count > 0 ? $standardizedBets[$count - 1]['settled_timestamp'] : 0;
+        $activeAfterLastTotal = 0.0;
+        $activeAfterLastBets = [];
+        if ($count > 0) {
+            foreach ($activeItems as $item) {
+                if ($item['created_timestamp'] > $lastSettledTimestamp) {
+                    $activeAfterLastTotal += $item['amount'];
+                    $activeAfterLastBets[] = $item;
+                }
+            }
+        }
+
         $balances = [];
         if ($currentTotal !== null) {
-            $running = $currentTotal;
+            // 若最後一筆結盤之後有進行中投注，代表結盤當下該投注金尚未扣除；
+            // 若進行中投注在最後一筆結盤前就已下注扣款，結盤當下水位即為扣除後的水位，不可灌水加回。
+            $running = $currentTotal + $activeAfterLastTotal;
             for ($i = $count - 1; $i >= 0; $i--) {
                 $balances[$i] = $running;
                 $running -= $standardizedBets[$i]['profit'];
+
+                if ($i > 0) {
+                    $prevSettledTimestamp = $standardizedBets[$i - 1]['settled_timestamp'];
+                    $currSettledTimestamp = $standardizedBets[$i]['settled_timestamp'];
+                    foreach ($activeItems as $item) {
+                        if ($item['created_timestamp'] > $prevSettledTimestamp && $item['created_timestamp'] <= $currSettledTimestamp) {
+                            $running += $item['amount'];
+                        }
+                    }
+                }
             }
             $startBalance = $running;
             $currentBalance = $currentTotal;
@@ -1971,6 +2037,56 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 'balance_formatted' => $this->formatBalanceAmount($b),
                 'profit_formatted' => $profitFormatted,
             ]);
+        }
+
+        // 若最後一筆結盤之後有進行中的下注，在長條圖尾端追加一根「待結算」長條圖，
+        // 清楚呈現當前扣掉待結算訂單後的真正水位
+        if ($activeAfterLastTotal > 0.0 && $currentBalance !== null) {
+            if ($currentBalance > $maxWatermark) {
+                $maxWatermark = $currentBalance;
+            }
+            if ($currentBalance < $minWatermark) {
+                $minWatermark = $currentBalance;
+            }
+
+            $lastActiveTime = null;
+            foreach ($activeAfterLastBets as $aItem) {
+                if ($aItem['created_at'] !== null) {
+                    if ($lastActiveTime === null || $aItem['created_at']->greaterThan($lastActiveTime)) {
+                        $lastActiveTime = $aItem['created_at'];
+                    }
+                }
+            }
+            $activeTimeStr = $lastActiveTime ? $lastActiveTime->format('H:i') : '當前';
+            $activeDateStr = $lastActiveTime ? $lastActiveTime->format('m/d') : CarbonImmutable::now($timezone)->format('m/d');
+            $activeDateTimeStr = $lastActiveTime ? $lastActiveTime->format('m/d H:i') : CarbonImmutable::now($timezone)->format('m/d H:i');
+            $activeCount = count($activeAfterLastBets);
+
+            $bars[] = [
+                'id' => 'active-unsettled-summary',
+                'iid' => '#進行中',
+                'amount' => $activeAfterLastTotal,
+                'payout' => 0.0,
+                'profit' => -$activeAfterLastTotal,
+                'currency' => 'USDT',
+                'potential_multiplier' => 1.0,
+                'status' => 'pending',
+                'status_label' => '進行中',
+                'is_parlay' => false,
+                'leg_count' => 1,
+                'settled_at' => $activeDateTimeStr,
+                'settled_date' => $activeDateStr,
+                'settled_ymd' => $lastActiveTime ? $lastActiveTime->format('Y-m-d') : CarbonImmutable::now($timezone)->format('Y-m-d'),
+                'settled_time' => $activeTimeStr,
+                'settled_timestamp' => $lastActiveTime?->getTimestamp() ?? CarbonImmutable::now($timezone)->getTimestamp(),
+                'sport_name' => '待結算',
+                'match_name' => $activeCount > 1 ? "{$activeCount} 筆待結算" : '待結算注單',
+                'index' => count($bars) + 1,
+                'index_label' => '待結',
+                'balance' => $currentBalance,
+                'balance_formatted' => $this->formatBalanceAmount($currentBalance),
+                'profit_formatted' => '-'.$this->formatBalanceAmount($activeAfterLastTotal),
+            ];
         }
 
         $decided = $wonCount + $lostCount;
@@ -2257,7 +2373,11 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 $lines[] = sprintf('近 %d 天內查無結盤之體育注單。', $days);
             } else {
                 $lines[] = '';
-                $lines[] = sprintf('【📊 結盤水位明細（共 %d 筆）】', count($bars));
+                $settledCount = count(array_filter($bars, fn (array $b): bool => ($b['status'] ?? '') !== 'pending'));
+                $hasPending = count($bars) > $settledCount;
+                $lines[] = $hasPending
+                    ? sprintf('【📊 結盤水位明細（共 %d 筆，含 1 筆待結算）】', count($bars))
+                    : sprintf('【📊 結盤水位明細（共 %d 筆）】', count($bars));
 
                 $displayBars = array_slice($bars, -20);
                 if (count($bars) > 20) {
@@ -2265,34 +2385,48 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 }
 
                 foreach ($displayBars as $b) {
-                    $statusEmoji = match ($b['status']) {
+                    $statusEmoji = match ($b['status'] ?? '') {
                         'won' => '🏆',
                         'lost' => '❌',
                         'cashout' => '💰',
                         'void' => '⚪',
+                        'pending' => '⏳',
                         default => '⏳',
                     };
-                    $iidStr = $b['iid'] !== '' ? "｜{$b['iid']}" : '';
+                    $iidStr = ($b['iid'] ?? '') !== '' ? "｜{$b['iid']}" : '';
                     $lines[] = sprintf(
-                        '%d. %s%s',
-                        $b['index'],
+                        '%s. %s%s',
+                        $b['index_label'] ?? (string) $b['index'],
                         $b['settled_at'],
                         $iidStr
                     );
-                    $sportTag = $b['sport_name'] !== '' ? "【{$b['sport_name']}】" : '';
-                    if ($b['match_name'] !== '') {
+                    $sportTag = ($b['sport_name'] ?? '') !== '' ? "【{$b['sport_name']}】" : '';
+                    if (($b['match_name'] ?? '') !== '') {
                         $lines[] = "   賽事：{$sportTag}{$b['match_name']}";
                     }
-                    $lines[] = sprintf(
-                        '   結果：%s %s（%s USDT）',
-                        $b['status_label'],
-                        $statusEmoji,
-                        $b['profit_formatted']
-                    );
-                    $lines[] = sprintf(
-                        '   結盤後水位：%s USDT',
-                        $b['balance_formatted']
-                    );
+                    if (($b['status'] ?? '') === 'pending') {
+                        $lines[] = sprintf(
+                            '   狀態：%s %s（%s USDT）',
+                            $b['status_label'] ?? '進行中',
+                            $statusEmoji,
+                            $b['profit_formatted']
+                        );
+                        $lines[] = sprintf(
+                            '   當前水位：%s USDT',
+                            $b['balance_formatted']
+                        );
+                    } else {
+                        $lines[] = sprintf(
+                            '   結果：%s %s（%s USDT）',
+                            $b['status_label'],
+                            $statusEmoji,
+                            $b['profit_formatted']
+                        );
+                        $lines[] = sprintf(
+                            '   結盤後水位：%s USDT',
+                            $b['balance_formatted']
+                        );
+                    }
                 }
             }
         }
@@ -3508,17 +3642,31 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         $hasVault = ($balance['vault'] ?? 0.0) >= 0.0001;
         $hasActive = ($balance['active'] ?? 0.0) >= 0.0001;
 
-        if ($hasVault || $hasActive) {
-            $parts = [];
-            if ($hasActive) {
-                $parts[] = '未結盤：'.$this->formatBalanceAmount($balance['active']).' USDT';
-            }
-            if ($hasVault) {
-                $parts[] = '金庫：'.$this->formatBalanceAmount($balance['vault']).' USDT';
-            }
-            $parts[] = '總計：'.$this->formatBalanceAmount($balance['total']).' USDT';
+        if ($hasVault && $hasActive) {
+            return sprintf(
+                '可用：%s USDT（未結盤：%s USDT / 金庫：%s USDT / 總計：%s USDT）',
+                $availStr,
+                $this->formatBalanceAmount($balance['active']),
+                $this->formatBalanceAmount($balance['vault']),
+                $this->formatBalanceAmount($balance['total'])
+            );
+        }
 
-            return sprintf('可用：%s USDT（%s）', $availStr, implode(' / ', $parts));
+        if ($hasActive) {
+            return sprintf(
+                '可用：%s USDT（未結盤：%s USDT）',
+                $availStr,
+                $this->formatBalanceAmount($balance['active'])
+            );
+        }
+
+        if ($hasVault) {
+            return sprintf(
+                '可用：%s USDT（金庫：%s USDT / 總計：%s USDT）',
+                $availStr,
+                $this->formatBalanceAmount($balance['vault']),
+                $this->formatBalanceAmount($balance['total'])
+            );
         }
 
         return sprintf('可用：%s USDT', $availStr);
@@ -3533,17 +3681,17 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         $hasVault = ($balance['vault'] ?? 0.0) >= 0.0001;
         $hasActive = ($balance['active'] ?? 0.0) >= 0.0001;
 
+        if ($hasActive && $hasVault) {
+            $activeStr = $this->formatBalanceAmount($balance['active']);
+            $vaultStr = $this->formatBalanceAmount($balance['vault']);
+
+            return sprintf('%s USDT（未結 %s / 金庫 %s）', $availStr, $activeStr, $vaultStr);
+        }
+
         if ($hasActive) {
             $activeStr = $this->formatBalanceAmount($balance['active']);
-            $totalStr = $this->formatBalanceAmount($balance['total']);
 
-            if ($hasVault) {
-                $vaultStr = $this->formatBalanceAmount($balance['vault']);
-
-                return sprintf('%s USDT（未結 %s / 金庫 %s）', $totalStr, $activeStr, $vaultStr);
-            }
-
-            return sprintf('%s USDT（未結 %s）', $totalStr, $activeStr);
+            return sprintf('%s USDT（未結 %s）', $availStr, $activeStr);
         }
 
         if ($hasVault) {
