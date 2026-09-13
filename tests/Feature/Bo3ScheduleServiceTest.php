@@ -5,10 +5,74 @@ namespace Tests\Feature;
 use App\Services\Bo3ScheduleService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class Bo3ScheduleServiceTest extends TestCase
 {
+    public function test_api_metadata_fills_missing_format_without_an_extra_match_detail_request(): void
+    {
+        config([
+            'services.bo3.base_url' => 'https://bo3.gg',
+            'services.bo3.api_url' => 'https://api.bo3.gg/api/v1',
+            'services.bo3.timezone' => 'Asia/Taipei',
+        ]);
+        Http::preventStrayRequests();
+        $event = [
+            '@type' => 'SportsEvent',
+            'name' => 'Cloud9 vs Fluxo W7M',
+            'url' => 'https://bo3.gg/valorant/matches/cloud9-vs-fluxo',
+            'startDate' => '2026-08-15T00:00:00+00:00',
+        ];
+        Http::fake([
+            'https://bo3.gg/valorant/matches/current*' => Http::response('<html><script id="micro-markup">'
+                .json_encode([$event], JSON_THROW_ON_ERROR).'</script></html>'),
+            'https://api.bo3.gg/api/v1/matches?*' => Http::response(['results' => [
+                $this->valorantApiMatch('cloud9-vs-fluxo', $event['startDate'], 'Cloud9', 'Fluxo W7M', 'VCT Americas'),
+                $this->valorantApiMatch('midnight', '2026-08-14T16:00:00+00:00', 'Midnight', 'Opponent', 'VCT Americas'),
+                $this->valorantApiMatch('next-day', '2026-08-15T16:00:00+00:00', 'Next day', 'Opponent', 'VCT Americas'),
+            ]]),
+        ]);
+
+        $matches = app(Bo3ScheduleService::class)->forDate('valorant', CarbonImmutable::parse('2026-08-15', 'Asia/Taipei'), ['s']);
+
+        $this->assertCount(2, $matches);
+        $this->assertSame(['Midnight', 'Cloud9'], array_column($matches, 'team1'));
+        $this->assertSame('BO3', $matches[1]['format']);
+        $this->assertSame('VCT Americas', $matches[1]['tournament']);
+        Http::assertSentCount(2);
+    }
+
+    #[DataProvider('apiFailures')]
+    public function test_failed_pooled_api_request_keeps_the_html_schedule(string $failure): void
+    {
+        config([
+            'services.bo3.base_url' => 'https://bo3.gg',
+            'services.bo3.api_url' => 'https://api.bo3.gg/api/v1',
+            'services.bo3.timezone' => 'Asia/Taipei',
+        ]);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://bo3.gg/valorant/matches/current*' => Http::response($this->valorantIncompleteScheduleHtml()),
+            'https://api.bo3.gg/api/v1/matches?*' => $failure === 'connection'
+                ? Http::failedConnection()
+                : Http::response([], 503),
+        ]);
+
+        $matches = app(Bo3ScheduleService::class)->forDate('valorant', CarbonImmutable::parse('2026-08-15', 'Asia/Taipei'), ['s']);
+
+        $this->assertCount(1, $matches);
+        $this->assertSame('Cloud9', $matches[0]['team1']);
+    }
+
+    public static function apiFailures(): array
+    {
+        return [
+            'unavailable API' => ['http'],
+            'connection failure' => ['connection'],
+        ];
+    }
+
     public function test_valorant_schedule_merges_the_complete_local_day_from_the_api(): void
     {
         config([

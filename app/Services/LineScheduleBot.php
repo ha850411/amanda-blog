@@ -77,25 +77,16 @@ class LineScheduleBot
             return null;
         }
 
-        $allMatches = [];
-
         try {
-            $currentDate = $command['start_date'];
-            while ($currentDate->lessThanOrEqualTo($command['end_date'])) {
-                foreach ($command['games'] as $game) {
-                    $gameMatches = $this->schedules->forDate(
-                        $game,
-                        $currentDate,
-                        $command['tiers'],
-                    );
+            $allMatches = $this->schedules->forRange(
+                $command['games'],
+                $command['start_date'],
+                $command['end_date'],
+                $command['tiers'],
+            );
 
-                    foreach ($gameMatches as $match) {
-                        $match['game'] = $game;
-                        $match['game_label'] = self::GAME_LABELS[$game] ?? mb_strtoupper($game);
-                        $allMatches[] = $match;
-                    }
-                }
-                $currentDate = $currentDate->addDay();
+            foreach ($allMatches as $index => $match) {
+                $allMatches[$index]['game_label'] = self::GAME_LABELS[$match['game']] ?? mb_strtoupper($match['game']);
             }
         } catch (Throwable $exception) {
             report($exception);
@@ -114,6 +105,7 @@ class LineScheduleBot
             && $command['end_date']->greaterThanOrEqualTo($now->startOfDay());
 
         if ($includesToday) {
+            $allMatches = $this->schedules->enrichLiveDetailsAndMissingFormats($allMatches);
             $allMatches = $this->liveScores->enrich($allMatches);
 
             $allMatches = array_values(array_filter(
@@ -187,6 +179,9 @@ class LineScheduleBot
         }
 
         $visibleMatches = array_slice($allMatches, 0, $command['limit']);
+        if (! $includesToday) {
+            $visibleMatches = $this->schedules->enrichLiveDetailsAndMissingFormats($visibleMatches);
+        }
         $visibleMatches = $this->headToHead->enrich($visibleMatches);
         $visibleMatches = $this->odds->enrich(
             $visibleMatches,
