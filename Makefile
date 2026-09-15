@@ -17,7 +17,7 @@ RUNTIME_REGISTRY_IMAGE ?= ghcr.io/ha850411/amanda-blog-runtime
 # Amazon Linux EC2 預設以 x86_64 發布；Graviton 使用者可覆寫為 linux/arm64。
 # 多架構發布必須使用已配置原生 nodes 或可靠 binfmt/QEMU 的 builder。
 RUNTIME_PLATFORMS ?= linux/amd64
-PHP_IMAGE ?= php:8.4-fpm-bookworm@sha256:c5fb7a0c02f4efe280691910c8b734995fa83598cdcf3115ef5dcb2e4617681c
+PHP_IMAGE ?= php:8.4-fpm-trixie@sha256:59fa733c9af643a122f8a9976119460e35ce76dd0a3f2b9c8f75af8e361a54e2
 COMPOSER_IMAGE ?= composer:2@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244481723664138fd36d5040
 
 # Runtime tags are derived from every input that affects the runtime image.

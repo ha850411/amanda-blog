@@ -41,6 +41,10 @@
 
 # Runtime image
 
+PHP 8.4 runtime 使用固定 digest 的 Debian Trixie base image，採用 OpenSSL 3.5。Stake API 的實測中，相同代理、Token、HTTP/1.1 與 request 在舊 Bookworm／OpenSSL 3.0 runtime 回傳 403，Trixie runtime 則回傳 HTTP 200 與有效 GraphQL 資料；此結果不代表所有 403 都由 TLS 環境造成。TLS 更新不需要新增 Cookie 或關閉憑證驗證。
+
+此修改必須重建 runtime image，並讓 `service`、`queue`、`scheduler` 重新建立容器後才會生效；只重啟 queue worker 不會更新底層 TLS 函式庫。若環境有覆寫 `PHP_IMAGE`，請同步改用 `.docker/Dockerfile` 內的 Trixie image。
+
 透過 `make deploy-up` 部署時，Runtime image tag 會依 `.docker/Dockerfile`、PHP base image 與 Composer base image自動產生；相同建置內容會沿用既有 image，建置內容有變更時則會自動使用新 tag。可執行 `make runtime-tag` 查看目前 tag，不需在 `.env` 手動維護 `RUNTIME_IMAGE_TAG`。
 
 CI 必須從 secret store 注入 `GHCR_TOKEN`（GitHub classic PAT，具備 `write:packages`），不得將 token 寫入 repository 或 `.env`。`make deploy-up` 會先登入 GHCR，檢查 fingerprint image 是否存在；不存在時才建置並推送至 `ghcr.io/ha850411/amanda-blog-runtime`，同時將 BuildKit layer cache 保存於 `buildcache-php8.4` tag，完成後才啟動新容器。

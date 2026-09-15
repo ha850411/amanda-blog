@@ -2,7 +2,8 @@
 
 # Pin the upstream manifests so rebuilding the same runtime definition is
 # reproducible. The Makefile includes these values in the generated image tag.
-ARG PHP_IMAGE=php:8.4-fpm-bookworm@sha256:c5fb7a0c02f4efe280691910c8b734995fa83598cdcf3115ef5dcb2e4617681c
+# Trixie supplies the OpenSSL 3.5 TLS stack verified with Stake's GraphQL API.
+ARG PHP_IMAGE=php:8.4-fpm-trixie@sha256:59fa733c9af643a122f8a9976119460e35ce76dd0a3f2b9c8f75af8e361a54e2
 ARG COMPOSER_IMAGE=composer:2@sha256:4d71c3c2109c61d5415544264b59ad4087e4c5b7244481723664138fd36d5040
 
 FROM ${COMPOSER_IMAGE} AS composer
