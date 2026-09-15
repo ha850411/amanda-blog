@@ -45,7 +45,9 @@ PHP 8.4 runtime 使用固定 digest 的 Debian Trixie base image，採用 OpenSS
 
 此修改必須重建 runtime image，並讓 `service`、`queue`、`scheduler` 重新建立容器後才會生效；只重啟 queue worker 不會更新底層 TLS 函式庫。若環境有覆寫 `PHP_IMAGE`，請同步改用 `.docker/Dockerfile` 內的 Trixie image。
 
-透過 `make deploy-up` 部署時，Runtime image tag 會依 `.docker/Dockerfile`、PHP base image 與 Composer base image自動產生；相同建置內容會沿用既有 image，建置內容有變更時則會自動使用新 tag。可執行 `make runtime-tag` 查看目前 tag，不需在 `.env` 手動維護 `RUNTIME_IMAGE_TAG`。
+目前正式部署的 EC2 與線上 PHP image 都是 ARM64，因此 `RUNTIME_PLATFORMS` 預設為 `linux/arm64`。建置架構應以最終部署主機為準；若改部署到 x86_64 主機，請在 Jenkins 環境設定 `RUNTIME_PLATFORMS=linux/amd64`，讓 `make runtime-tag` 與後續建置使用相同架構。
+
+透過 `make deploy-up` 部署時，Runtime image tag 會依 `.docker/Dockerfile`、PHP base image、Composer base image 與 `RUNTIME_PLATFORMS` 自動產生；相同建置內容會沿用既有 image，建置內容有變更時則會自動使用新 tag。可執行 `make runtime-tag` 查看目前 tag，不需在 `.env` 手動維護 `RUNTIME_IMAGE_TAG`。
 
 CI 必須從 secret store 注入 `GHCR_TOKEN`（GitHub classic PAT，具備 `write:packages`），不得將 token 寫入 repository 或 `.env`。`make deploy-up` 會先登入 GHCR，檢查 fingerprint image 是否存在；不存在時才建置並推送至 `ghcr.io/ha850411/amanda-blog-runtime`，同時將 BuildKit layer cache 保存於 `buildcache-php8.4` tag，完成後才啟動新容器。
 
