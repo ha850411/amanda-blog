@@ -82,6 +82,8 @@ return [
         'api_url' => env('STAKE_API_URL', 'https://stake.com/_api/graphql'),
         'timeout_seconds' => (int) env('STAKE_TIMEOUT_SECONDS', 10),
         'cache_seconds' => (int) env('STAKE_CACHE_SECONDS', 0),
+        'max_retries' => (int) env('STAKE_MAX_RETRIES', env('STAKE_RETRY_TIMES', 3)),
+        'retry_delay_ms' => (int) env('STAKE_RETRY_DELAY_MS', 100),
         'language' => env('STAKE_LANGUAGE', 'zh'),
         'proxy' => env('STAKE_PROXY'),
         'user_agent' => env('STAKE_USER_AGENT'),

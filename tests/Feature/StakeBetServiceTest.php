@@ -175,6 +175,60 @@ class StakeBetServiceTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!bet');
         $this->assertNotNull($reply);
         $this->assertStringContainsString('Stake API 存取受限', $reply->text);
+        Http::assertSentCount(4);
+    }
+
+    public function test_bet_command_retries_on_403_and_succeeds_on_subsequent_attempt(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::sequence()
+                ->push(['message' => 'Forbidden'], 403)
+                ->push(['message' => 'Forbidden'], 403)
+                ->push([
+                    'data' => [
+                        'user' => [
+                            'activeSportBetCount' => 0,
+                            'activeSwishBetCount' => 0,
+                            'activeRacingBetCount' => 0,
+                            'activeSportsbookXMultiBetCount' => 0,
+                        ],
+                    ],
+                ], 200)
+                ->push($this->sampleUserBalancesResponse(), 200),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('目前無進行中的 Stake 體育注單。', $reply->text);
+        // 3 attempts for count query (2 retries) + 1 attempt for balance query = 4 total requests
+        Http::assertSentCount(4);
+    }
+
+    public function test_bet_command_respects_custom_max_retries_config(): void
+    {
+        config(['services.stake.max_retries' => 1]);
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::response(['message' => 'Forbidden'], 403),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('Stake API 存取受限', $reply->text);
+        // 1 initial attempt + 1 retry = 2 attempts
+        Http::assertSentCount(2);
+    }
+
+    public function test_bet_command_does_not_retry_on_401(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::response(['message' => 'Unauthorized'], 401),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('Stake 認證失敗', $reply->text);
+        Http::assertSentCount(1);
     }
 
     public function test_bet_command_handles_451_legal_reasons(): void
@@ -186,6 +240,7 @@ class StakeBetServiceTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!bet');
         $this->assertNotNull($reply);
         $this->assertStringContainsString('區域限制 HTTP 451', $reply->text);
+        Http::assertSentCount(1);
     }
 
     public function test_bet_command_handles_500_server_error(): void

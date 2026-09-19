@@ -3225,6 +3225,49 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             $request = $request->withOptions(['proxy' => $proxy]);
         }
 
+        $maxRetries = (int) (config('services.stake.max_retries') ?? config('services.stake.retry_times') ?? 3);
+        $retryDelayMs = (int) config('services.stake.retry_delay_ms', 100);
+
+        if ($maxRetries > 0) {
+            $attempt = 0;
+            $request = $request->retry(
+                $maxRetries + 1,
+                $retryDelayMs,
+                function (Throwable $exception) use ($operationName, $maxRetries, &$attempt): bool {
+                    $attempt++;
+
+                    if ($exception instanceof RequestException && $exception->response) {
+                        $status = $exception->response->status();
+                        if (in_array($status, [400, 401, 451], true)) {
+                            return false;
+                        }
+
+                        if ($attempt <= $maxRetries) {
+                            Log::warning('Stake API request failed, retrying...', [
+                                'operation' => $operationName,
+                                'status' => $status,
+                                'attempt' => $attempt,
+                                'max_retries' => $maxRetries,
+                            ]);
+                        }
+
+                        return true;
+                    }
+
+                    if ($attempt <= $maxRetries) {
+                        Log::warning('Stake API connection failed, retrying...', [
+                            'operation' => $operationName,
+                            'attempt' => $attempt,
+                            'max_retries' => $maxRetries,
+                            'error' => $exception->getMessage(),
+                        ]);
+                    }
+
+                    return true;
+                }
+            );
+        }
+
         $payload = [
             'query' => $query,
             'variables' => $variables === [] ? (object) [] : $variables,
