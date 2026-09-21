@@ -8,6 +8,7 @@
         </div>
         <p style="white-space: pre-line">@{{ base.about.data?.description || '' }}</p>
     </div>
+    @include('layouts.ad-unit', ['placement' => 'sidebar'])
     <div class="new_article text-left">
         <h5 class="text-white bg-dark bg-gradient rounded-1 title text-center p-2 my-4">
             最新文章

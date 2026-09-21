@@ -135,6 +135,9 @@
                 ]).then(() => {
                     this.base.inital = true;
                     document.body.classList.remove('page-loading');
+                    this.$nextTick(() => {
+                        document.dispatchEvent(new Event('amanda:content-ready'));
+                    });
                 });
                 this.addVisit();
             },

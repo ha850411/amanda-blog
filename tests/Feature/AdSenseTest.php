@@ -56,6 +56,47 @@ class AdSenseTest extends TestCase
             ->assertContent('google.com, '.self::PUBLISHER_ID.", DIRECT, f08c47fec0942fa0\n");
     }
 
+    public function test_public_article_has_only_the_two_fixed_slots_outside_its_content(): void
+    {
+        $article = Article::factory()->create(['status' => 1]);
+        config()->set('adsense.slots.article_end', '1111111111');
+        config()->set('adsense.slots.sidebar', '2222222222');
+
+        $response = $this->get('/article/'.$article->id)->assertOk();
+        $document = new \DOMDocument;
+        @$document->loadHTML($response->getContent());
+        $xpath = new \DOMXPath($document);
+
+        $this->assertSame(2, $xpath->query('//ins[@data-ad-slot]')->length);
+        $this->assertSame(1, $xpath->query('//aside[contains(@class, "manual-ad--article_end")]/ins[@data-ad-slot="1111111111"]')->length);
+        $this->assertSame(1, $xpath->query('//aside[contains(@class, "manual-ad--sidebar")]/ins[@data-ad-slot="2222222222"]')->length);
+        $this->assertSame(0, $xpath->query('//div[contains(@class, "article-content")]//ins')->length);
+        $this->assertSame(0, $xpath->query('//div[contains(@class, "loading-page")]//ins')->length);
+        $response->assertSee('amanda:content-ready', false);
+    }
+
+    public function test_listing_pages_only_have_the_sidebar_slot(): void
+    {
+        $tag = Tag::factory()->create();
+        foreach (['/', '/tag/'.$tag->id] as $url) {
+            $response = $this->get($url)->assertOk();
+            $response->assertSee('manual-ad--sidebar', false)
+                ->assertDontSee('<aside class="manual-ad manual-ad--article_end"', false);
+        }
+    }
+
+    public function test_disabled_ads_and_invalid_slot_ids_do_not_render_units(): void
+    {
+        $article = Article::factory()->create(['status' => 1]);
+        config()->set('adsense.enabled', false);
+        $this->get('/article/'.$article->id)->assertDontSee('data-ad-slot=', false);
+
+        config()->set('adsense.enabled', true);
+        config()->set('adsense.slots.article_end', 'invalid');
+        config()->set('adsense.slots.sidebar', '');
+        $this->get('/article/'.$article->id)->assertDontSee('data-ad-slot=', false);
+    }
+
     public function test_client_id_format_is_normalized_for_ads_txt(): void
     {
         config()->set('adsense.publisher_id', ' ca-'.self::PUBLISHER_ID.' ');
@@ -94,7 +135,9 @@ class AdSenseTest extends TestCase
         $hidden = Article::factory()->create(['status' => 0]);
 
         foreach (['/article/'.$protected->id, '/article/'.$hidden->id, '/privacy', '/admin/login'] as $url) {
-            $this->get($url)->assertOk()->assertDontSee('adsbygoogle.js', false);
+            $this->get($url)->assertOk()
+                ->assertDontSee('adsbygoogle.js', false)
+                ->assertDontSee('data-ad-slot=', false);
         }
 
         $this->get('/article/999999')->assertNotFound()->assertDontSee('adsbygoogle.js', false);

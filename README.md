@@ -41,7 +41,7 @@
 
 # Google AdSense 廣告收益
 
-網站透過 Google AdSense 放送廣告。網站端已提供帳戶驗證 meta tag、`/ads.txt` 與自動廣告程式碼；實際帳戶啟用、網站審查、自動廣告及收款資料仍需在 AdSense 後台完成。
+網站透過 Google AdSense 的手動廣告單元放送廣告。網站端提供帳戶驗證 meta tag、`/ads.txt` 與固定版位；實際帳戶啟用、網站審查及收款資料仍需在 AdSense 後台完成。
 
 ## 1. 設定發布商 ID 並部署
 
@@ -70,9 +70,22 @@ docker compose exec -T service php artisan view:clear
 
 隱私權頁面已說明現有 IP／日期統計、工作階段 Cookie、Google Tag Manager 及廣告資料使用，聯絡信箱沿用網站公開的 `summer.hung222@gmail.com`。上線時應確認 AdSense 的廣告技術供應商、GTM 標籤、資料使用方式與政策內容一致。
 
-## 3. 啟用自動廣告與收款
+## 3. 固定版位與收款
 
-在 AdSense「廣告」為網站啟用自動廣告並套用設定，並完成隱私訊息設定。正式環境預設已啟用程式碼；若 `.env` 有覆寫，請確認 `ADSENSE_ENABLED=true` 並重新執行 `config:cache`。本機開發請保留 `.env.example` 的 `ADSENSE_ENABLED=false`。程式碼會在首頁、分類及公開文章的 `<head>` 各載入一次；密碼保護文章、隱藏文章、後台、錯誤頁及隱私權頁不載入廣告程式碼。
+AdSense「廣告」中，本站的**自動廣告與自動最佳化均應關閉**，以免 Google 加入浮動、全螢幕或額外內文廣告。保留已發布的隱私同意訊息。正式環境預設已啟用程式碼；若 `.env` 有覆寫，請確認 `ADSENSE_ENABLED=true` 並重新執行 `config:cache`。本機開發請保留 `.env.example` 的 `ADSENSE_ENABLED=false`。
+
+固定版位：
+
+| 位置 | AdSense 單元 ID | 顯示條件 |
+| --- | --- | --- |
+| 公開文章結尾 | `2872372580` | 手機與桌機，隨頁面捲動；手機高度 100px、平板／桌機 90px |
+|「關於我」下方 | `3189348618` | 首頁、分類與公開文章；僅螢幕寬度至少 992px，250px 高 |
+
+可使用 `ADSENSE_ARTICLE_END_SLOT`、`ADSENSE_SIDEBAR_SLOT` 覆寫單元 ID。空白或無效 ID 不會輸出版位。共用 loader 在 Vue 完成內容掛載後依 DOM 順序請求廣告，跳過隱藏的手機側欄，且每個單元只請求一次；已明確回報無廣告的版位會收合。版位不使用 fixed／sticky，不覆蓋文章內容。
+
+廣告程式碼會在首頁、分類及公開文章的 `<head>` 各載入一次；密碼保護文章、隱藏文章、後台、錯誤頁及隱私權頁不載入廣告程式碼或單元。
+
+檢查版位與初始化行為：`php artisan test --filter=AdSenseTest`、`node --test tests/Frontend/adsense.test.cjs`。
 
 網站通過 Google 審查且帳戶啟用後才會開始放送廣告。付款資料、身分／地址驗證、稅務資訊與付款方式，依 AdSense 後台顯示的要求由帳戶持有人完成。放上程式碼本身不代表審查通過或已可領款。
 

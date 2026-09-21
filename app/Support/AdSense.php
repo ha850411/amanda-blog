@@ -26,4 +26,15 @@ class AdSense
     {
         return (bool) config('adsense.enabled', false) && $this->publisherId() !== null;
     }
+
+    public function slotId(string $placement): ?string
+    {
+        if (! in_array($placement, ['article_end', 'sidebar'], true)) {
+            return null;
+        }
+
+        $value = trim((string) config('adsense.slots.'.$placement, ''));
+
+        return preg_match('/\A[0-9]{10}\z/', $value) ? $value : null;
+    }
 }

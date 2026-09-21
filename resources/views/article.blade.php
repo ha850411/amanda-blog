@@ -97,6 +97,7 @@
                         </template>
                         <div v-else class="article-content ck-content" v-html="article.content"></div>
                     </div>
+                    @include('layouts.ad-unit', ['placement' => 'article_end'])
                 </div>
                 {{-- 關於我、最新文章、文章分類、網站瀏覽 --}}
                 @include('layouts/about')
