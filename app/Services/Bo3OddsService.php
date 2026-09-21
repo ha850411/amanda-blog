@@ -4,7 +4,6 @@ namespace App\Services;
 
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -26,6 +25,7 @@ class Bo3OddsService
 
         $candidates = [];
         $slugs = [];
+        $knownDetails = [];
 
         foreach ($matches as $index => $match) {
             if (($match['odds'] ?? null) !== null) {
@@ -39,9 +39,12 @@ class Bo3OddsService
             }
 
             $slugs[$index] = $slug;
+            if (array_key_exists('bet_updates', $match['bo3_detail'] ?? [])) {
+                $knownDetails[$slug] = $match['bo3_detail'];
+            }
         }
 
-        $details = $this->matchDetails(array_values(array_unique($slugs)));
+        $details = $knownDetails + $this->matchDetails(array_values(array_diff(array_unique($slugs), array_keys($knownDetails))));
 
         foreach ($slugs as $index => $slug) {
             $candidate = $this->moneyline($matches[$index], $details[$slug] ?? []);
@@ -84,23 +87,7 @@ class Bo3OddsService
     private function matchDetails(array $slugs): array
     {
         $details = [];
-        $missing = [];
-
-        foreach ($slugs as $slug) {
-            try {
-                $cached = Cache::get('bo3-odds:match:'.$slug);
-
-                if (is_array($cached)) {
-                    $details[$slug] = $cached;
-
-                    continue;
-                }
-            } catch (Throwable) {
-                // Cache is optional for this fallback.
-            }
-
-            $missing[] = $slug;
-        }
+        $missing = $slugs;
 
         if ($missing === []) {
             return $details;
@@ -139,15 +126,6 @@ class Bo3OddsService
             $detail = is_array($detail) ? $detail : [];
             $details[$slug] = $detail;
 
-            try {
-                Cache::put(
-                    'bo3-odds:match:'.$slug,
-                    $detail,
-                    (int) config('services.odds.cache_seconds', 60),
-                );
-            } catch (Throwable) {
-                // Cache is optional for this fallback.
-            }
         }
 
         return $details;
@@ -195,18 +173,6 @@ class Bo3OddsService
     /** @return array<int, string> */
     private function providerNames(): array
     {
-        $cacheKey = 'bo3-odds:providers';
-
-        try {
-            $cached = Cache::get($cacheKey);
-
-            if (is_array($cached)) {
-                return $cached;
-            }
-        } catch (Throwable) {
-            // Cache is optional for this fallback.
-        }
-
         try {
             $response = Http::acceptJson()
                 ->withUserAgent('AmandaBlogLineBot/1.0')
@@ -227,12 +193,6 @@ class Bo3OddsService
                     (int) $provider['id'] => trim($provider['name']),
                 ])
                 ->all();
-
-            try {
-                Cache::put($cacheKey, $providers, 3600);
-            } catch (Throwable) {
-                // Cache is optional for this fallback.
-            }
 
             return $providers;
         } catch (Throwable $exception) {

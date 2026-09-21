@@ -5,7 +5,6 @@ namespace App\Services;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -15,228 +14,168 @@ class Bo3HeadToHeadService
     private const LIMIT = 5;
 
     /**
-     * Add bo3.gg's latest head-to-head summary to supported matches.
-     * A missing or unavailable H2H response is optional and never removes a match.
-     *
-     * @param  array<int, array<string, mixed>>  $matches
-     * @return array<int, array<string, mixed>>
+     * Fetch H2H and each team's recent form in the same bounded HTTP pool.
+     * Reuse details and duplicate team queries only within this invocation;
+     * nothing is read from or written to persistent cache.
      */
     public function enrich(array $matches): array
     {
-        $slugs = [];
-
+        $missing = [];
         foreach ($matches as $index => $match) {
+            if (! in_array($match['game'] ?? null, ['lol', 'valorant', 'cs', 'cs2'], true)) {
+                $matches[$index]['h2h'] ??= null;
+
+                continue;
+            }
             $matches[$index]['h2h'] = null;
-
-            if (! in_array(($match['game'] ?? null), ['lol', 'valorant', 'cs', 'cs2'], true)) {
+            $matches[$index]['recent_form'] = ['team1' => null, 'team2' => null];
+            $detail = (array) ($match['bo3_detail'] ?? []) + $match;
+            if ($this->positiveInt($detail['team1_id'] ?? null) !== null
+                && $this->positiveInt($detail['team2_id'] ?? null) !== null
+                && $this->positiveInt($detail['discipline_id'] ?? null) !== null) {
                 continue;
             }
-
             $slug = $this->matchSlug((string) ($match['url'] ?? ''));
-
-            if ($slug !== null) {
-                $slugs[$index] = $slug;
+            if ($slug !== null && ! array_key_exists('bo3_detail', $match)) {
+                $missing[$slug][] = $index;
             }
         }
 
-        if ($slugs === []) {
-            return $matches;
+        $details = $this->pool(array_map(fn (array $indexes, string $slug): array => [
+            'path' => '/matches/'.rawurlencode($slug), 'query' => [],
+        ], $missing, array_keys($missing)));
+        foreach (array_values($missing) as $key => $indexes) {
+            $response = $details[$key] ?? null;
+            $detail = $response instanceof Response && $response->successful() ? $response->json() : null;
+            foreach ($indexes as $index) {
+                $matches[$index]['bo3_detail'] = is_array($detail) ? $detail : [];
+            }
         }
 
-        try {
-            $details = $this->matchDetails(array_values(array_unique($slugs)));
-        } catch (Throwable $exception) {
-            $this->logWarning('bo3.gg match detail connection for head-to-head failed.', [
-                'type' => $exception::class,
-            ]);
-
-            return $matches;
-        }
         $requests = [];
-
-        foreach ($slugs as $index => $slug) {
-            $detail = $details[$slug] ?? [];
-            $team1Id = $this->positiveInt($detail['team1_id'] ?? null);
-            $team2Id = $this->positiveInt($detail['team2_id'] ?? null);
-            $disciplineId = $this->positiveInt($detail['discipline_id'] ?? null);
-
-            if ($team1Id === null || $team2Id === null || $disciplineId === null) {
+        foreach ($matches as $index => $match) {
+            if (! in_array($match['game'] ?? null, ['lol', 'valorant', 'cs', 'cs2'], true)) {
                 continue;
             }
-
-            $cutoff = CarbonImmutable::now((string) config('services.bo3.timezone', 'Asia/Taipei'))
-                ->format('Y-m-d');
-            // Keep the scheduled team order in the key because the summary is
-            // expressed as team1 versus team2, even when a past row is reversed.
-            $cacheKey = sprintf('bo3-h2h:v2:%d:%d-%d:%s', $disciplineId, $team1Id, $team2Id, $cutoff);
-
-            try {
-                $cached = Cache::get($cacheKey);
-
-                if (is_array($cached)) {
-                    $matches[$index]['h2h'] = $cached !== [] ? $cached : null;
-
-                    continue;
-                }
-            } catch (Throwable) {
-                // Cache is optional; continue with the API request.
+            $detail = (array) ($match['bo3_detail'] ?? []) + $match;
+            $team1 = $this->positiveInt($detail['team1_id'] ?? null);
+            $team2 = $this->positiveInt($detail['team2_id'] ?? null);
+            $discipline = $this->positiveInt($detail['discipline_id'] ?? null);
+            if ($discipline === null) {
+                continue;
             }
-
-            $requests[$cacheKey] = [
-                'indexes' => [...($requests[$cacheKey]['indexes'] ?? []), $index],
-                'team1_id' => $team1Id,
-                'team2_id' => $team2Id,
-                'discipline_id' => $disciplineId,
-                'cutoff' => $cutoff,
-            ];
-        }
-
-        if ($requests === []) {
-            return $matches;
-        }
-
-        try {
-            $responses = Http::pool(function (Pool $pool) use ($requests): void {
-                foreach ($requests as $cacheKey => $request) {
-                    $pool->as($cacheKey)
-                        ->acceptJson()
-                        ->withUserAgent('AmandaBlogLineBot/1.0')
-                        ->timeout((int) config('services.bo3.timeout_seconds', 10))
-                        ->get($this->apiUrl().'/matches', $this->query($request));
+            $cutoff = RecentForm::cutoff($match)->utc()->toIso8601String();
+            $queries = [];
+            if ($team1 !== null && $team2 !== null) {
+                $queries['h2h'] = $team1.','.$team2;
+            }
+            foreach (['team1' => $team1, 'team2' => $team2] as $side => $team) {
+                if ($team !== null) {
+                    $queries[$side] = (string) $team;
                 }
-            }, 5);
-        } catch (Throwable $exception) {
-            $this->logWarning('bo3.gg head-to-head connection failed.', [
-                'type' => $exception::class,
-            ]);
-
-            return $matches;
+            }
+            foreach ($queries as $kind => $ids) {
+                $key = $discipline.':'.$ids.':'.$cutoff;
+                $requests[$key] ??= [
+                    'path' => '/matches',
+                    'query' => [
+                        'page' => ['offset' => 0, 'limit' => self::LIMIT],
+                        'sort' => '-start_date',
+                        'filter' => [
+                            'matches.status' => ['in' => 'finished'],
+                            'matches.team_ids' => ['contains' => $ids],
+                            'matches.start_date' => ['lt' => $cutoff],
+                            'matches.discipline_id' => ['eq' => $discipline],
+                        ],
+                    ],
+                    'targets' => [],
+                ];
+                $requests[$key]['targets'][] = compact('index', 'kind', 'team1', 'team2', 'cutoff');
+            }
         }
 
-        foreach ($requests as $cacheKey => $request) {
-            $response = $responses[$cacheKey] ?? null;
-
+        $responses = $this->pool($requests);
+        foreach ($requests as $key => $request) {
+            $response = $responses[$key] ?? null;
             if (! $response instanceof Response || ! $response->successful()) {
-                $this->logWarning('bo3.gg head-to-head request failed.', [
-                    'team1_id' => $request['team1_id'],
-                    'team2_id' => $request['team2_id'],
-                    'status' => $response instanceof Response ? $response->status() : null,
-                ]);
-
                 continue;
             }
-
-            $summary = $this->summarize(
-                $response->json(),
-                $request['team1_id'],
-                $request['team2_id'],
-            );
-
-            try {
-                Cache::put(
-                    $cacheKey,
-                    $summary ?? [],
-                    (int) config('services.bo3.h2h_cache_seconds', 300),
-                );
-            } catch (Throwable) {
-                // Cache is optional for this enrichment.
+            $payload = $response->json();
+            if (! is_array($payload) || ! is_array($payload['results'] ?? null)) {
+                continue;
             }
-
-            foreach ($request['indexes'] as $index) {
-                $matches[$index]['h2h'] = $summary;
+            foreach ($request['targets'] as $target) {
+                $cutoff = CarbonImmutable::parse($target['cutoff']);
+                if ($target['kind'] === 'h2h') {
+                    $matches[$target['index']]['h2h'] = $this->summarize($payload, $target['team1'], $target['team2'], $cutoff);
+                } else {
+                    $side = $target['kind'];
+                    $matches[$target['index']]['recent_form'][$side] = $this->recentForm(array_values(array_filter($payload['results'], 'is_array')), $target[$side], $cutoff);
+                }
             }
         }
 
         return $matches;
     }
 
-    /**
-     * @param  array<int, string>  $slugs
-     * @return array<string, array<string, mixed>>
-     */
-    private function matchDetails(array $slugs): array
+    private function pool(array $requests): array
     {
-        $details = [];
-        $missing = [];
-
-        foreach ($slugs as $slug) {
-            $cacheKey = 'bo3-h2h:detail:'.$slug;
-
-            try {
-                $cached = Cache::get($cacheKey);
-
-                if (is_array($cached)) {
-                    $details[$slug] = $cached;
-
-                    continue;
+        if ($requests === []) {
+            return [];
+        }
+        try {
+            return Http::pool(function (Pool $pool) use ($requests): void {
+                foreach ($requests as $key => $request) {
+                    $pool->as((string) $key)->acceptJson()->withUserAgent('AmandaBlogLineBot/1.0')
+                        ->timeout((int) config('services.bo3.timeout_seconds', 10))
+                        ->get($this->apiUrl().$request['path'], $request['query']);
                 }
-            } catch (Throwable) {
-                // Cache is optional; continue with the API request.
-            }
+            }, 5);
+        } catch (Throwable $exception) {
+            $this->logWarning('bo3.gg match history unavailable.', ['type' => $exception::class]);
 
-            $missing[] = $slug;
+            return [];
         }
-
-        if ($missing === []) {
-            return $details;
-        }
-
-        $responses = Http::pool(function (Pool $pool) use ($missing): void {
-            foreach ($missing as $slug) {
-                $pool->as($slug)
-                    ->acceptJson()
-                    ->withUserAgent('AmandaBlogLineBot/1.0')
-                    ->timeout((int) config('services.bo3.timeout_seconds', 10))
-                    ->get($this->apiUrl().'/matches/'.rawurlencode($slug));
-            }
-        }, 5);
-
-        foreach ($missing as $slug) {
-            $response = $responses[$slug] ?? null;
-
-            if (! $response instanceof Response || ! $response->successful()) {
-                $this->logWarning('bo3.gg match detail request for head-to-head failed.', [
-                    'slug' => $slug,
-                    'status' => $response instanceof Response ? $response->status() : null,
-                ]);
-
-                continue;
-            }
-
-            $detail = $response->json();
-            $detail = is_array($detail) ? $detail : [];
-            $details[$slug] = $detail;
-
-            try {
-                Cache::put(
-                    'bo3-h2h:detail:'.$slug,
-                    $detail,
-                    (int) config('services.bo3.h2h_cache_seconds', 300),
-                );
-            } catch (Throwable) {
-                // Cache is optional for this enrichment.
-            }
-        }
-
-        return $details;
     }
 
-    /** @param array{team1_id: int, team2_id: int, discipline_id: int, cutoff: string} $request */
-    private function query(array $request): array
+    private function recentForm(array $rows, int $teamId, CarbonImmutable $cutoff): array
     {
-        return [
-            'page' => [
-                'offset' => 0,
-                'limit' => self::LIMIT,
-            ],
-            'sort' => '-start_date',
-            'filter' => [
-                'matches.status' => ['in' => 'finished'],
-                'matches.team_ids' => ['contains' => $request['team1_id'].','.$request['team2_id']],
-                'matches.start_date' => ['lt' => $request['cutoff']],
-                'matches.discipline_id' => ['eq' => $request['discipline_id']],
-            ],
-        ];
+        $results = [];
+        $seen = [];
+        usort($rows, fn (array $a, array $b): int => strcmp($b['start_date'] ?? '', $a['start_date'] ?? ''));
+        foreach ($rows as $row) {
+            if (! $this->completedBefore($row, $cutoff)
+                || ! is_numeric($row['team1_score'] ?? null) || ! is_numeric($row['team2_score'] ?? null)) {
+                continue;
+            }
+            $id = $row['id'] ?? $row['slug'] ?? json_encode([$row['team1_id'] ?? null, $row['team2_id'] ?? null, $row['start_date']]);
+            if (isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            if ((int) ($row['team1_id'] ?? 0) === $teamId) {
+                [$own, $other] = [$row['team1_score'], $row['team2_score']];
+            } elseif ((int) ($row['team2_id'] ?? 0) === $teamId) {
+                [$own, $other] = [$row['team2_score'], $row['team1_score']];
+            } else {
+                continue;
+            }
+            $results[] = $own > $other ? 'W' : ($own < $other ? 'L' : 'D');
+        }
+
+        return RecentForm::summarize($results);
+    }
+
+    private function completedBefore(array $row, CarbonImmutable $cutoff): bool
+    {
+        if (($row['status'] ?? 'finished') !== 'finished' || empty($row['start_date'])) {
+            return false;
+        }
+        try {
+            return CarbonImmutable::parse($row['end_date'] ?? $row['start_date'])->lt($cutoff);
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**
@@ -250,7 +189,7 @@ class Bo3HeadToHeadService
      *     series: array<int, array{date: string, format: string, team1_score: int, team2_score: int, winner: 'team1'|'team2'}>
      * }|null
      */
-    private function summarize(mixed $payload, int $team1Id, int $team2Id): ?array
+    private function summarize(mixed $payload, int $team1Id, int $team2Id, CarbonImmutable $cutoff): ?array
     {
         if (! is_array($payload) || ! is_array($payload['results'] ?? null)) {
             return null;
@@ -263,8 +202,14 @@ class Bo3HeadToHeadService
         $team2Games = 0;
         $series = [];
 
-        foreach ($payload['results'] as $result) {
+        $rows = array_filter($payload['results'], 'is_array');
+        usort($rows, fn (array $a, array $b): int => strcmp($b['start_date'] ?? '', $a['start_date'] ?? ''));
+        foreach ($rows as $result) {
+            if ($sampleSize >= self::LIMIT) {
+                break;
+            }
             if (! is_array($result)
+                || ! $this->completedBefore($result, $cutoff)
                 || ! is_numeric($result['team1_id'] ?? null)
                 || ! is_numeric($result['team2_id'] ?? null)
                 || ! is_numeric($result['team1_score'] ?? null)
@@ -287,10 +232,6 @@ class Bo3HeadToHeadService
                 continue;
             }
 
-            $sampleSize++;
-            $team1Games += $score1;
-            $team2Games += $score2;
-
             if ($score1 > $score2) {
                 $team1Wins++;
                 $winner = 'team1';
@@ -301,6 +242,9 @@ class Bo3HeadToHeadService
                 continue;
             }
 
+            $sampleSize++;
+            $team1Games += $score1;
+            $team2Games += $score2;
             $series[] = [
                 'date' => $this->formatMatchDate($result['start_date'] ?? null),
                 'format' => $this->formatBestOf($result['bo_type'] ?? null, $score1, $score2),

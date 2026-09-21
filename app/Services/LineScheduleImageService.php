@@ -12,13 +12,13 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 28;
+    private const CACHE_VERSION = 29;
 
-    private const CARD_HEIGHT = 180;
+    private const CARD_HEIGHT = 310;
 
-    private const CARD_GAP = 18;
+    private const CARD_GAP = 20;
 
-    private const CARDS_TOP = 140;
+    private const CARDS_TOP = 160;
 
     private const BET_CARDS_TOP = 150;
 
@@ -71,6 +71,12 @@ class LineScheduleImageService
     ];
 
     private const GAME_THEMES = [
+        'mlb' => [
+            'accent' => '#34d399',
+            'badge_bg' => '#063b32',
+            'badge_text' => '#a7f3d0',
+            'label' => 'MLB',
+        ],
         'cs' => [
             'accent' => '#f59e0b',
             'badge_bg' => '#2e1b06',
@@ -162,301 +168,102 @@ class LineScheduleImageService
     private function renderSchedule(array $data): Imagick
     {
         $matches = $data['matches'];
-        $canvasHeight = $this->canvasHeight($matches);
         $image = new Imagick;
-        $image->newImage(self::CANVAS_WIDTH, $canvasHeight, '#090d16', 'png');
+        $image->newImage(self::CANVAS_WIDTH, $this->canvasHeight($matches), '#090d16', 'png');
         $image->setImageColorspace(Imagick::COLORSPACE_SRGB);
-
-        $font = $this->fontPath();
         $draw = new ImagickDraw;
-        $draw->setFont($font);
+        $draw->setFont($this->fontPath());
         $draw->setTextAntialias(true);
 
-        // Header Title
-        $draw->setFillColor('#f8fafc');
-        $draw->setFontSize(40);
-        $draw->setFontWeight(700);
-        $draw->annotation(46, 64, $this->fitText($image, $draw, $data['title'], 1120, 32));
+        $this->scheduleText($image, $draw, 46, 33, 'MATCHDAY  /  賽程總覽', 15, '#64748b', 700);
+        $this->scheduleText($image, $draw, 44, 84, $data['title'], 38, '#f8fafc', 700, 1150);
+        $this->scheduleText($image, $draw, 46, 123, $data['subtitle'], 20, '#94a3b8', 400, 1060);
+        $this->scheduleText($image, $draw, 1250, 80, count($matches).' 場', 30, '#e2e8f0', 700, 144);
+        $this->scheduleText($image, $draw, 1120, 124, 'W 勝   L 敗   D 和', 18, '#94a3b8', 500);
 
-        // Header Subtitle
-        $draw->setFillColor('#94a3b8');
-        $draw->setFontSize(21);
-        $draw->setFontWeight(400);
-        $draw->annotation(48, 104, $this->fitText($image, $draw, $data['subtitle'], 1120, 17));
-
-        // Top Right Count Badge
-        $count = count($matches);
-        $headerTheme = $this->themeForGame($data['game'] ?? null);
-        $draw->setFillColor($headerTheme['accent']);
-        $draw->roundRectangle(1252, 36, 1394, 92, 28, 28);
-        $draw->setFillColor('#ffffff');
-        $draw->setFontSize(22);
-        $draw->setFontWeight(700);
-        $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-        $draw->annotation(1323, 72, $count.' 場');
-        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-        $mainWidth = 944;
-        $cardWidth = 1352;
-        $left = 44;
-        $iconsToDraw = [];
-
+        $x = 44;
         $y = self::CARDS_TOP;
-
         foreach ($matches as $match) {
-            $x = $left;
-            $matchGame = $match['game'] ?? $data['game'] ?? null;
-            $theme = $this->themeForGame($matchGame);
+            $game = $match['game'] ?? $data['game'] ?? null;
+            $theme = $this->themeForGame($game);
+            $this->scheduleBox($draw, $x, $y, 1352, self::CARD_HEIGHT, '#131b2e', '#263650', 16);
+            $this->scheduleBox($draw, $x + 1, $y + 18, 4, self::CARD_HEIGHT - 36, $theme['accent'], $theme['accent'], 2);
+            $this->scheduleBox($draw, $x + 24, $y + 18, 72, 30, $theme['badge_bg'], $theme['accent'], 6);
+            $this->scheduleText($image, $draw, $x + 36, $y + 40, $theme['label'], 16, $theme['badge_text'], 700, 52);
+            $this->scheduleText($image, $draw, $x + 114, $y + 41, $match['start_time'], 23, '#f8fafc', 700, 225);
+            $format = $this->formatTheme($match['format'] ?? null);
+            $this->scheduleBox($draw, $x + 347, $y + 18, 68, 30, $format['bg'], $format['border'], 6);
+            $this->scheduleText($image, $draw, $x + 359, $y + 39, $format['label'], 16, $format['text'], 700, 48);
+            $isLive = $match['is_live'] ?? false;
+            $status = $isLive ? '● 滾球中' : ($match['status_label'] ?? '');
+            $this->scheduleText($image, $draw, $x + 434, $y + 40, $status, 17, $isLive ? '#fb7185' : '#94a3b8', 600, 135);
+            $this->scheduleText($image, $draw, $x + 24, $y + 76, $match['tournament'], 17, '#94a3b8', 500, 898);
 
-            // Card Container Background & Border
-            $draw->setFillColor('#131b2e');
-            $draw->setStrokeColor('#1f2d47');
-            $draw->setStrokeWidth(1.5);
-            $draw->roundRectangle($x, $y, $x + $cardWidth, $y + self::CARD_HEIGHT, 16, 16);
-
-            // Left Theme Indicator Bar
-            $draw->setFillColor($theme['accent']);
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->roundRectangle($x + 2, $y + 14, $x + 6, $y + self::CARD_HEIGHT - 14, 2, 2);
-
-            // Card Top Row: Game Icon / Badge / Time / Format / Tournament
-            $iconPath = $this->iconPathForGame($matchGame);
-            $timeX = $x + 24;
-
-            if ($iconPath !== null) {
-                $iconSize = 28;
-                $iconsToDraw[] = [
-                    'path' => $iconPath,
-                    'x' => $x + 22,
-                    'y' => $y + 13,
-                    'size' => $iconSize,
-                ];
-                $timeX = $x + 22 + $iconSize + 12;
-            } elseif ($matchGame !== null) {
-                $badgeWidth = 52;
-                $draw->setFillColor($theme['badge_bg']);
-                $draw->setStrokeColor($theme['accent']);
-                $draw->setStrokeWidth(1);
-                $draw->roundRectangle($x + 22, $y + 15, $x + 22 + $badgeWidth, $y + 39, 6, 6);
-
-                $draw->setFillColor($theme['badge_text']);
-                $draw->setStrokeColor('none');
-                $draw->setStrokeWidth(0);
-                $draw->setFontSize(13);
-                $draw->setFontWeight(700);
-                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-                $draw->annotation($x + 22 + (int) round($badgeWidth / 2), $y + 32, $theme['label']);
-                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-                $timeX = $x + 22 + $badgeWidth + 12;
+            foreach (['team1' => 24, 'team2' => 526] as $side => $offset) {
+                $teamX = $x + $offset;
+                $this->scheduleBox($draw, $teamX, $y + 93, 396, 160, '#0e1728', '#22334d', 10);
+                $name = $match[$side];
+                $this->scheduleText($image, $draw, $teamX + 16, $y + 128, $name, 24, '#f8fafc', 700, 270);
+                $price = $match['odds'][$side]['price'] ?? null;
+                $this->scheduleText($image, $draw, $teamX + 307, $y + 128, $price === null ? '—' : sprintf('%.2f', $price), 22, '#38bdf8', 700, 75);
+                $caption = ($game === 'mlb' ? ($side === 'team1' ? '客隊 · ' : '主隊 · ') : '').'近 5 場 · 新 → 舊';
+                $this->scheduleText($image, $draw, $teamX + 16, $y + 159, $caption, 15, '#94a3b8', 400, 355);
+                $this->drawRecentForm($image, $draw, $teamX + 16, $y + 174, $match['recent_form'][$side] ?? null);
             }
 
-            // Start Time
-            $draw->setFillColor('#f8fafc');
-            $draw->setFontSize(21);
-            $draw->setFontWeight(700);
-            $draw->annotation($timeX, $y + 34, $match['start_time']);
-
-            $timeMetrics = $image->queryFontMetrics($draw, $match['start_time']);
-            $timeWidth = (int) round($timeMetrics['textWidth']);
-
-            // Format Badge (e.g. BO1 / BO2 / BO3 / BO5)
-            $formatTheme = $this->formatTheme($match['format'] ?? null);
-            $formatBadgeX = $timeX + $timeWidth + 12;
-            $isBo5OrMore = in_array($formatTheme['label'], ['BO5', 'BO7'], true);
-            $formatBadgeWidth = $isBo5OrMore ? 62 : 56;
-            $formatBadgeHeight = 26;
-            $formatBadgeY = $y + 13;
-
-            $draw->setFillColor($formatTheme['bg']);
-            $draw->setStrokeColor($formatTheme['border']);
-            $draw->setStrokeWidth($isBo5OrMore ? 1.6 : 1.2);
-            $draw->roundRectangle(
-                $formatBadgeX,
-                $formatBadgeY,
-                $formatBadgeX + $formatBadgeWidth,
-                $formatBadgeY + $formatBadgeHeight,
-                6,
-                6
-            );
-
-            $draw->setFillColor($formatTheme['text']);
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize(14);
-            $draw->setFontWeight(800);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation(
-                $formatBadgeX + (int) round($formatBadgeWidth / 2),
-                $formatBadgeY + 18,
-                $formatTheme['label']
-            );
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-            if ($match['is_live'] ?? false) {
-                $liveBadgeX = $formatBadgeX + $formatBadgeWidth + 8;
-                $liveBadgeWidth = 64;
-                $liveBadgeHeight = 26;
-
-                $draw->setFillColor('#3b0811');
-                $draw->setStrokeColor('#ef4444');
-                $draw->setStrokeWidth(1.2);
-                $draw->roundRectangle(
-                    $liveBadgeX,
-                    $formatBadgeY,
-                    $liveBadgeX + $liveBadgeWidth,
-                    $formatBadgeY + $liveBadgeHeight,
-                    6,
-                    6,
-                );
-
-                // Live blinking red dot indicator
-                $draw->setFillColor('#ef4444');
-                $draw->setStrokeColor('none');
-                $draw->setStrokeWidth(0);
-                $draw->circle(
-                    $liveBadgeX + 14,
-                    $formatBadgeY + 13,
-                    $liveBadgeX + 16.5,
-                    $formatBadgeY + 13
-                );
-
-                $draw->setFillColor('#ffffff');
-                $draw->setFontSize(13);
-                $draw->setFontWeight(700);
-                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-                $draw->annotation(
-                    $liveBadgeX + 23,
-                    $formatBadgeY + 18,
-                    '滾球',
-                );
+            // Reuse the esports scoreboard; MLB runs have no series/map slots.
+            if ($game === 'mlb') {
+                $this->scheduleText($image, $draw, $x + 434, $y + 157, $match['score'] ?? 'VS', 24, '#e2e8f0', 700, 76);
+            } else {
+                $this->drawCenterMatchBadge($draw, $x, $y + 107, $match);
             }
+            $source = isset($match['odds']['team1']['bookmaker'])
+                ? '獨贏賠率 · '.$match['odds']['team1']['bookmaker']
+                : ($game === 'mlb' ? 'MLB 官方賽程 · 客隊在左／主隊在右' : '獨贏賠率 · 暫無盤口');
+            $this->scheduleText($image, $draw, $x + 24, $y + 285, $source, 15, '#64748b', 400, 898);
 
-            // Tournament Name (Top Right)
-            $draw->setFillColor('#94a3b8');
-            $draw->setFontSize(16);
-            $draw->setFontWeight(400);
-            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-            $tournamentText = $this->fitText($image, $draw, (string) $match['tournament'], 440, 13);
-            $draw->annotation($x + $mainWidth - 22, $y + 34, $tournamentText);
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-            // Card Middle Row: Symmetrical Team 1 & Team 2 Boxes (Spacious Layout)
-            $boxY = $y + 48;
-            $boxHeight = 74;
-            $boxWidth = 396;
-
-            // Team 1 Box (Left)
-            $draw->setFillColor('#1a243b');
-            $draw->setStrokeColor('#293852');
-            $draw->setStrokeWidth(1.2);
-            $draw->roundRectangle($x + 22, $boxY, $x + 22 + $boxWidth, $boxY + $boxHeight, 10, 10);
-
-            // Team 1 Name
-            $draw->setFillColor('#f8fafc');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize(21);
-            $draw->setFontWeight(700);
-            $draw->annotation($x + 36, $boxY + 46, $this->fitText($image, $draw, $match['team1'], 265, 14));
-
-            // Team 1 Odds Pill
-            $draw->setFillColor('#0d1524');
-            $draw->setStrokeColor('#1e293b');
-            $draw->setStrokeWidth(1);
-            $draw->roundRectangle($x + 318, $boxY + 14, $x + 406, $boxY + 60, 8, 8);
-
-            $hasOdds = ($match['odds'] ?? null) !== null;
-            $team1Odds = $hasOdds ? sprintf('%.2f', $match['odds']['team1']['price']) : '—';
-            $draw->setFillColor($hasOdds ? '#38bdf8' : '#64748b');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize(18);
-            $draw->setFontWeight(700);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + 362, $boxY + 44, $team1Odds);
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-            // Center VS Badge / Live Match Scoreboard Hub
-            $this->drawCenterMatchBadge($draw, $x, $boxY, $match);
-
-            // Team 2 Box (Right)
-            $team2BoxX = $x + 526;
-            $draw->setFillColor('#1a243b');
-            $draw->setStrokeColor('#293852');
-            $draw->setStrokeWidth(1.2);
-            $draw->roundRectangle($team2BoxX, $boxY, $team2BoxX + $boxWidth, $boxY + $boxHeight, 10, 10);
-
-            // Team 2 Name
-            $draw->setFillColor('#f8fafc');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize(21);
-            $draw->setFontWeight(700);
-            $draw->annotation($team2BoxX + 16, $boxY + 46, $this->fitText($image, $draw, $match['team2'], 265, 14));
-
-            // Team 2 Odds Pill
-            $draw->setFillColor('#0d1524');
-            $draw->setStrokeColor('#1e293b');
-            $draw->setStrokeWidth(1);
-            $draw->roundRectangle($team2BoxX + 296, $boxY + 14, $team2BoxX + 384, $boxY + 60, 8, 8);
-
-            $team2Odds = $hasOdds ? sprintf('%.2f', $match['odds']['team2']['price']) : '—';
-            $draw->setFillColor($hasOdds ? '#38bdf8' : '#64748b');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize(18);
-            $draw->setFontWeight(700);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($team2BoxX + 340, $boxY + 44, $team2Odds);
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-            // Card Bottom Row: Odds / Bookmaker Source
-            $statusText = $hasOdds
-                ? ('獨贏盤口 · 來源：'.(string) $match['odds']['team1']['bookmaker'])
-                : '獨贏盤口 · 暫無盤口';
-            $draw->setFillColor('#64748b');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize(14);
-            $draw->setFontWeight(400);
-            $draw->annotation($x + 24, $y + 154, $statusText);
-
-            // Vertical separator line
             $draw->setStrokeColor('#263650');
             $draw->setStrokeWidth(1);
-            $draw->line($x + $mainWidth, $y + 14, $x + $mainWidth, $y + self::CARD_HEIGHT - 14);
-
-            $this->drawH2hPanel(
-                $image,
-                $draw,
-                $x + $mainWidth + 16,
-                $y,
-                $cardWidth - $mainWidth - 32,
-                $match,
-                $theme,
-            );
-
+            $draw->line($x + 944, $y + 20, $x + 944, $y + 290);
+            $this->drawH2hPanel($image, $draw, $x + 964, $y, 364, $match, $theme);
             $y += self::CARD_HEIGHT + self::CARD_GAP;
         }
-
         $image->drawImage($draw);
-
-        foreach ($iconsToDraw as $iconData) {
-            try {
-                $icon = new Imagick($iconData['path']);
-                $icon->resizeImage($iconData['size'], $iconData['size'], Imagick::FILTER_LANCZOS, 1);
-                $image->compositeImage($icon, Imagick::COMPOSITE_OVER, $iconData['x'], $iconData['y']);
-                $icon->clear();
-            } catch (\Throwable) {
-                // If icon cannot be loaded, gracefully continue.
-            }
-        }
-
         $image->stripImage();
 
         return $image;
+    }
+
+    private function scheduleText(Imagick $image, ImagickDraw $draw, int $x, int $y, string $text, int $size, string $color, int $weight = 400, int $width = 1352): void
+    {
+        $draw->setStrokeColor('none');
+        $draw->setStrokeWidth(0);
+        $draw->setFillColor($color);
+        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+        $draw->setFontSize($size);
+        $draw->setFontWeight($weight);
+        $draw->annotation($x, $y, $this->fitText($image, $draw, $text, $width, max(12, $size - 4)));
+    }
+
+    private function scheduleBox(ImagickDraw $draw, int $x, int $y, int $width, int $height, string $fill, string $border, int $radius): void
+    {
+        $draw->setFillColor($fill);
+        $draw->setStrokeColor($border);
+        $draw->setStrokeWidth(1);
+        $draw->roundRectangle($x, $y, $x + $width, $y + $height, $radius, $radius);
+    }
+
+    private function drawRecentForm(Imagick $image, ImagickDraw $draw, int $x, int $y, ?array $form): void
+    {
+        $colors = ['W' => ['#063b32', '#6ee7b7'], 'L' => ['#3b1825', '#fda4af'], 'D' => ['#3c3016', '#fde68a']];
+        for ($i = 0; $i < 5; $i++) {
+            $result = $form['results'][$i] ?? '—';
+            [$background, $color] = $colors[$result] ?? ['#182338', '#475569'];
+            $chipX = $x + ($i * 52);
+            $this->scheduleBox($draw, $chipX, $y, 42, 30, $background, $background, 6);
+            $this->scheduleText($image, $draw, $chipX + 12, $y + 22, $result, 18, $color, 700, 26);
+        }
+        $this->scheduleText($image, $draw, $x, $y + 59, RecentForm::label($form), 17, '#cbd5e1', 500, 358);
     }
 
     /** @param array<int, array<string, mixed>> $matches */
@@ -974,229 +781,29 @@ class LineScheduleImageService
      * @param  array<string, mixed>  $match
      * @param  array{accent: string, badge_bg: string, badge_text: string, label: string}  $theme
      */
-    private function drawH2hPanel(
-        Imagick $image,
-        ImagickDraw $draw,
-        int $x,
-        int $y,
-        int $width,
-        array $match,
-        array $theme,
-    ): void {
+    private function drawH2hPanel(Imagick $image, ImagickDraw $draw, int $x, int $y, int $width, array $match, array $theme): void
+    {
         $h2h = $match['h2h'] ?? null;
-
-        $draw->setFillColor('#e2e8f0');
-        $draw->setStrokeColor('none');
-        $draw->setStrokeWidth(0);
-        $draw->setFontSize(13);
-        $draw->setFontWeight(700);
-        $draw->annotation($x, $y + 25, '歷史交手');
-
+        $this->scheduleText($image, $draw, $x, $y + 39, '雙方交手紀錄', 19, '#e2e8f0', 700, $width);
         if (! is_array($h2h)) {
-            $draw->setFillColor('#0d1524');
-            $draw->setStrokeColor('#1e293b');
-            $draw->setStrokeWidth(1);
-            $draw->roundRectangle($x, $y + 42, $x + $width, $y + 162, 8, 8);
-
-            $draw->setFillColor('#64748b');
-            $draw->setStrokeColor('none');
-            $draw->setFontSize(13);
-            $draw->setFontWeight(500);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + (int) round($width / 2), $y + 107, '無近期交手紀錄');
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+            $this->scheduleBox($draw, $x, $y + 60, $width, 192, '#0e1728', '#22334d', 10);
+            $this->scheduleText($image, $draw, $x + 28, $y + 145, '暫無交手資料', 19, '#64748b', 500, $width - 56);
+            $this->scheduleText($image, $draw, $x + 28, $y + 176, '各隊近況請見左側戰績', 15, '#64748b', 400, $width - 56);
 
             return;
         }
-
-        // Sample size pill badge
-        $draw->setFillColor('#1e293b');
-        $draw->setStrokeColor('#334155');
-        $draw->setStrokeWidth(1);
-        $draw->roundRectangle($x + 58, $y + 11, $x + 104, $y + 28, 4, 4);
-        $draw->setFillColor('#94a3b8');
-        $draw->setStrokeColor('none');
-        $draw->setFontSize(10);
-        $draw->setFontWeight(600);
-        $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-        $draw->annotation($x + 81, $y + 23, '近'.$h2h['sample_size'].'場');
-        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-        $t1Wins = (int) $h2h['team1_wins'];
-        $t2Wins = (int) $h2h['team2_wins'];
-        $t1Games = (int) $h2h['team1_games'];
-        $t2Games = (int) $h2h['team2_games'];
-        $totalWins = $t1Wins + $t2Wins;
-
-        // Calculate Win Rate & Ratio
-        if ($totalWins > 0) {
-            $t1Ratio = $t1Wins / $totalWins;
-            $t1Percent = (int) round($t1Ratio * 100);
-            $t2Percent = 100 - $t1Percent;
-        } elseif ($t1Games + $t2Games > 0) {
-            $t1Ratio = $t1Games / ($t1Games + $t2Games);
-            $t1Percent = (int) round($t1Ratio * 100);
-            $t2Percent = 100 - $t1Percent;
-        } else {
-            $t1Ratio = 0.5;
-            $t1Percent = 50;
-            $t2Percent = 50;
-        }
-        $t2Ratio = 1.0 - $t1Ratio;
-
-        $winGreen = '#4ade80';
-        $loseRed = '#f87171';
-        $neutralBlue = '#38bdf8';
-
-        // Colored Win Rates Summary in Header
-        $t1TextColor = $t1Wins > $t2Wins ? $winGreen : ($t1Wins < $t2Wins ? $loseRed : $neutralBlue);
-        $t2TextColor = $t2Wins > $t1Wins ? $winGreen : ($t2Wins < $t1Wins ? $loseRed : $neutralBlue);
-
-        $t2Summary = sprintf('%d勝 (%d%%)', $t2Wins, $t2Percent);
-        $draw->setFillColor($t2TextColor);
-        $draw->setFontSize(12);
-        $draw->setFontWeight($t2Wins >= $t1Wins ? 700 : 500);
-        $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-        $draw->annotation($x + $width, $y + 25, $t2Summary);
-
-        $metrics = $image->queryFontMetrics($draw, $t2Summary);
-        $t2Width = (int) round($metrics['textWidth']);
-        $sepX = $x + $width - $t2Width - 10;
-
-        $draw->setFillColor('#64748b');
-        $draw->setFontSize(11);
-        $draw->setFontWeight(400);
-        $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-        $draw->annotation($sepX, $y + 25, '-');
-
-        $t1Summary = sprintf('%d勝 (%d%%)', $t1Wins, $t1Percent);
-        $draw->setFillColor($t1TextColor);
-        $draw->setFontSize(12);
-        $draw->setFontWeight($t1Wins >= $t2Wins ? 700 : 500);
-        $draw->annotation($sepX - 10, $y + 25, $t1Summary);
-        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-        // Win Rate Progress Bar
-        $barY = $y + 33;
-        $barHeight = 6;
-        $barWidth = $width;
-
-        $draw->setFillColor('#1e293b');
-        $draw->setStrokeColor('none');
-        $draw->setStrokeWidth(0);
-        $draw->roundRectangle($x, $barY, $x + $barWidth, $barY + $barHeight, 3, 3);
-
-        $barGreen = '#22c55e';
-        $barRed = '#ef4444';
-        $barBlue = '#38bdf8';
-
-        $t1BarColor = $t1Wins > $t2Wins ? $barGreen : ($t1Wins < $t2Wins ? $barRed : $barBlue);
-        $t2BarColor = $t2Wins > $t1Wins ? $barGreen : ($t2Wins < $t1Wins ? $barRed : $barBlue);
-
-        if ($t1Ratio >= 1.0) {
-            $draw->setFillColor($t1BarColor);
-            $draw->roundRectangle($x, $barY, $x + $barWidth, $barY + $barHeight, 3, 3);
-        } elseif ($t2Ratio >= 1.0) {
-            $draw->setFillColor($t2BarColor);
-            $draw->roundRectangle($x, $barY, $x + $barWidth, $barY + $barHeight, 3, 3);
-        } else {
-            $t1W = (int) round($barWidth * $t1Ratio);
-            $t1W = max(8, min($barWidth - 8, $t1W));
-
-            $draw->setFillColor($t1BarColor);
-            $draw->roundRectangle($x, $barY, $x + $t1W - 1, $barY + $barHeight, 3, 3);
-
-            $draw->setFillColor($t2BarColor);
-            $draw->roundRectangle($x + $t1W + 1, $barY, $x + $barWidth, $barY + $barHeight, 3, 3);
-        }
-
-        // Recent Series List
-        $series = array_slice(is_array($h2h['series'] ?? null) ? $h2h['series'] : [], 0, 5);
-
-        if ($series === []) {
-            return;
-        }
-
-        $centerX = $x + 240;
-
-        foreach ($series as $index => $result) {
-            $rowY = $y + 45 + ($index * 24);
-            $team1Won = ($result['winner'] ?? null) === 'team1';
-
-            if ($index % 2 === 0) {
-                $draw->setFillColor('#0f172a');
-                $draw->setStrokeColor('none');
-                $draw->roundRectangle($x - 4, $rowY, $x + $width + 4, $rowY + 21, 4, 4);
-            }
-
-            // 1. Date with Western Year (e.g. 2026/08/01)
-            $draw->setFillColor('#94a3b8');
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize(11);
-            $draw->setFontWeight(500);
-            $draw->annotation($x, $rowY + 15, (string) ($result['date'] ?? '—'));
-
-            // 2. Format Badge (e.g. BO1 / BO2 / BO3 / BO5)
-            $formatTheme = $this->formatTheme($result['format'] ?? null);
-            $draw->setFillColor($formatTheme['bg']);
-            $draw->setStrokeColor($formatTheme['border']);
-            $draw->setStrokeWidth(1);
-            $draw->roundRectangle($x + 70, $rowY + 1, $x + 104, $rowY + 19, 3, 3);
-            $draw->setFillColor($formatTheme['text']);
-            $draw->setStrokeColor('none');
-            $draw->setStrokeWidth(0);
-            $draw->setFontSize(10);
-            $draw->setFontWeight(700);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($x + 87, $rowY + 14, $formatTheme['label']);
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-
-            // 3. Team 1 Name (Right-aligned to score pill, Green if won, Red if lost)
-            $draw->setFillColor($team1Won ? $winGreen : $loseRed);
-            $draw->setFontSize(11.5);
-            $draw->setFontWeight($team1Won ? 700 : 500);
-            $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-            $team1Text = $this->fitText($image, $draw, (string) $match['team1'], 94, 9);
-            $draw->annotation($centerX - 35, $rowY + 15, $team1Text);
-
-            // 4. Team 1 Score Pill (Green badge if won, Red badge if lost)
-            $draw->setFillColor($team1Won ? '#052e16' : '#270e11');
-            $draw->setStrokeColor($team1Won ? '#22c55e' : '#7f1d1d');
-            $draw->setStrokeWidth(1);
-            $draw->roundRectangle($centerX - 29, $rowY + 1, $centerX - 8, $rowY + 19, 3, 3);
-            $draw->setFillColor($team1Won ? $winGreen : $loseRed);
-            $draw->setStrokeColor('none');
-            $draw->setFontSize(10.5);
-            $draw->setFontWeight(700);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($centerX - 18, $rowY + 14, (string) ($result['team1_score'] ?? 0));
-
-            // 5. Separator
-            $draw->setFillColor('#475569');
-            $draw->setFontSize(10.5);
-            $draw->setFontWeight(400);
-            $draw->annotation($centerX, $rowY + 14, '-');
-
-            // 6. Team 2 Score Pill (Green badge if won, Red badge if lost)
-            $draw->setFillColor(! $team1Won ? '#052e16' : '#270e11');
-            $draw->setStrokeColor(! $team1Won ? '#22c55e' : '#7f1d1d');
-            $draw->setStrokeWidth(1);
-            $draw->roundRectangle($centerX + 8, $rowY + 1, $centerX + 29, $rowY + 19, 3, 3);
-            $draw->setFillColor(! $team1Won ? $winGreen : $loseRed);
-            $draw->setStrokeColor('none');
-            $draw->setFontSize(10.5);
-            $draw->setFontWeight(700);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($centerX + 19, $rowY + 14, (string) ($result['team2_score'] ?? 0));
-
-            // 7. Team 2 Name (Left-aligned to score pill, Green if won, Red if lost)
-            $draw->setFillColor(! $team1Won ? $winGreen : $loseRed);
-            $draw->setFontSize(11.5);
-            $draw->setFontWeight(! $team1Won ? 700 : 500);
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
-            $team2Text = $this->fitText($image, $draw, (string) $match['team2'], 94, 9);
-            $draw->annotation($centerX + 35, $rowY + 15, $team2Text);
+        $summary = sprintf('近 %d 場 · %d：%d 勝', $h2h['sample_size'], $h2h['team1_wins'], $h2h['team2_wins']);
+        $this->scheduleText($image, $draw, $x, $y + 70, $summary, 17, $theme['badge_text'], 600, $width);
+        $this->scheduleText($image, $draw, $x, $y + 95, '比分順序同左側隊伍', 13, '#64748b', 400, $width);
+        foreach (array_slice($h2h['series'] ?? [], 0, 5) as $i => $series) {
+            $rowY = $y + 108 + $i * 32;
+            $this->scheduleBox($draw, $x, $rowY, $width, 28, $i % 2 === 0 ? '#0e1728' : '#131b2e', '#131b2e', 4);
+            $this->scheduleText($image, $draw, $x + 6, $rowY + 20, $series['date'] ?? '—', 13, '#94a3b8', 400, 89);
+            $this->scheduleText($image, $draw, $x + 105, $rowY + 20, $series['format'] ?? '', 13, '#94a3b8', 600, 43);
+            $score = ($series['team1_score'] ?? 0).' : '.($series['team2_score'] ?? 0);
+            $this->scheduleText($image, $draw, $x + 162, $rowY + 20, $score, 16, '#f8fafc', 700, 70);
+            $winner = ($series['winner'] ?? '') === 'team1' ? $match['team1'] : $match['team2'];
+            $this->scheduleText($image, $draw, $x + 240, $rowY + 20, $this->teamAbbreviation($winner).' 勝', 13, '#6ee7b7', 500, $width - 246);
         }
     }
 

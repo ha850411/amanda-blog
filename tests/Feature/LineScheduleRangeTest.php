@@ -19,6 +19,7 @@ class LineScheduleRangeTest extends TestCase
             'services.bo3.api_url' => 'https://api.bo3.gg/api/v1',
             'services.bo3.timezone' => 'Asia/Taipei',
             'services.odds.api_key' => null,
+            'mlb.team_ids' => [],
         ]);
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-13 12:00:00', 'Asia/Taipei'));
         Http::preventStrayRequests();
@@ -88,6 +89,18 @@ class LineScheduleRangeTest extends TestCase
 
         $this->assertSame('目前無法取得 bo3.gg 賽程，請稍後再試。', $reply->text);
         $this->assertNull($reply->imageData);
+    }
+
+    public function test_range_including_today_does_not_fetch_details_for_hidden_future_matches(): void
+    {
+        $this->fakeRange();
+        $reply = app(LineScheduleBot::class)->reply('!match 0913~0918 limit=1');
+        $this->assertCount(1, $reply->imageData['matches']);
+        $this->assertSame('lol-2026-09-14-0', $reply->imageData['matches'][0]['team1']);
+        $this->assertSame('BO3', $reply->imageData['matches'][0]['format']);
+        Http::assertNotSent(fn (Request $request): bool => str_starts_with($request->url(), 'https://api.bo3.gg/api/v1/matches/')
+            && ! str_contains($request->url(), '2026-09-13-')
+            && basename($request->url()) !== 'lol-2026-09-14-0');
     }
 
     private function fakeRange(): void

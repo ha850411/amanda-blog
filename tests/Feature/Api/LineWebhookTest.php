@@ -31,6 +31,7 @@ class LineWebhookTest extends TestCase
             'services.odds.api_key' => null,
             'services.odds.base_url' => 'https://api.odds-api.io/v3',
             'services.odds.bookmakers' => 'Pinnacle,Bet365',
+            'mlb.team_ids' => [], // MLB integration has its own fixtures.
         ]);
 
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-11 09:00:00', 'Asia/Taipei'));
@@ -122,6 +123,9 @@ class LineWebhookTest extends TestCase
 
         $this->assertNotNull($reply);
         $this->assertStringContainsString('近期交手｜Team Alpha 2 勝・Team Beta 1 勝（近 3 場，小局 5：2）', $reply->text);
+        $this->assertStringContainsString('各隊近 5 場（新→舊）', $reply->text);
+        $this->assertSame(['W', 'L', 'W'], $reply->imageData['matches'][0]['recent_form']['team1']['results']);
+        $this->assertSame(['L', 'W', 'L'], $reply->imageData['matches'][0]['recent_form']['team2']['results']);
         $this->assertStringContainsString('交手明細｜', $reply->text);
         $this->assertStringContainsString('・2026/08/01 BO3  2：0（Team Alpha 勝）', $reply->text);
         $this->assertStringContainsString('・2026/07/01 BO3  1：2（Team Beta 勝）', $reply->text);
@@ -397,7 +401,7 @@ class LineWebhookTest extends TestCase
 
             return $request['messages'][0] === [
                 'type' => 'text',
-                'text' => "指令格式：\n!match｜!lol｜!val｜!cs（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，預設查 S Tier。\n可選參數：game=lol/val/cs｜tier=s,a｜tier=all｜limit=5｜team=G2",
+                'text' => "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb｜tier=s,a｜tier=all｜limit=5｜team=G2",
             ];
         });
     }
@@ -737,7 +741,7 @@ class LineWebhookTest extends TestCase
             === 'https://bo3.gg/api/v1/matches/all-gamers-vs-tec-esports-12-08-2026');
     }
 
-    public function test_schedule_command_queries_all_three_games_by_default(): void
+    public function test_schedule_command_queries_all_esports_by_default(): void
     {
         $this->fakeScheduleImage();
 
@@ -824,7 +828,7 @@ class LineWebhookTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!match 今天');
 
         $this->assertNotNull($reply);
-        $this->assertStringContainsString('綜合賽程（LoL/VALORANT/CS2）｜08/11｜S Tier', $reply->text);
+        $this->assertStringContainsString('綜合賽程（LoL/VALORANT/CS2/MLB）｜08/11｜S Tier', $reply->text);
         $this->assertSame('綜合賽程｜08/11｜S Tier', $reply->imageData['title']);
     }
 

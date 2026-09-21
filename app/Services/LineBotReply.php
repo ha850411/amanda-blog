@@ -35,7 +35,12 @@ final readonly class LineBotReply
      *                 team2_score: int,
      *                 winner: 'team1'|'team2'
      *             }>
-     *         }
+     *         },
+     *         recent_form?: ?array{
+     *             team1: ?array{sample_size: int, wins: int, losses: int, draws: int, results: array<int, string>},
+     *             team2: ?array{sample_size: int, wins: int, losses: int, draws: int, results: array<int, string>}
+     *         },
+     *         status_label?: ?string
      *     }>
      * }|null  $imageData
      */

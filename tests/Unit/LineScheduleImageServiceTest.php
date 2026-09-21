@@ -41,6 +41,10 @@ class LineScheduleImageServiceTest extends TestCase
             'team2' => 'Team '.$number.' Beta',
             'tournament' => 'VCT 2026: Test Stage',
             'odds' => null,
+            'recent_form' => [
+                'team1' => \App\Services\RecentForm::summarize(['W', 'L', 'W', 'D', 'W']),
+                'team2' => $number === 3 ? null : \App\Services\RecentForm::summarize(['L', 'W']),
+            ],
             'h2h' => [
                 'sample_size' => 5,
                 'history_total' => 12,
@@ -77,12 +81,12 @@ class LineScheduleImageServiceTest extends TestCase
         $preview->readImageBlob(Storage::disk('schedule-images')->get($previewPath));
 
         $this->assertSame(1440, $original->getImageWidth());
-        $this->assertSame(750, $original->getImageHeight());
+        $this->assertSame(1164, $original->getImageHeight());
         $this->assertSame(700, $preview->getImageWidth());
-        $this->assertSame(365, $preview->getImageHeight());
+        $this->assertSame(566, $preview->getImageHeight());
         $this->assertSame(
             ['r' => 19, 'g' => 27, 'b' => 46, 'a' => 1],
-            $original->getImagePixelColor(520, 145)->getColor(),
+            $original->getImagePixelColor(520, 165)->getColor(),
         );
 
         $original->clear();
@@ -147,7 +151,7 @@ class LineScheduleImageServiceTest extends TestCase
 
         $image = new Imagick;
         $image->readImageBlob(Storage::disk('schedule-images')->get($originalPath));
-        $this->assertSame(2334, $image->getImageHeight());
+        $this->assertSame(3804, $image->getImageHeight());
         $image->clear();
     }
 

@@ -201,6 +201,9 @@ class Bo3ScheduleService
             }
 
             $index = $knownMatches[$key];
+            foreach (['team1_id', 'team2_id', 'discipline_id'] as $field) {
+                $structuredMatches[$index][$field] = $match[$field] ?? null;
+            }
             if ($structuredMatches[$index]['format'] === '未知') {
                 $structuredMatches[$index]['format'] = $match['format'];
             }
@@ -295,6 +298,9 @@ class Bo3ScheduleService
                         'name' => "{$team1} vs {$team2}",
                         'team1' => $team1,
                         'team2' => $team2,
+                        'team1_id' => $match['team1_id'] ?? $match['team1']['id'] ?? null,
+                        'team2_id' => $match['team2_id'] ?? $match['team2']['id'] ?? null,
+                        'discipline_id' => self::DISCIPLINE_IDS[$game],
                         'tournament' => $this->normalizeText((string) ($match['tournament']['name'] ?? '')) ?: '未知賽事',
                         'format' => $boType,
                         'is_live' => $isLive,
@@ -331,6 +337,9 @@ class Bo3ScheduleService
         $slugs = [];
 
         foreach ($matches as $index => $match) {
+            if (array_key_exists('bo3_detail', $match)) {
+                continue; // Already attempted during this command's live refresh.
+            }
             $hasFormat = preg_match('/^BO\d+$/i', trim((string) ($match['format'] ?? ''))) === 1;
             $isLive = (bool) ($match['is_live'] ?? false);
 
@@ -364,6 +373,7 @@ class Bo3ScheduleService
             $response = $responses[$slug] ?? null;
 
             if (! $response instanceof Response || ! $response->successful()) {
+                $matches[$index]['bo3_detail'] = [];
                 Log::warning('bo3.gg match format request failed.', [
                     'slug' => $slug,
                     'status' => $response instanceof Response ? $response->status() : null,
@@ -372,6 +382,7 @@ class Bo3ScheduleService
                 continue;
             }
 
+            $matches[$index]['bo3_detail'] = is_array($response->json()) ? $response->json() : [];
             $boType = $response->json('bo_type');
 
             if (is_numeric($boType) && (int) $boType > 0) {

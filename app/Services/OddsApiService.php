@@ -4,7 +4,6 @@ namespace App\Services;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -19,7 +18,7 @@ class OddsApiService
     {
         $apiKey = (string) config('services.odds.api_key');
 
-        if ($matches === [] || $apiKey === '') {
+        if ($matches === [] || $apiKey === '' || ! array_filter($matches, fn (array $match): bool => ($match['game'] ?? '') !== 'mlb')) {
             return $this->withoutOdds($matches);
         }
 
@@ -163,18 +162,6 @@ class OddsApiService
 
     private function selectedBookmakers(string $apiKey): string
     {
-        $cacheKey = 'odds-api:selected-bookmakers';
-
-        try {
-            $cached = Cache::get($cacheKey);
-
-            if (is_string($cached) && $cached !== '') {
-                return $cached;
-            }
-        } catch (Throwable) {
-            // Cache is optional for this integration.
-        }
-
         $response = Http::acceptJson()
             ->withUserAgent('AmandaBlogLineBot/1.0')
             ->timeout((int) config('services.odds.timeout_seconds', 10))
@@ -192,14 +179,6 @@ class OddsApiService
             ->filter(fn (mixed $bookmaker): bool => is_string($bookmaker) && trim($bookmaker) !== '')
             ->map(fn (string $bookmaker): string => trim($bookmaker))
             ->implode(',');
-
-        if ($bookmakers !== '') {
-            try {
-                Cache::put($cacheKey, $bookmakers, 3600);
-            } catch (Throwable) {
-                // Cache is optional for this integration.
-            }
-        }
 
         return $bookmakers;
     }

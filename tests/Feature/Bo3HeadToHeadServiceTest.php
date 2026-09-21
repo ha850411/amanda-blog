@@ -81,7 +81,7 @@ class Bo3HeadToHeadServiceTest extends TestCase
                 && $request['sort'] === '-start_date'
                 && $request['filter']['matches.status']['in'] === 'finished'
                 && $request['filter']['matches.team_ids']['contains'] === '17842,17801'
-                && $request['filter']['matches.start_date']['lt'] === '2026-08-14'
+                && $request['filter']['matches.start_date']['lt'] === '2026-08-14T04:00:00+00:00'
                 && $request['filter']['matches.discipline_id']['eq'] === 3
                 && ! isset($request['with']);
         });
