@@ -33,7 +33,7 @@
         <li>
             <a href="{{ url('/log-viewer') }}" target="_blank" rel="noopener">
                 <span class="icon"><i class="fa-solid fa-list-check"></i></span>
-                <span class="title">Webhook 紀錄</span>
+                <span class="title">Log</span>
             </a>
         </li>
         <li>

@@ -94,7 +94,7 @@ LINE webhook 會先記錄事件並快速回傳 HTTP 200，再由 queue worker �
 
 查到賽程時會回覆一張可點擊放大的賽程圖，並另外用一則文字訊息提供符合遊戲、日期與 Tier 條件的 bo3.gg 總覽連結，不會再為每場賽事附上個別連結。圖片會顯示賽事名稱與 BO 賽制，並以 Odds-API.io 的日期、開賽時間與雙方隊名匹配盤口。設定 `ODDS_API_KEY` 後，會依 `ODDS_API_BOOKMAKER_PRIORITY` 選擇同一家莊家的完整雙邊 ML（預設 Stake 優先、Bet365 備援），不會混搭兩家盤口；`ODDS_API_BOOKMAKERS` 留空時自動使用帳號已選擇的莊家。若所選莊家沒有完整雙邊 ML，會改用 bo3.gg 該場賽事提供的同一家莊家獨贏盤，兩邊都沒有時才顯示「暫無盤口」。圖片會直接寫入 `LINE_SCHEDULE_IMAGE_DISK`（預設固定為 `s3`），不會儲存在主機的 `public/storage`；S3 的 `Storage::url()` 必須產生公開 HTTPS 網址。Scheduler 每天 03:30（台灣時間）只清理 `line-schedules/` 下超過 `LINE_SCHEDULE_IMAGE_RETENTION_DAYS`（預設 7 天）的物件，因此 S3 IAM 除了上傳與讀取外，也需要 `ListBucket` 與 `DeleteObject` 權限。若圖片產生或儲存失敗，Bot 會降級成文字回覆，且只保留一個總覽連結。
 
-Webhook 執行紀錄寫入 `storage/logs/webhook-*.log`。登入後台後可由「Webhook 紀錄」或 `/log-viewer` 查看；Log Viewer 與其 API 都受後台管理員登入保護。
+Webhook 執行紀錄寫入 `storage/logs/webhook-*.log`。登入後台後可由「Log」或 `/log-viewer` 查看；Log Viewer 與其 API 都受後台管理員登入保護。
 
 日期區間查詢（例如 `!match 0914~0918`）會將各遊戲、各日期的 bo3.gg 網頁與賽程 API 請求合併處理，最多同時執行 5 個請求。查詢會先套用隊伍篩選；未包含今天時，另先排序與套用顯示場數限制，再補抓缺少的賽事詳情；BO 賽制與賽事名稱優先沿用已取得的賽程資料。包含今天的查詢仍會先更新滾球資訊，再排除已結束的場次。
 
