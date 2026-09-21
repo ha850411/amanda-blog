@@ -39,6 +39,55 @@
 - 前台: http://localhost:8091
 - 後台: http://localhost:8091/admin
 
+# Google AdSense 廣告收益
+
+網站透過 Google AdSense 放送廣告。網站端已提供帳戶驗證 meta tag、`/ads.txt` 與自動廣告程式碼；實際帳戶啟用、網站審查、自動廣告及收款資料仍需在 AdSense 後台完成。
+
+## 1. 設定發布商 ID 並部署
+
+`config/adsense.php` 已設定從本站 AdSense 後台確認的公開發布商 ID `pub-8869697978199559`，並預設載入廣告程式碼。既有正式環境未設定下列變數時，push 後可直接透過 CI/CD 部署；此 ID 是公開驗證資訊，不是金鑰。若正式環境已設定空白 ID 或關閉廣告，請移除覆寫或改為：
+
+```env
+ADSENSE_PUBLISHER_ID=pub-8869697978199559
+ADSENSE_ENABLED=true
+```
+
+部署本次程式後，以現有部署流程重新產生 Laravel 設定；若使用本專案的 Docker Compose：
+
+```sh
+cd .docker/compose
+docker compose exec -T service php artisan config:cache
+docker compose exec -T service php artisan view:clear
+```
+
+有有效 ID 時，首頁 `<head>` 會包含 `google-adsense-account` meta tag，`https://amanda-blog.com/ads.txt` 會回傳自己的 Google 授權紀錄。`ADSENSE_ENABLED=false` 時仍可驗證；沒有 ID 或格式錯誤時不輸出驗證碼、廣告程式碼，`/ads.txt` 回傳 404。不要另外建立 `public/ads.txt`，以免靜態檔蓋過動態設定。
+
+## 2. 驗證網站與設定隱私訊息
+
+在 AdSense 選擇「meta 標記」或「ads.txt 程式碼片段」驗證方式，確認正式網站已上線後點選「驗證」及「要求審查」。`robots.txt` 沒有封鎖首頁、公開文章或 `/ads.txt`；若 Cloudflare 對 Google 廣告檢索器顯示驗證挑戰，需在 Cloudflare 設定中允許合法檢索。
+
+在「隱私權與訊息」設定及發布適用的訊息。向歐洲經濟區、英國與瑞士使用者提供個人化廣告時，須使用 Google 認證 CMP；可選用 AdSense 內建的 Google CMP。將隱私權政策網址設為 `https://amanda-blog.com/privacy`，並設定同意選项與撤回入口。本站隱私權頁面與 Cookie 說明不會取代 CMP。
+
+隱私權頁面已說明現有 IP／日期統計、工作階段 Cookie、Google Tag Manager 及廣告資料使用，聯絡信箱沿用網站公開的 `summer.hung222@gmail.com`。上線時應確認 AdSense 的廣告技術供應商、GTM 標籤、資料使用方式與政策內容一致。
+
+## 3. 啟用自動廣告與收款
+
+在 AdSense「廣告」為網站啟用自動廣告並套用設定，並完成隱私訊息設定。正式環境預設已啟用程式碼；若 `.env` 有覆寫，請確認 `ADSENSE_ENABLED=true` 並重新執行 `config:cache`。本機開發請保留 `.env.example` 的 `ADSENSE_ENABLED=false`。程式碼會在首頁、分類及公開文章的 `<head>` 各載入一次；密碼保護文章、隱藏文章、後台、錯誤頁及隱私權頁不載入廣告程式碼。
+
+網站通過 Google 審查且帳戶啟用後才會開始放送廣告。付款資料、身分／地址驗證、稅務資訊與付款方式，依 AdSense 後台顯示的要求由帳戶持有人完成。放上程式碼本身不代表審查通過或已可領款。
+
+上線後檢查：
+
+```sh
+curl -fsS https://amanda-blog.com/ads.txt
+curl -fsS https://amanda-blog.com/ | rg 'google-adsense-account|adsbygoogle'
+curl -fsS https://amanda-blog.com/privacy
+```
+
+確認兩處 ID 都屬於自己的 AdSense 帳戶。若暫停廣告，將 `ADSENSE_ENABLED=false` 並重新產生設定快取即可，驗證碼與 `ads.txt` 仍會保留。
+
+官方文件：[連結網站](https://support.google.com/adsense/answer/7584263?hl=zh-Hant)、[設定自動廣告](https://support.google.com/adsense/answer/9261307?hl=zh-Hant)、[隱私權政策必要內容](https://support.google.com/adsense/answer/1348695?hl=zh-Hant)、[Google 同意聲明管理規定](https://support.google.com/adsense/answer/13554116?hl=zh-Hant)。
+
 # Runtime image
 
 PHP 8.4 runtime 使用固定 digest 的 Debian Trixie base image，採用 OpenSSL 3.5。Stake API 的實測中，相同代理、Token、HTTP/1.1 與 request 在舊 Bookworm／OpenSSL 3.0 runtime 回傳 403，Trixie runtime 則回傳 HTTP 200 與有效 GraphQL 資料；此結果不代表所有 403 都由 TLS 環境造成。TLS 更新不需要新增 Cookie 或關閉憑證驗證。

@@ -16,6 +16,10 @@
     <link rel="alternate" type="application/rss+xml" title="Amanda's Blog RSS Feed" href="{{ url('/rss.xml') }}" />
     <link rel="llms-txt" type="text/markdown" title="LLMs Summary Index" href="{{ url('/llms.txt') }}" />
     @yield('meta')
+    @include('layouts.adsense', [
+        'showAds' => request()->routeIs('index', 'tag')
+            || (request()->routeIs('article') && isset($article) && (int) $article->status === 1),
+    ])
     <link rel="icon" href="{{ asset('images/favicon.png') }}" type="image/png">
     <link rel="stylesheet" href="{{ asset('css/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ asset('css/fontawesome.min.css') }}">
@@ -31,12 +35,18 @@
     <!-- End Google Tag Manager -->
 </head>
 
-<body class="page-loading">
+<body @class(['page-loading' => ! $__env->hasSection('static_content')])>
     <!-- Google Tag Manager (noscript) -->
     <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WP6N5NTS"
     height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <!-- End Google Tag Manager (noscript) -->
 
+    @hasSection('static_content')
+        <header class="container py-4 border-bottom">
+            <a href="{{ route('index') }}" class="h4 text-dark text-decoration-none">Amanda | 探店 | 美食 | 生活 | 開箱</a>
+        </header>
+        @yield('static_content')
+    @else
     {{-- header --}}
     <div id="app">
         <template v-if="!base.inital">
@@ -64,8 +74,6 @@
             @include('layouts/header')
             {{-- main content --}}
             @yield('content')
-            {{-- footer --}}
-            @include('layouts/footer')
         </template>
     </div>
 
@@ -218,6 +226,8 @@
         };
     </script>
     @yield('scripts')
+    @endif
+    @include('layouts.footer')
 </body>
 
 </html>

@@ -1,12 +1,17 @@
 <?php
 
 use App\Http\Controllers\Admin;
+use App\Http\Controllers\AdsTxtController;
 use App\Http\Controllers\IndexController;
 use App\Http\Middleware\AdminMiddleware;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [IndexController::class, 'index'])
     ->name('index');
+
+Route::get('/ads.txt', AdsTxtController::class)->name('ads.txt');
+
+Route::view('/privacy', 'privacy')->name('privacy');
 
 Route::get('/tag/{tagId}', [IndexController::class, 'tag'])
     ->name('tag');

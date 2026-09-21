@@ -6,6 +6,11 @@
         <changefreq>daily</changefreq>
         <priority>1.0</priority>
     </url>
+    <url>
+        <loc>{{ route('privacy') }}</loc>
+        <changefreq>monthly</changefreq>
+        <priority>0.3</priority>
+    </url>
     @foreach ($tags as $tag)
     <url>
         <loc>{{ url('/tag/' . $tag->id) }}</loc>
