@@ -88,6 +88,10 @@ curl -fsS https://amanda-blog.com/privacy
 
 官方文件：[連結網站](https://support.google.com/adsense/answer/7584263?hl=zh-Hant)、[設定自動廣告](https://support.google.com/adsense/answer/9261307?hl=zh-Hant)、[隱私權政策必要內容](https://support.google.com/adsense/answer/1348695?hl=zh-Hant)、[Google 同意聲明管理規定](https://support.google.com/adsense/answer/13554116?hl=zh-Hant)。
 
+# Cloudflare 文章流量 Dashboard
+
+Admin 首頁提供文章瀏覽次數、每日趨勢與文章排行，使用 Cloudflare Web Analytics。正式站需設定唯讀分析 API Token；完整設定與統計範圍見 [串接說明](docs/cloudflare-analytics.md)。
+
 # Runtime image
 
 PHP 8.4 runtime 使用固定 digest 的 Debian Trixie base image，採用 OpenSSL 3.5。Stake API 的實測中，相同代理、Token、HTTP/1.1 與 request 在舊 Bookworm／OpenSSL 3.0 runtime 回傳 403，Trixie runtime 則回傳 HTTP 200 與有效 GraphQL 資料；此結果不代表所有 403 都由 TLS 環境造成。TLS 更新不需要新增 Cookie 或關閉憑證驗證。

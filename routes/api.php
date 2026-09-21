@@ -22,6 +22,10 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::middleware(AdminMiddleware::class)->group(function () {
+    Route::get('/admin/analytics/articles', Api\ArticleAnalyticsController::class)
+        ->middleware('throttle:30,1')
+        ->name('admin.analytics.articles');
+
     // 更新關於我
     Route::post('/about', [Api\AboutController::class, 'updateAbout'])
         ->name('updateAbout');
