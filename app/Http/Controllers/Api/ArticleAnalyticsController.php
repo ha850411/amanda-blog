@@ -69,6 +69,7 @@ class ArticleAnalyticsController extends Controller
                 'fetched_at' => $metrics['fetched_at'],
                 'through' => $metrics['through'],
                 'sampled' => $metrics['sampled'],
+                'cache_seconds' => (int) config('cloudflare.cache_seconds'),
                 'summary' => [
                     'page_views' => $total,
                     'viewed_articles' => $rows->where('page_views', '>', 0)->count(),
@@ -80,6 +81,6 @@ class ArticleAnalyticsController extends Controller
                 ])->values(),
                 'articles' => $rows,
             ],
-        ]);
+        ])->header('Cache-Control', 'private, no-store');
     }
 }

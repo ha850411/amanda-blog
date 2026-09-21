@@ -25,7 +25,7 @@
                 <div class="analytics-date-inputs">
                     <label>開始日期<input type="date" class="form-control form-control-sm" v-model="start" :max="today" required @change="preset = null"></label>
                     <label>結束日期<input type="date" class="form-control form-control-sm" v-model="end" :min="start" :max="today" required @change="preset = null"></label>
-                    <button class="btn btn-dark btn-sm" type="submit" :disabled="loading">@{{ loading ? '讀取中…' : '查詢' }}</button>
+                    <button class="btn btn-dark btn-sm" type="submit" :disabled="loading">@{{ loading ? '讀取中…' : '查詢最新資料' }}</button>
                 </div>
             </form>
             <div v-if="loading" class="analytics-state" role="status" aria-live="polite"><div class="spinner-border text-secondary mb-3" aria-hidden="true"></div><h2>正在整理文章流量</h2><p>正在取得所選日期的 Cloudflare 瀏覽資料。</p></div>
@@ -37,7 +37,7 @@
             </div>
             <div v-else-if="error" class="analytics-state" role="alert"><div class="setup-icon"><i class="fa-solid fa-plug-circle-exclamation" aria-hidden="true"></i></div><h2>目前無法顯示流量資料</h2><p>@{{ error }}</p><button type="button" class="btn btn-outline-dark btn-sm" @click="loadDashboard">重新查詢</button></div>
             <template v-else-if="dashboard">
-                <div class="analytics-period"><span>@{{ dashboard.start }} — @{{ dashboard.end }} <span class="text-secondary ms-1">台灣時間</span></span><span class="text-secondary">資料更新 @{{ formatTime(dashboard.fetched_at) }} · 快取 5 分鐘，可重新查詢更新</span></div>
+                <div class="analytics-period"><span>@{{ dashboard.start }} — @{{ dashboard.end }} <span class="text-secondary ms-1">台灣時間</span></span><span class="text-secondary">查詢時間 @{{ formatTime(dashboard.fetched_at) }} · @{{ dashboard.cache_seconds > 0 ? '快取 ' + dashboard.cache_seconds + ' 秒' : '每次查詢直接取得 Cloudflare 資料' }}<br>Cloudflare 收集與處理資料仍可能延遲</span></div>
                 <section class="analytics-metrics" aria-label="流量摘要">
                     <article class="metric-card metric-primary"><div class="metric-label">文章瀏覽次數 <span>PV</span></div><div class="metric-number">@{{ number(dashboard.summary.page_views) }}</div><div class="metric-caption">所選期間所有文章的瀏覽總和</div></article>
                     <article class="metric-card"><div class="metric-label">有瀏覽的文章</div><div class="metric-number">@{{ number(dashboard.summary.viewed_articles) }}<small>/ @{{ number(dashboard.summary.total_articles) }}</small></div><div class="metric-caption">目前文章中有記錄到瀏覽的篇數</div></article>

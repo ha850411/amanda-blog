@@ -38,13 +38,7 @@ class CloudflareAnalyticsService
             $paths[] = '/article/'.$id.'/';
         }
 
-        $key = 'cloudflare:articles:'.hash('sha256', json_encode([
-            config('cloudflare.account_id'), config('cloudflare.site_tag'),
-            config('cloudflare.hostname'), config('cloudflare.api_token'),
-            $start->toDateString(), $end->toDateString(), $paths,
-        ], JSON_THROW_ON_ERROR));
-
-        return Cache::remember($key, config('cloudflare.cache_seconds'), function () use ($start, $end, $paths) {
+        $fetch = function () use ($start, $end, $paths) {
             $now = CarbonImmutable::now('Asia/Taipei');
             $until = $end->addDay()->startOfDay()->min($now);
             $base = [
@@ -126,7 +120,22 @@ class CloudflareAnalyticsService
             }
 
             return $base;
-        });
+        };
+
+        $cacheSeconds = (int) config('cloudflare.cache_seconds');
+        // remember(..., 0) can still read an older entry before applying its TTL.
+        // Bypass the cache entirely so disabling it takes effect immediately.
+        if ($cacheSeconds <= 0) {
+            return $fetch();
+        }
+
+        $key = 'cloudflare:articles:'.hash('sha256', json_encode([
+            config('cloudflare.account_id'), config('cloudflare.site_tag'),
+            config('cloudflare.hostname'), config('cloudflare.api_token'),
+            $start->toDateString(), $end->toDateString(), $paths, $cacheSeconds,
+        ], JSON_THROW_ON_ERROR));
+
+        return Cache::remember($key, $cacheSeconds, $fetch);
     }
 
     private function pageViews(array $row): int

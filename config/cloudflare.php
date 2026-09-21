@@ -7,7 +7,8 @@ return [
     // Web Analytics site tag, not the public beacon token or the API token.
     'site_tag' => env('CLOUDFLARE_WEB_ANALYTICS_SITE_TAG', '24dc41967c4346ac8b5ddc0b7faf13a0'),
     'hostname' => env('CLOUDFLARE_ANALYTICS_HOSTNAME', 'amanda-blog.com'),
-    'cache_seconds' => 300,
+    // Zero bypasses stored results and queries Cloudflare on every dashboard request.
+    'cache_seconds' => max(0, (int) env('CLOUDFLARE_ANALYTICS_CACHE_SECONDS', 0)),
     'timeout_seconds' => 20,
     'max_range_days' => 31,
 ];

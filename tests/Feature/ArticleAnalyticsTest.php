@@ -122,6 +122,7 @@ class ArticleAnalyticsTest extends TestCase
     public function test_cache_is_reused_and_invalidated_when_credentials_change(): void
     {
         $this->login();
+        config()->set('cloudflare.cache_seconds', 300);
         Article::factory()->create();
         Http::fake(['api.cloudflare.com/*' => Http::response($this->response())]);
         $this->getJson(self::URL)->assertOk();
@@ -130,6 +131,28 @@ class ArticleAnalyticsTest extends TestCase
         config()->set('cloudflare.api_token', 'replacement-token');
         $this->getJson(self::URL)->assertOk();
         Http::assertSentCount(2);
+    }
+
+    public function test_disabling_cache_ignores_stored_results_and_fetches_each_time(): void
+    {
+        $this->login();
+        $article = Article::factory()->create();
+        $sequence = Http::sequence();
+        foreach ([1, 2, 3] as $views) {
+            $sequence->push($this->response([
+                ['count' => $views, 'dimensions' => ['requestPath' => '/article/'.$article->id]],
+            ]));
+        }
+        Http::fake(['api.cloudflare.com/*' => $sequence]);
+
+        config()->set('cloudflare.cache_seconds', 300);
+        $this->getJson(self::URL)->assertOk()->assertJsonPath('data.summary.page_views', 1);
+        config()->set('cloudflare.cache_seconds', 0);
+        $this->getJson(self::URL)->assertOk()->assertJsonPath('data.summary.page_views', 2)
+            ->assertJsonPath('data.cache_seconds', 0)
+            ->assertHeader('Cache-Control', 'no-store, private');
+        $this->getJson(self::URL)->assertOk()->assertJsonPath('data.summary.page_views', 3);
+        Http::assertSentCount(3);
     }
 
     public function test_empty_successful_data_is_distinct_from_provider_failure(): void

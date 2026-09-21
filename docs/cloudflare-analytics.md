@@ -10,6 +10,7 @@
 CLOUDFLARE_ANALYTICS_API_TOKEN=你的唯讀Token
 CLOUDFLARE_ACCOUNT_ID=abcff8b627068eccd2c3d48b43b7a6bf
 CLOUDFLARE_ANALYTICS_HOSTNAME=amanda-blog.com
+CLOUDFLARE_ANALYTICS_CACHE_SECONDS=0
 CLOUDFLARE_WEB_ANALYTICS_SITE_TAG=24dc41967c4346ac8b5ddc0b7faf13a0
 ```
 
@@ -30,6 +31,7 @@ php artisan view:clear
 - 只計算資料庫目前存在的 `/article/{id}` 與尾端有 `/` 的文章網址；不包含首頁、後台、圖片、API 或已刪除文章。隱藏及密碼文章保留於排行，密碼頁瀏覽不表示讀者已解鎖內容。
 - PV 是頁面瀏覽次數，不是獨立訪客或廣告點擊率。JavaScript 封鎖、網路狀況、資料保留期及 Cloudflare 抽樣可能影響結果。
 - UTC 小時資料換算為台灣日期；今天截至查詢當下。文章排行與每日趨勢各自彙整，抽樣時加總可能略有差異。
-- 查詢成功後快取 5 分鐘，按「查詢」取得目前快取或到期後的新資料。API 僅供登入的後台管理者使用，每分鐘最多 30 次。
+- 預設不快取：開啟頁面或按「查詢最新資料」時，直接向 Cloudflare 查詢。既有快取也不會被讀取，API 回應帶有 `private, no-store`。這不會消除 Cloudflare 收集與處理資料的延遲，頁面不會自動輪詢。
+- 如需降低查詢頻率，可設定 `CLOUDFLARE_ANALYTICS_CACHE_SECONDS` 為正秒數；畫面會顯示實際快取秒數。API 僅供登入的後台管理者使用，每分鐘最多 30 次。
 
 官方文件：[Web Analytics](https://developers.cloudflare.com/web-analytics/about/)、[Analytics Token](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/)、[GraphQL 查詢限制](https://developers.cloudflare.com/analytics/graphql-api/limits/)。
