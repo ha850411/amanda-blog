@@ -42,8 +42,8 @@ class LineScheduleImageServiceTest extends TestCase
             'tournament' => 'VCT 2026: Test Stage',
             'odds' => null,
             'recent_form' => [
-                'team1' => \App\Services\RecentForm::summarize(['W', 'L', 'W', 'D', 'W']),
-                'team2' => $number === 3 ? null : \App\Services\RecentForm::summarize(['L', 'W']),
+                'team1' => $this->recentForm(['W', 'L', 'W', 'D', 'W']),
+                'team2' => $number === 3 ? null : $this->recentForm(['L', 'W']),
             ],
             'h2h' => [
                 'sample_size' => 5,
@@ -81,16 +81,38 @@ class LineScheduleImageServiceTest extends TestCase
         $preview->readImageBlob(Storage::disk('schedule-images')->get($previewPath));
 
         $this->assertSame(1440, $original->getImageWidth());
-        $this->assertSame(1164, $original->getImageHeight());
+        $this->assertSame(1674, $original->getImageHeight());
         $this->assertSame(700, $preview->getImageWidth());
-        $this->assertSame(566, $preview->getImageHeight());
+        $this->assertSame(814, $preview->getImageHeight());
         $this->assertSame(
             ['r' => 19, 'g' => 27, 'b' => 46, 'a' => 1],
             $original->getImagePixelColor(520, 165)->getColor(),
         );
+        // H2H outcomes reverse sides on the second result: the winner is
+        // green and loser red regardless of the scheduled left/right team.
+        $win = ['r' => 7, 'g' => 56, 'b' => 47, 'a' => 1];
+        $loss = ['r' => 61, 'g' => 23, 'b' => 36, 'a' => 1];
+        $this->assertSame($win, $original->getImagePixelColor(1012, 318)->getColor());
+        $this->assertSame($loss, $original->getImagePixelColor(1200, 318)->getColor());
+        $this->assertSame($loss, $original->getImagePixelColor(1012, 384)->getColor());
+        $this->assertSame($win, $original->getImagePixelColor(1200, 384)->getColor());
+        $this->assertSame($win, $original->getImagePixelColor(412, 388)->getColor());
+        $this->assertSame($loss, $original->getImagePixelColor(412, 434)->getColor());
 
         $original->clear();
         $preview->clear();
+    }
+
+    private function recentForm(array $results): array
+    {
+        return \App\Services\RecentForm::fromMatches(array_map(fn (string $result, int $index): array => [
+            'date' => '2026/08/'.(10 - $index),
+            'opponent' => $index === 2 ? 'Very Long Opponent Team Name With Multiple Words' : 'Opponent '.$index,
+            'format' => 'BO3',
+            'team_score' => $result === 'W' ? 2 : ($result === 'D' ? 1 : 0),
+            'opponent_score' => $result === 'L' ? 2 : ($result === 'D' ? 1 : 0),
+            'result' => $result,
+        ], $results, array_keys($results)));
     }
 
     public function test_it_abbreviates_team_names_intelligently(): void
@@ -151,7 +173,7 @@ class LineScheduleImageServiceTest extends TestCase
 
         $image = new Imagick;
         $image->readImageBlob(Storage::disk('schedule-images')->get($originalPath));
-        $this->assertSame(3804, $image->getImageHeight());
+        $this->assertSame(5674, $image->getImageHeight());
         $image->clear();
     }
 

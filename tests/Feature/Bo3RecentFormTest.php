@@ -45,9 +45,20 @@ class Bo3RecentFormTest extends TestCase
             $this->assertSame(2, $match['recent_form']['team1']['wins']);
             $this->assertSame(2, $match['recent_form']['team1']['losses']);
             $this->assertSame(['L'], $match['recent_form']['team2']['results']);
+            $this->assertSame([
+                'date' => '2026/09/20', 'opponent' => 'Team 9', 'format' => 'BO3',
+                'team_score' => 2, 'opponent_score' => 0, 'result' => 'W',
+            ], $match['recent_form']['team1']['matches'][0]);
+            $this->assertSame([
+                'date' => '2026/09/19', 'opponent' => 'Team 8', 'format' => 'BO3',
+                'team_score' => 0, 'opponent_score' => 2, 'result' => 'L',
+            ], $match['recent_form']['team1']['matches'][1]);
+            $this->assertCount(5, $match['recent_form']['team1']['matches']);
+            $this->assertSame('D', $match['recent_form']['team1']['matches'][2]['result']);
             $this->assertNull($match['h2h']); // Each team's form is independent of H2H.
         }
         Http::assertSentCount(9);
+        $this->assertCount(6, Http::recorded(fn (Request $request): bool => ($request['with'] ?? '') === 'teams'));
     }
 
     public function test_duplicate_teams_share_requests_but_later_invocations_fetch_fresh_data_without_cache(): void
@@ -111,6 +122,18 @@ class Bo3RecentFormTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_detail_dates_use_taiwan_time_and_missing_names_are_explicit(): void
+    {
+        $row = $this->row(9, 1, 0, 2, '2026-09-20T18:00:00Z');
+        unset($row['team1'], $row['bo_type']);
+        Http::fake(['https://api.bo3.gg/api/v1/matches?*' => Http::response(['results' => [$row]])]);
+        $result = app(Bo3HeadToHeadService::class)->enrich([$this->match('cs')])[0];
+        $this->assertSame([
+            'date' => '2026/09/21', 'opponent' => '對手不明', 'format' => '—',
+            'team_score' => 2, 'opponent_score' => 0, 'result' => 'W',
+        ], $result['recent_form']['team1']['matches'][0]);
+    }
+
     private function match(string $game): array
     {
         return [
@@ -123,6 +146,10 @@ class Bo3RecentFormTest extends TestCase
 
     private function row(int $first, int $second, int $firstScore, int $secondScore, string $date): array
     {
-        return ['team1_id' => $first, 'team2_id' => $second, 'team1_score' => $firstScore, 'team2_score' => $secondScore, 'start_date' => $date, 'status' => 'finished'];
+        return [
+            'team1_id' => $first, 'team2_id' => $second, 'team1_score' => $firstScore, 'team2_score' => $secondScore,
+            'start_date' => $date, 'status' => 'finished', 'bo_type' => 3,
+            'team1' => ['id' => $first, 'name' => 'Team '.$first], 'team2' => ['id' => $second, 'name' => 'Team '.$second],
+        ];
     }
 }

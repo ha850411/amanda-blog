@@ -6,6 +6,16 @@ use Carbon\CarbonImmutable;
 
 class RecentForm
 {
+    /**
+     * @param  array<int, array{date: string, opponent: string, format: string, team_score: int, opponent_score: int, result: string}>  $matches
+     */
+    public static function fromMatches(array $matches): array
+    {
+        $matches = array_slice(array_values($matches), 0, 5);
+
+        return self::summarize(array_column($matches, 'result')) + ['matches' => $matches];
+    }
+
     public static function cutoff(array $match): CarbonImmutable
     {
         $now = CarbonImmutable::now((string) config('services.bo3.timezone', 'Asia/Taipei'));

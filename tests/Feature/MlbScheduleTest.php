@@ -85,6 +85,17 @@ class MlbScheduleTest extends TestCase
         $matches = $service->enrichRecentForm([$match, $match]);
         $this->assertSame(['W', 'L', 'W', 'W', 'L'], $matches[0]['recent_form']['team1']['results']);
         $this->assertSame(['L', 'W', 'L', 'L', 'W'], $matches[0]['recent_form']['team2']['results']);
+        $this->assertSame([
+            'date' => '2026/09/20', 'opponent' => '密爾瓦基釀酒人', 'format' => '單場',
+            'team_score' => 4, 'opponent_score' => 0, 'result' => 'W',
+        ], $matches[0]['recent_form']['team1']['matches'][0]);
+        $this->assertSame([
+            'date' => '2026/09/20', 'opponent' => '洛杉磯道奇', 'format' => '單場',
+            'team_score' => 0, 'opponent_score' => 4, 'result' => 'L',
+        ], $matches[0]['recent_form']['team2']['matches'][0]);
+        $this->assertSame(0, $matches[0]['recent_form']['team1']['matches'][1]['team_score']);
+        $this->assertSame(4, $matches[0]['recent_form']['team1']['matches'][1]['opponent_score']);
+        $this->assertCount(5, $matches[0]['recent_form']['team1']['matches']);
         $this->assertSame($matches[0]['recent_form'], $matches[1]['recent_form']);
         Http::assertSentCount(1);
         Http::assertSent(fn (Request $r): bool => $r['teamId'] === '119,158');
@@ -119,7 +130,9 @@ class MlbScheduleTest extends TestCase
             $this->assertSame('洛杉磯道奇', $reply->imageData['matches'][0]['team1']);
             $this->assertSame(['W', 'L', 'W', 'W', 'L'], $reply->imageData['matches'][0]['recent_form']['team1']['results']);
             $this->assertStringContainsString('近 5 場（新→舊）', $reply->text);
-            $this->assertStringContainsString('勝 敗 勝 勝 敗', $reply->text);
+            $this->assertStringContainsString('比分為本隊：對手', $reply->text);
+            $this->assertStringContainsString('2026/09/20 單場｜勝 4：0 vs 密爾瓦基釀酒人', $reply->text);
+            $this->assertStringContainsString('2026/09/20 單場｜敗 0：4 vs 洛杉磯道奇', $reply->text);
         }
         Http::assertSentCount(6); // One schedule and one history call per command.
         Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), 'bo3.gg'));

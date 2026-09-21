@@ -91,6 +91,11 @@ class Bo3HeadToHeadService
                     'targets' => [],
                 ];
                 $requests[$key]['targets'][] = compact('index', 'kind', 'team1', 'team2', 'cutoff');
+                if ($kind !== 'h2h') {
+                    // Include opponent names with the same history request;
+                    // no follow-up request is needed for individual results.
+                    $requests[$key]['query']['with'] = 'teams';
+                }
             }
         }
 
@@ -155,15 +160,27 @@ class Bo3HeadToHeadService
             $seen[$id] = true;
             if ((int) ($row['team1_id'] ?? 0) === $teamId) {
                 [$own, $other] = [$row['team1_score'], $row['team2_score']];
+                $opponent = $row['team2']['name'] ?? null;
             } elseif ((int) ($row['team2_id'] ?? 0) === $teamId) {
                 [$own, $other] = [$row['team2_score'], $row['team1_score']];
+                $opponent = $row['team1']['name'] ?? null;
             } else {
                 continue;
             }
-            $results[] = $own > $other ? 'W' : ($own < $other ? 'L' : 'D');
+            $results[] = [
+                'date' => $this->formatMatchDate($row['start_date']),
+                'opponent' => is_string($opponent) && trim($opponent) !== '' ? trim($opponent) : '對手不明',
+                'format' => is_numeric($row['bo_type'] ?? null) && (int) $row['bo_type'] > 0 ? 'BO'.(int) $row['bo_type'] : '—',
+                'team_score' => (int) $own,
+                'opponent_score' => (int) $other,
+                'result' => $own > $other ? 'W' : ($own < $other ? 'L' : 'D'),
+            ];
+            if (count($results) === self::LIMIT) {
+                break;
+            }
         }
 
-        return RecentForm::summarize($results);
+        return RecentForm::fromMatches($results);
     }
 
     private function completedBefore(array $row, CarbonImmutable $cutoff): bool

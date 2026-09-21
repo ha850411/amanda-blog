@@ -250,11 +250,14 @@ class LineScheduleBot
             if (($match['game'] ?? null) === 'mlb') {
                 $lines[] = '客隊 vs 主隊｜'.($match['status_label'] ?? '');
             }
-            $lines[] = '各隊近 5 場（新→舊）｜';
+            $lines[] = '各隊近 5 場（新→舊）｜比分為本隊：對手';
             foreach (['team1', 'team2'] as $side) {
                 $form = $match['recent_form'][$side] ?? null;
-                $results = implode(' ', array_map(fn (string $r): string => ['W' => '勝', 'L' => '敗', 'D' => '和'][$r], $form['results'] ?? []));
-                $lines[] = $match[$side].'｜'.RecentForm::label($form).($results === '' ? '' : '｜'.$results);
+                $lines[] = $match[$side].'｜'.RecentForm::label($form);
+                foreach (array_slice($form['matches'] ?? [], 0, 5) as $recent) {
+                    $resultLabel = ['W' => '勝', 'L' => '敗', 'D' => '和'][$recent['result']] ?? '—';
+                    $lines[] = sprintf('・%s %s｜%s %d：%d vs %s', $recent['date'], $recent['format'], $resultLabel, $recent['team_score'], $recent['opponent_score'], $recent['opponent']);
+                }
             }
 
             if ($match['is_live'] ?? false) {

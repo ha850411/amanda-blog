@@ -37,8 +37,8 @@ final readonly class LineBotReply
      *             }>
      *         },
      *         recent_form?: ?array{
-     *             team1: ?array{sample_size: int, wins: int, losses: int, draws: int, results: array<int, string>},
-     *             team2: ?array{sample_size: int, wins: int, losses: int, draws: int, results: array<int, string>}
+     *             team1: ?array{sample_size: int, wins: int, losses: int, draws: int, results: array<int, string>, matches: array<int, array{date: string, opponent: string, format: string, team_score: int, opponent_score: int, result: string}>},
+     *             team2: ?array{sample_size: int, wins: int, losses: int, draws: int, results: array<int, string>, matches: array<int, array{date: string, opponent: string, format: string, team_score: int, opponent_score: int, result: string}>}
      *         },
      *         status_label?: ?string
      *     }>

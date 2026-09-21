@@ -110,7 +110,7 @@ class MlbScheduleService
             // (for example at the start of a season); normal days need one call.
             $missing = array_values(array_unique(array_column(array_filter(
                 $requests,
-                fn (array $request): bool => count($this->results($games, $request)) < 5,
+                fn (array $request): bool => count($this->recentMatches($games, $request)) < 5,
             ), 'id')));
             if ($missing !== []) {
                 try {
@@ -120,7 +120,7 @@ class MlbScheduleService
                 }
             }
             foreach ($requests as $request) {
-                $matches[$request['index']]['recent_form'][$request['side']] = RecentForm::summarize($this->results($games, $request));
+                $matches[$request['index']]['recent_form'][$request['side']] = RecentForm::fromMatches($this->recentMatches($games, $request));
             }
         } catch (Throwable $exception) {
             Log::warning('MLB recent form unavailable.', ['type' => $exception::class]);
@@ -157,7 +157,7 @@ class MlbScheduleService
         return collect($payload['dates'])->flatMap(fn (array $day): array => $day['games'] ?? [])->unique('gamePk')->values()->all();
     }
 
-    private function results(array $games, array $request): array
+    private function recentMatches(array $games, array $request): array
     {
         $completed = [];
         foreach ($games as $game) {
@@ -180,11 +180,22 @@ class MlbScheduleService
             }
             $own = $isAway ? $away['score'] : $home['score'];
             $opponent = $isAway ? $home['score'] : $away['score'];
-            $completed[(string) $game['gamePk']] = ['date' => $date, 'number' => $game['gameNumber'] ?? 1, 'result' => $own > $opponent ? 'W' : ($own < $opponent ? 'L' : 'D')];
+            $completed[(string) $game['gamePk']] = [
+                'date' => $date,
+                'number' => $game['gameNumber'] ?? 1,
+                'match' => [
+                    'date' => $date->setTimezone((string) config('services.bo3.timezone', 'Asia/Taipei'))->format('Y/m/d'),
+                    'opponent' => $this->teamName(($isAway ? $home : $away)['team'] ?? []),
+                    'format' => '單場',
+                    'team_score' => (int) $own,
+                    'opponent_score' => (int) $opponent,
+                    'result' => $own > $opponent ? 'W' : ($own < $opponent ? 'L' : 'D'),
+                ],
+            ];
         }
         usort($completed, fn (array $a, array $b): int => ($b['date'] <=> $a['date']) ?: ($b['number'] <=> $a['number']));
 
-        return array_slice(array_column($completed, 'result'), 0, 5);
+        return array_slice(array_column($completed, 'match'), 0, 5);
     }
 
     private function teamName(array $team): string

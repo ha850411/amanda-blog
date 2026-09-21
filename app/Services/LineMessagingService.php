@@ -53,10 +53,43 @@ class LineMessagingService
     /** @return array<int, array<string, mixed>> */
     private function textMessages(string $text): array
     {
-        return [[
-            'type' => 'text',
-            'text' => mb_substr($text, 0, 5000),
-        ]];
+        // Detailed schedule histories can exceed one text bubble. LINE accepts
+        // up to five messages, each limited to 5,000 UTF-16 code units.
+        // https://developers.line.biz/en/docs/messaging-api/text-character-count/
+        $messages = [];
+        do {
+            $chunk = $this->textPrefix($text, 5000);
+            $length = mb_strlen($chunk);
+            if (mb_strlen($text) > $length) {
+                $lineEnd = mb_strrpos($chunk, "\n");
+                if ($lineEnd !== false && $lineEnd > 0) {
+                    $length = $lineEnd + 1;
+                    $chunk = mb_substr($chunk, 0, $length);
+                }
+            }
+            $messages[] = ['type' => 'text', 'text' => $chunk];
+            $text = mb_substr($text, $length);
+        } while ($text !== '' && count($messages) < 5);
+
+        if ($text !== '') {
+            $notice = "\n內容過長，部分內容省略；請縮小查詢範圍。";
+            $last = array_key_last($messages);
+            $messages[$last]['text'] = $this->textPrefix($messages[$last]['text'], 5000 - mb_strlen($notice)).$notice;
+        }
+
+        return $messages;
+    }
+
+    private function textPrefix(string $text, int $maxUnits): string
+    {
+        $prefix = mb_substr($text, 0, $maxUnits);
+        while (($units = strlen(mb_convert_encoding($prefix, 'UTF-16LE', 'UTF-8')) / 2) > $maxUnits) {
+            // Unicode supplementary characters use two UTF-16 units. Trim by
+            // complete Unicode characters so emoji are never split in half.
+            $prefix = mb_substr($prefix, 0, mb_strlen($prefix) - (int) ceil(($units - $maxUnits) / 2));
+        }
+
+        return $prefix;
     }
 
     /** @return array<int, array<string, mixed>> */
