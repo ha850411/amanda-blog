@@ -75,7 +75,7 @@ const app = Vue.createApp({
     data() {
         return {
             today: @json($analyticsToday), start: @json($analyticsStart), end: @json($analyticsToday),
-            preset: 7, presets: [{ days: 1, label: '今天' }, { days: 7, label: '近 7 天' }, { days: 30, label: '近 30 天' }],
+            preset: 1, presets: [{ days: 1, label: '今天' }, { days: 7, label: '近 7 天' }, { days: 30, label: '近 30 天' }],
             loading: true, state: '', error: '', dashboard: null, activeDay: null,
             search: '', page: 1, perPage: 10, requestId: 0,
         };

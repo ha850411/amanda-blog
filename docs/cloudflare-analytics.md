@@ -1,6 +1,6 @@
 # Admin 首頁文章流量 Dashboard
 
-`/admin` 使用 Cloudflare Web Analytics 的 RUM 瀏覽資料，顯示文章 PV、每日趨勢、熱門排行、瀏覽占比與搜尋。日期以 `Asia/Taipei` 計算，提供今天、近 7 天、近 30 天與最多 31 天的自訂區間。
+`/admin` 使用 Cloudflare Web Analytics 的 RUM 瀏覽資料，顯示文章 PV、每日趨勢、熱門排行、瀏覽占比與搜尋。日期以 `Asia/Taipei` 計算，預設顯示今天，另提供近 7 天、近 30 天與最多 31 天的自訂區間。
 
 ## 正式環境設定
 

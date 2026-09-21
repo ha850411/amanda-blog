@@ -6,10 +6,12 @@ class IndexController extends Controller
 {
     public function index()
     {
+        $today = \Carbon\CarbonImmutable::today('Asia/Taipei')->toDateString();
+
         return view('admin.index')->with([
             'active' => 'index',
-            'analyticsToday' => \Carbon\CarbonImmutable::today('Asia/Taipei')->toDateString(),
-            'analyticsStart' => \Carbon\CarbonImmutable::today('Asia/Taipei')->subDays(6)->toDateString(),
+            'analyticsToday' => $today,
+            'analyticsStart' => $today,
         ]);
     }
 }

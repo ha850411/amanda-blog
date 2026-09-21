@@ -63,7 +63,8 @@ class ArticleAnalyticsTest extends TestCase
         $this->get('/admin')->assertOk()
             ->assertSee('文章流量總覽')
             ->assertSee('admin-analytics.css')
-            ->assertSee('2026-09-15')
+            ->assertViewHas('analyticsToday', '2026-09-21')
+            ->assertViewHas('analyticsStart', '2026-09-21')
             ->assertDontSee('private-test-token');
     }
 
