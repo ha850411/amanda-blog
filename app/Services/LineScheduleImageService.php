@@ -12,9 +12,9 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 32;
+    private const CACHE_VERSION = 33;
 
-    private const CARD_HEIGHT = 316;
+    private const CARD_HEIGHT = 468;
 
     private const CARD_GAP = 16;
 
@@ -189,32 +189,7 @@ class LineScheduleImageService
         $x = 44;
         $y = self::CARDS_TOP;
         foreach ($matches as $match) {
-            $game = $match['game'] ?? $data['game'] ?? null;
-            $theme = $this->themeForGame($game);
-            $isLive = (bool) ($match['is_live'] ?? false);
-            $cardBorder = $isLive ? '#e11d48' : '#263650';
-            $this->scheduleBox($draw, $x, $y, 1352, self::CARD_HEIGHT, '#131b2e', $cardBorder, 16);
-            $accentWidth = $isLive ? 6 : 4;
-            $accentColor = $isLive ? '#f43f5e' : $theme['accent'];
-            $this->scheduleBox($draw, $x + 1, $y + 18, $accentWidth, self::CARD_HEIGHT - 36, $accentColor, $accentColor, 2);
-            $this->drawScheduleMatchSummary($image, $draw, $x + 20, $y, 280, $match, $game);
-
-            // Match information and all three histories share the same row.
-            // Keep the existing image width and readable history text sizes.
-            foreach (['team1' => 328, 'team2' => 660] as $side => $offset) {
-                $teamX = $x + $offset;
-                $form = $match['recent_form'][$side] ?? null;
-                $this->scheduleText($image, $draw, $teamX, $y + 32, $match[$side].' · 近 5 場', 20, '#f8fafc', 700, 316);
-                $this->scheduleText($image, $draw, $teamX, $y + 55, RecentForm::label($form), 14, '#94a3b8', 500, 220);
-                $this->scheduleText($image, $draw, $teamX + 226, $y + 55, '本隊：對手', 14, '#94a3b8', 400, 90);
-                $this->drawRecentForm($image, $draw, $teamX, $y + 66, 316, $form);
-            }
-
-            $draw->setStrokeColor('#263650');
-            $draw->setStrokeWidth(1);
-            $draw->line($x + 314, $y + 20, $x + 314, $y + 296);
-            $draw->line($x + 992, $y + 20, $x + 992, $y + 296);
-            $this->drawH2hPanel($image, $draw, $x + 1008, $y, 324, $match);
+            $this->drawScheduleCard($image, $draw, $x, $y, $match, $data['game'] ?? null);
             $y += self::CARD_HEIGHT + self::CARD_GAP;
         }
         $image->drawImage($draw);
@@ -223,61 +198,126 @@ class LineScheduleImageService
         return $image;
     }
 
-    private function drawScheduleMatchSummary(Imagick $image, ImagickDraw $draw, int $x, int $y, int $width, array $match, ?string $game): void
+    private function drawScheduleCard(Imagick $image, ImagickDraw $draw, int $x, int $y, array $match, ?string $defaultGame): void
     {
+        $game = $match['game'] ?? $defaultGame ?? null;
         $theme = $this->themeForGame($game);
-        $format = $this->formatTheme($match['format'] ?? null);
-        $this->scheduleBox($draw, $x, $y + 18, 58, 26, $theme['badge_bg'], $theme['accent'], 6);
-        $this->scheduleText($image, $draw, $x + 8, $y + 37, $theme['label'], 15, $theme['badge_text'], 700, 44);
+        $isLive = (bool) ($match['is_live'] ?? false);
+        $cardBorder = $isLive ? '#e11d48' : '#263650';
+        $cardWidth = 1352;
+        $cardHeight = self::CARD_HEIGHT;
 
+        // 1. Card Container
+        $this->scheduleBox($draw, $x, $y, $cardWidth, $cardHeight, '#131b2e', $cardBorder, 16);
+        $accentWidth = $isLive ? 6 : 4;
+        $accentColor = $isLive ? '#f43f5e' : $theme['accent'];
+        $this->scheduleBox($draw, $x + 1, $y + 16, $accentWidth, $cardHeight - 32, $accentColor, $accentColor, 2);
+
+        // 2. Top Header Row (Tags, Time, Tournament)
+        $this->scheduleBox($draw, $x + 20, $y + 16, 58, 26, $theme['badge_bg'], $theme['accent'], 6);
+        $this->scheduleText($image, $draw, $x + 28, $y + 35, $theme['label'], 15, $theme['badge_text'], 700, 44);
+
+        $format = $this->formatTheme($match['format'] ?? null);
         $formatLabel = (string) ($format['label'] ?? '');
         $hasDistinctFormat = $formatLabel !== '' && strtoupper($formatLabel) !== strtoupper($theme['label']);
-        $statusX = $x + 66;
+        $statusX = $x + 20 + 66;
         if ($hasDistinctFormat) {
-            $this->scheduleBox($draw, $x + 66, $y + 18, 58, 26, $format['bg'], $format['border'], 6);
-            $this->scheduleText($image, $draw, $x + 74, $y + 37, $formatLabel, 15, $format['text'], 700, 44);
-            $statusX = $x + 132;
+            $this->scheduleBox($draw, $statusX, $y + 16, 58, 26, $format['bg'], $format['border'], 6);
+            $this->scheduleText($image, $draw, $statusX + 8, $y + 35, $formatLabel, 15, $format['text'], 700, 44);
+            $statusX += 66;
         }
 
-        $isLive = (bool) ($match['is_live'] ?? false);
         if ($isLive) {
-            $this->scheduleBox($draw, $statusX, $y + 18, 74, 26, '#300a14', '#e11d48', 6);
+            $this->scheduleBox($draw, $statusX, $y + 16, 74, 26, '#300a14', '#e11d48', 6);
             $draw->setFillColor('#ef4444');
             $draw->setStrokeColor('none');
-            $draw->circle($statusX + 11, $y + 31, $statusX + 13.5, $y + 31);
-            $this->scheduleText($image, $draw, $statusX + 20, $y + 36, '滾球中', 13, '#fecdd3', 700, 50);
+            $draw->circle($statusX + 11, $y + 29, $statusX + 13.5, $y + 29);
+            $this->scheduleText($image, $draw, $statusX + 20, $y + 34, '滾球中', 13, '#fecdd3', 700, 50);
+            $statusX += 82;
         } else {
             $status = (string) ($match['status_label'] ?? '');
             if ($status !== '') {
-                $this->scheduleText($image, $draw, $statusX + 4, $y + 37, $status, 15, '#94a3b8', 600, $width - ($statusX - $x) - 4);
+                $this->scheduleText($image, $draw, $statusX + 4, $y + 35, $status, 15, '#94a3b8', 600, 80);
+                $statusX += 70;
             }
         }
 
-        $this->scheduleText($image, $draw, $x, $y + 72, $match['start_time'], 24, '#f8fafc', 700, $width);
-        $this->scheduleText($image, $draw, $x, $y + 95, $match['tournament'], 15, '#94a3b8', 500, $width);
+        // Start time
+        $this->scheduleText($image, $draw, $statusX + 8, $y + 35, $match['start_time'], 23, '#f8fafc', 700, 100);
 
-        foreach (['team1' => 110, 'team2' => 226] as $side => $offset) {
-            $this->scheduleBox($draw, $x, $y + $offset, $width, 50, '#0e1728', '#22334d', 8);
-            $this->scheduleText($image, $draw, $x + 10, $y + $offset + 22, $match[$side], 21, '#f8fafc', 700, $width - 20);
-            $price = $match['odds'][$side]['price'] ?? null;
-            $role = $game === 'mlb' ? ($side === 'team1' ? '客隊 · ' : '主隊 · ') : '';
-            $this->scheduleText($image, $draw, $x + 10, $y + $offset + 43, $role.'獨贏 '.($price === null ? '—' : sprintf('%.2f', $price)), 15, '#38bdf8', 500, $width - 20);
-        }
+        // Tournament right aligned
+        $this->scheduleRawText($draw, $x + $cardWidth - 24, $y + 35, $match['tournament'], 15, '#94a3b8', 500, Imagick::ALIGN_RIGHT);
 
-        // Label both score sides because the match names are stacked here.
-        $centerX = $x + (int) ($width / 2);
-        $this->scheduleText($image, $draw, $x + 6, $y + 196, $game === 'mlb' ? '客隊' : $this->teamAbbreviation($match['team1']), 15, '#94a3b8', 600, 76);
-        $this->scheduleText($image, $draw, $x + $width - 76, $y + 196, $game === 'mlb' ? '主隊' : $this->teamAbbreviation($match['team2']), 15, '#94a3b8', 600, 72);
-        if ($game === 'mlb') {
-            $this->scheduleBox($draw, $centerX - 44, $y + 170, 88, 42, '#0d1524', '#293852', 10);
-            $this->scheduleText($image, $draw, $centerX - 32, $y + 199, $match['score'] ?? 'VS', 24, '#e2e8f0', 700, 68);
+        // 3. Matchup Hero Banner
+        $centerX = $x + (int) ($cardWidth / 2);
+        $teamBoxWidth = 585;
+        $teamBoxHeight = 72;
+        $teamBoxY = $y + 50;
+
+        // Team 1 Box (Left)
+        $this->scheduleBox($draw, $x + 20, $teamBoxY, $teamBoxWidth, $teamBoxHeight, '#0e1728', '#22334d', 10);
+        $this->scheduleText($image, $draw, $x + 36, $teamBoxY + 32, $match['team1'], 24, '#f8fafc', 700, 430);
+        $price1 = $match['odds']['team1']['price'] ?? null;
+        $role1 = $game === 'mlb' ? '客隊 · ' : '';
+        $this->scheduleText($image, $draw, $x + 36, $teamBoxY + 56, $role1.'獨贏 '.($price1 === null ? '—' : sprintf('%.2f', $price1)), 15, '#38bdf8', 500, 300);
+        // Abbr badge
+        $this->scheduleBox($draw, $x + 20 + $teamBoxWidth - 76, $teamBoxY + 22, 60, 28, '#152035', '#2a3a54', 6);
+        $this->scheduleRawText($draw, $x + 20 + $teamBoxWidth - 46, $teamBoxY + 41, $game === 'mlb' ? '客隊' : $this->teamAbbreviation($match['team1']), 14, '#94a3b8', 700, Imagick::ALIGN_CENTER);
+
+        // Team 2 Box (Right)
+        $team2X = $centerX + 71;
+        $this->scheduleBox($draw, $team2X, $teamBoxY, $teamBoxWidth, $teamBoxHeight, '#0e1728', '#22334d', 10);
+        $this->scheduleText($image, $draw, $team2X + 16, $teamBoxY + 32, $match['team2'], 24, '#f8fafc', 700, 430);
+        $price2 = $match['odds']['team2']['price'] ?? null;
+        $role2 = $game === 'mlb' ? '主隊 · ' : '';
+        $this->scheduleText($image, $draw, $team2X + 16, $teamBoxY + 56, $role2.'獨贏 '.($price2 === null ? '—' : sprintf('%.2f', $price2)), 15, '#38bdf8', 500, 300);
+        // Abbr badge
+        $this->scheduleBox($draw, $team2X + $teamBoxWidth - 76, $teamBoxY + 22, 60, 28, '#152035', '#2a3a54', 6);
+        $this->scheduleRawText($draw, $team2X + $teamBoxWidth - 46, $teamBoxY + 41, $game === 'mlb' ? '主隊' : $this->teamAbbreviation($match['team2']), 14, '#94a3b8', 700, Imagick::ALIGN_CENTER);
+
+        // Center Score / VS
+        if ($isLive) {
+            $this->drawCenterMatchBadge($draw, $centerX, $teamBoxY, $match);
         } else {
-            $this->drawCenterMatchBadge($draw, $centerX, $y + 156, $match);
+            $this->scheduleBox($draw, $centerX - 44, $teamBoxY + 15, 88, 42, '#0d1524', '#293852', 10);
+            $scoreText = $match['score'] ?? 'VS';
+            $this->scheduleRawText($draw, $centerX, $teamBoxY + 44, $scoreText, 22, '#e2e8f0', 700, Imagick::ALIGN_CENTER);
         }
-        $source = isset($match['odds']['team1']['bookmaker'])
-            ? '獨贏賠率 · '.$match['odds']['team1']['bookmaker']
-            : ($game === 'mlb' ? 'MLB 官方賽程' : '獨贏賠率 · 暫無盤口');
-        $this->scheduleText($image, $draw, $x, $y + 298, $source, 14, '#64748b', 400, $width);
+
+        // Horizontal line separator
+        $draw->setStrokeColor('#1e293b');
+        $draw->setStrokeWidth(1);
+        $draw->line($x + 20, $y + 132, $x + $cardWidth - 20, $y + 132);
+
+        // 4. Middle Section (Left/Right Recent Form)
+        $panelWidth = 648;
+        $leftPanelX = $x + 20;
+        $rightPanelX = $centerX + 8;
+        $formTopY = $y + 144;
+
+        $this->drawRecentForm($image, $draw, $leftPanelX, $formTopY, $panelWidth, $match['team1'], $match['recent_form']['team1'] ?? null);
+        $this->drawRecentForm($image, $draw, $rightPanelX, $formTopY, $panelWidth, $match['team2'], $match['recent_form']['team2'] ?? null);
+
+        // Vertical divider between panels
+        $draw->setStrokeColor('#1e293b');
+        $draw->setStrokeWidth(1);
+        $draw->line($centerX, $formTopY + 4, $centerX, $formTopY + 252);
+
+        // 5. Bottom Section (H2H Bar)
+        $h2hY = $y + 406;
+        $this->drawH2hPanel($image, $draw, $x + 20, $h2hY, $cardWidth - 40, $match);
+    }
+
+    private function scheduleRawText(ImagickDraw $draw, int $x, int $y, string $text, int $size, string $color, int $weight = 400, int $align = Imagick::ALIGN_LEFT): void
+    {
+        $draw->setStrokeColor('none');
+        $draw->setStrokeWidth(0);
+        $draw->setFillColor($color);
+        $draw->setFontSize($size);
+        $draw->setFontWeight($weight);
+        $draw->setTextAlignment($align);
+        $draw->annotation($x, $y, $text);
+        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
     }
 
     private function scheduleText(Imagick $image, ImagickDraw $draw, int $x, int $y, string $text, int $size, string $color, int $weight = 400, int $width = 1352): void
@@ -309,28 +349,43 @@ class LineScheduleImageService
         };
     }
 
-    private function drawRecentForm(Imagick $image, ImagickDraw $draw, int $x, int $y, int $width, ?array $form): void
+    private function drawRecentForm(Imagick $image, ImagickDraw $draw, int $x, int $y, int $width, string $teamName, ?array $form): void
     {
-        $this->scheduleBox($draw, $x, $y, $width, 230, '#0e1728', '#22334d', 10);
+        // Header line
+        $this->scheduleText($image, $draw, $x + 4, $y + 18, $teamName.' · 近 5 場', 18, '#f8fafc', 700, 340);
+        $this->scheduleText($image, $draw, $x + 350, $y + 18, RecentForm::label($form), 14, '#94a3b8', 500, 180);
+        $this->scheduleRawText($draw, $x + $width - 8, $y + 18, '本隊 ： 對手', 13, '#64748b', 400, Imagick::ALIGN_RIGHT);
+
+        // Panel Box
+        $boxY = $y + 26;
+        $boxHeight = 224;
+        $this->scheduleBox($draw, $x, $boxY, $width, $boxHeight, '#0e1728', '#22334d', 10);
+
         $matches = array_slice($form['matches'] ?? [], 0, 5);
         if ($matches === []) {
             $label = ($form['sample_size'] ?? 0) > 0 ? '對戰明細暫無資料' : RecentForm::label($form);
-            $this->scheduleText($image, $draw, $x + 24, $y + 118, $label, 18, '#64748b', 500, $width - 48);
+            $this->scheduleRawText($draw, $x + (int) ($width / 2), $boxY + 118, $label, 17, '#64748b', 500, Imagick::ALIGN_CENTER);
 
             return;
         }
+
         foreach ($matches as $i => $recent) {
-            $rowY = $y + 5 + $i * 44;
+            $rowY = $boxY + 5 + $i * 43;
             $theme = $this->resultTheme($recent['result'] ?? '');
-            $this->scheduleBox($draw, $x + 6, $rowY, $width - 12, 42, $i % 2 === 0 ? '#152035' : '#0e1728', '#0e1728', 5);
-            $this->scheduleBox($draw, $x + 10, $rowY + 7, 28, 28, $theme['bg'], $theme['border'], 5);
-            $this->scheduleText($image, $draw, $x + 16, $rowY + 27, $theme['label'], 16, $theme['text'], 700, 22);
-            $this->scheduleText($image, $draw, $x + 46, $rowY + 20, $recent['opponent'] ?? '對手不明', 18, '#e2e8f0', 600, $width - 144);
-            $meta = ($recent['date'] ?? '—').' · '.($recent['format'] ?? '—');
-            $this->scheduleText($image, $draw, $x + 46, $rowY + 37, $meta, 12, '#94a3b8', 400, $width - 144);
-            $this->scheduleBox($draw, $x + $width - 86, $rowY + 6, 78, 30, $theme['bg'], $theme['border'], 5);
+            $this->scheduleBox($draw, $x + 6, $rowY, $width - 12, 39, $i % 2 === 0 ? '#152035' : '#0e1728', '#0e1728', 6);
+
+            // Integrated result + score pill
+            $pillW = 98;
+            $this->scheduleBox($draw, $x + 12, $rowY + 6, $pillW, 27, $theme['bg'], $theme['border'], 5);
             $score = isset($recent['team_score'], $recent['opponent_score']) ? $recent['team_score'].' : '.$recent['opponent_score'] : '—';
-            $this->scheduleText($image, $draw, $x + $width - 80, $rowY + 28, $score, 20, $theme['text'], 700, 66);
+            $this->scheduleRawText($draw, $x + 12 + (int) ($pillW / 2), $rowY + 25, $theme['label'].'  '.$score, 15, $theme['text'], 700, Imagick::ALIGN_CENTER);
+
+            // Opponent name with "vs"
+            $this->scheduleText($image, $draw, $x + 122, $rowY + 25, 'vs  '.($recent['opponent'] ?? '對手不明'), 17, '#f8fafc', 600, 360);
+
+            // Date & format (right aligned)
+            $meta = ($recent['date'] ?? '—').' · '.($recent['format'] ?? '—');
+            $this->scheduleRawText($draw, $x + $width - 16, $rowY + 25, $meta, 13, '#94a3b8', 400, Imagick::ALIGN_RIGHT);
         }
     }
 
@@ -851,56 +906,50 @@ class LineScheduleImageService
     private function drawH2hPanel(Imagick $image, ImagickDraw $draw, int $x, int $y, int $width, array $match): void
     {
         $h2h = $match['h2h'] ?? null;
-        $this->scheduleText($image, $draw, $x, $y + 32, '雙方交手紀錄', 19, '#e2e8f0', 700, $width - 90);
-        if (! is_array($h2h)) {
-            $this->scheduleBox($draw, $x, $y + 66, $width, 230, '#0e1728', '#22334d', 10);
-            $centerX = $x + (int) ($width / 2);
-            $this->scheduleBox($draw, $centerX - 36, $y + 128, 72, 28, '#152035', '#2a3a54', 14);
-            $draw->setFillColor('#64748b');
-            $draw->setStrokeColor('none');
-            $draw->setFontSize(13);
-            $draw->setFontWeight(700);
-            $draw->setTextAlignment(Imagick::ALIGN_CENTER);
-            $draw->annotation($centerX, $y + 147, 'VS');
+        $this->scheduleBox($draw, $x, $y, $width, 50, '#0b1220', '#1e293b', 8);
 
-            $draw->setFillColor('#94a3b8');
-            $draw->setFontSize(18);
-            $draw->setFontWeight(600);
-            $draw->annotation($centerX, $y + 186, '暫無交手資料');
-
-            $draw->setFillColor('#64748b');
-            $draw->setFontSize(14);
-            $draw->setFontWeight(400);
-            $draw->annotation($centerX, $y + 212, '兩隊近期戰績請見左側');
-            $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+        if (! is_array($h2h) || empty($h2h['series'])) {
+            $title = '⚔️ 雙方交手';
+            $this->scheduleText($image, $draw, $x + 16, $y + 31, $title, 15, '#f8fafc', 700, 120);
+            $this->scheduleText($image, $draw, $x + 140, $y + 31, '近兩年暫無正式對戰紀錄 · 近期戰況請參考上方兩隊對局', 14, '#64748b', 400, $width - 160);
 
             return;
         }
-        $halfWidth = (int) floor(($width - 12) / 2);
-        $this->scheduleText($image, $draw, $x + $width - 80, $y + 32, '近 '.$h2h['sample_size'].' 場', 14, '#94a3b8', 400, 80);
-        $firstWins = (int) $h2h['team1_wins'];
-        $secondWins = (int) $h2h['team2_wins'];
-        foreach (['team1', 'team2'] as $sideIndex => $side) {
-            $own = $side === 'team1' ? $firstWins : $secondWins;
-            $other = $side === 'team1' ? $secondWins : $firstWins;
-            $summaryTheme = $this->resultTheme($own > $other ? 'W' : ($own < $other ? 'L' : 'D'));
-            $pillX = $x + $sideIndex * ($halfWidth + 12);
-            $this->scheduleBox($draw, $pillX, $y + 42, $halfWidth, 24, $summaryTheme['bg'], $summaryTheme['border'], 6);
-            $this->scheduleText($image, $draw, $pillX + 10, $y + 59, $this->teamAbbreviation($match[$side]).' '.$own.' 勝', 15, $summaryTheme['text'], 700, $halfWidth - 20);
-        }
-        foreach (array_slice($h2h['series'] ?? [], 0, 5) as $i => $series) {
-            $rowY = $y + 74 + $i * 44;
-            $this->scheduleText($image, $draw, $x + 2, $rowY + 12, ($series['date'] ?? '—').' · '.($series['format'] ?? '—'), 12, '#94a3b8', 400, $width);
-            foreach (['team1', 'team2'] as $sideIndex => $side) {
-                $own = $series[$side.'_score'] ?? null;
-                $other = $series[($side === 'team1' ? 'team2' : 'team1').'_score'] ?? null;
-                $outcome = $own === null || $other === null ? '' : ($own > $other ? 'W' : ($own < $other ? 'L' : 'D'));
-                $resultTheme = $this->resultTheme($outcome);
-                $pillX = $x + $sideIndex * ($halfWidth + 12);
-                $this->scheduleBox($draw, $pillX, $rowY + 18, $halfWidth, 24, $resultTheme['bg'], $resultTheme['border'], 5);
-                $this->scheduleText($image, $draw, $pillX + 9, $rowY + 36, $this->teamAbbreviation($match[$side]).' '.$resultTheme['label'], 16, $resultTheme['text'], 700, $halfWidth - 50);
-                $this->scheduleText($image, $draw, $pillX + $halfWidth - 33, $rowY + 37, $own === null ? '—' : (string) $own, 20, $resultTheme['text'], 800, 28);
-            }
+
+        // Title
+        $title = '⚔️ 雙方交手 (近 '.$h2h['sample_size'].' 場)';
+        $this->scheduleText($image, $draw, $x + 16, $y + 31, $title, 15, '#f8fafc', 700, 200);
+
+        // Win summary pills
+        $w1 = (int) $h2h['team1_wins'];
+        $w2 = (int) $h2h['team2_wins'];
+        $sum1 = $this->resultTheme($w1 > $w2 ? 'W' : ($w1 < $w2 ? 'L' : 'D'));
+        $sum2 = $this->resultTheme($w2 > $w1 ? 'W' : ($w2 < $w1 ? 'L' : 'D'));
+
+        $t1Abbr = $this->teamAbbreviation($match['team1']);
+        $t2Abbr = $this->teamAbbreviation($match['team2']);
+
+        $this->scheduleBox($draw, $x + 220, $y + 11, 86, 28, $sum1['bg'], $sum1['border'], 5);
+        $this->scheduleRawText($draw, $x + 263, $y + 30, $t1Abbr.' '.$w1.'勝', 13, $sum1['text'], 700, Imagick::ALIGN_CENTER);
+
+        $this->scheduleBox($draw, $x + 312, $y + 11, 86, 28, $sum2['bg'], $sum2['border'], 5);
+        $this->scheduleRawText($draw, $x + 355, $y + 30, $t2Abbr.' '.$w2.'勝', 13, $sum2['text'], 700, Imagick::ALIGN_CENTER);
+
+        // Series history horizontal chips
+        $chipX = $x + 420;
+        foreach (array_slice($h2h['series'], 0, 4) as $series) {
+            $s1 = $series['team1_score'] ?? 0;
+            $s2 = $series['team2_score'] ?? 0;
+            $theme = $this->resultTheme($s1 > $s2 ? 'W' : ($s1 < $s2 ? 'L' : 'D'));
+            $chipW = 210;
+            $this->scheduleBox($draw, $chipX, $y + 10, $chipW, 30, '#131b2e', '#22334d', 6);
+
+            $this->scheduleText($image, $draw, $chipX + 8, $y + 30, $series['date'], 12, '#94a3b8', 400, 70);
+            $this->scheduleBox($draw, $chipX + 78, $y + 13, $chipW - 84, 24, $theme['bg'], $theme['border'], 4);
+            $chipText = $t1Abbr.' '.$s1.':'.$s2.' '.$t2Abbr;
+            $this->scheduleRawText($draw, $chipX + 78 + (int) (($chipW - 84) / 2), $y + 29, $chipText, 12, $theme['text'], 700, Imagick::ALIGN_CENTER);
+
+            $chipX += $chipW + 10;
         }
     }
 

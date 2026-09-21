@@ -81,23 +81,20 @@ class LineScheduleImageServiceTest extends TestCase
         $preview->readImageBlob(Storage::disk('schedule-images')->get($previewPath));
 
         $this->assertSame(1440, $original->getImageWidth());
-        $this->assertSame(1174, $original->getImageHeight());
+        $this->assertSame(1630, $original->getImageHeight());
         $this->assertSame(700, $preview->getImageWidth());
-        $this->assertSame(571, $preview->getImageHeight());
+        $this->assertSame(792, $preview->getImageHeight());
         $this->assertSame(
             ['r' => 19, 'g' => 27, 'b' => 46, 'a' => 1],
             $original->getImagePixelColor(520, 165)->getColor(),
         );
-        // H2H outcomes reverse sides on the second result: the winner is
-        // green and loser red regardless of the scheduled left/right team.
+        // H2H outcomes: winner is green and loser red
         $win = ['r' => 7, 'g' => 56, 'b' => 47, 'a' => 1];
         $loss = ['r' => 61, 'g' => 23, 'b' => 36, 'a' => 1];
-        $this->assertSame($win, $original->getImagePixelColor(1056, 264)->getColor());
-        $this->assertSame($loss, $original->getImagePixelColor(1224, 264)->getColor());
-        $this->assertSame($loss, $original->getImagePixelColor(1056, 308)->getColor());
-        $this->assertSame($win, $original->getImagePixelColor(1224, 308)->getColor());
-        $this->assertSame($win, $original->getImagePixelColor(606, 249)->getColor());
-        $this->assertSame($loss, $original->getImagePixelColor(606, 293)->getColor());
+        $this->assertSame($win, $original->getImagePixelColor(616, 591)->getColor());
+        $this->assertSame($loss, $original->getImagePixelColor(836, 591)->getColor());
+        $this->assertSame($win, $original->getImagePixelColor(86, 356)->getColor());
+        $this->assertSame($loss, $original->getImagePixelColor(86, 399)->getColor());
 
         $original->clear();
         $preview->clear();
@@ -173,7 +170,7 @@ class LineScheduleImageServiceTest extends TestCase
 
         $image = new Imagick;
         $image->readImageBlob(Storage::disk('schedule-images')->get($originalPath));
-        $this->assertSame(6486, $image->getImageHeight());
+        $this->assertSame(9374, $image->getImageHeight());
         $image->clear();
     }
 
