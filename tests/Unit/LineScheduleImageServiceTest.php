@@ -96,8 +96,8 @@ class LineScheduleImageServiceTest extends TestCase
         $this->assertSame($loss, $original->getImagePixelColor(1224, 264)->getColor());
         $this->assertSame($loss, $original->getImagePixelColor(1056, 308)->getColor());
         $this->assertSame($win, $original->getImagePixelColor(1224, 308)->getColor());
-        $this->assertSame($win, $original->getImagePixelColor(590, 249)->getColor());
-        $this->assertSame($loss, $original->getImagePixelColor(590, 293)->getColor());
+        $this->assertSame($win, $original->getImagePixelColor(606, 249)->getColor());
+        $this->assertSame($loss, $original->getImagePixelColor(606, 293)->getColor());
 
         $original->clear();
         $preview->clear();
