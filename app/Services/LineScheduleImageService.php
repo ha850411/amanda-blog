@@ -308,7 +308,7 @@ class LineScheduleImageService
         $this->drawH2hPanel($image, $draw, $x + 20, $h2hY, $cardWidth - 40, $match);
     }
 
-    private function scheduleRawText(ImagickDraw $draw, int $x, int $y, string $text, int $size, string $color, int $weight = 400, int $align = Imagick::ALIGN_LEFT): void
+    private function scheduleRawText(ImagickDraw $draw, int $x, int $y, string $text, int $size, string $color, int $weight = 400, int $align = 1): void
     {
         $draw->setStrokeColor('none');
         $draw->setStrokeWidth(0);
