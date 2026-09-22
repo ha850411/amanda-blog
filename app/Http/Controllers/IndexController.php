@@ -13,6 +13,17 @@ class IndexController extends Controller
 {
     public function index(Request $request)
     {
+        $siteSocialUrls = Social::where('status', 1)->pluck('url')->filter()->values()->all();
+
+        $publisher = [
+            '@type' => 'Person',
+            'name' => 'Amanda',
+            'url' => url('/'),
+        ];
+        if (! empty($siteSocialUrls)) {
+            $publisher['sameAs'] = $siteSocialUrls;
+        }
+
         $siteJsonLd = [
             '@context' => 'https://schema.org',
             '@type' => 'WebSite',
@@ -20,10 +31,7 @@ class IndexController extends Controller
             'url' => url('/'),
             'description' => 'Amanda 的探店、美食、生活與開箱紀錄',
             'inLanguage' => 'zh-TW',
-            'publisher' => [
-                '@type' => 'Person',
-                'name' => 'Amanda',
-            ],
+            'publisher' => $publisher,
         ];
 
         return response()->view('index', [
@@ -31,7 +39,7 @@ class IndexController extends Controller
             ...$this->listingData($request),
             'selectedTag' => null,
             'siteJsonLd' => $siteJsonLd,
-        ])->header('Cache-Control', 'private, no-store');
+        ])->header('Cache-Control', 'public, max-age=180, stale-while-revalidate=1800');
     }
 
     public function tag(Request $request, int $tagId)
@@ -53,7 +61,7 @@ class IndexController extends Controller
             'tagId' => $tagId,
             'selectedTag' => $selectedTag,
             'siteJsonLd' => $siteJsonLd,
-        ])->header('Cache-Control', 'private, no-store');
+        ])->header('Cache-Control', 'public, max-age=180, stale-while-revalidate=1800');
     }
 
     public function article(Request $request, int $id, ArticlePasswordCache $articlePasswordCache)
@@ -65,11 +73,73 @@ class IndexController extends Controller
 
         $isProtected = (int) $article->status === 2;
         $description = $isProtected ? '這篇文章受密碼保護，請輸入密碼後閱讀。' : $article->excerpt;
-        $articleUrl = url()->current();
+        $canonicalUrl = route('article', ['id' => $article->id]);
+        $articleUrl = $canonicalUrl;
         $articleImage = $isProtected ? null : $article->first_image;
         $articlePublishedAt = $article->created_at?->copy()->utc()->toAtomString();
         $articleUpdatedAt = $article->updated_at?->copy()->utc()->toAtomString();
         $tagNames = $article->tags->pluck('name')->all();
+
+        $siteSocialUrls = Social::where('status', 1)->pluck('url')->filter()->values()->all();
+        $siteAbout = About::first();
+        $logoUrl = $siteAbout?->picture
+            ? (str_starts_with($siteAbout->picture, 'http') ? $siteAbout->picture : url($siteAbout->picture))
+            : asset('images/favicon.png');
+
+        $firstTag = $article->tags->first();
+        $breadcrumbs = [
+            '@type' => 'BreadcrumbList',
+            'itemListElement' => [
+                [
+                    '@type' => 'ListItem',
+                    'position' => 1,
+                    'name' => '首頁',
+                    'item' => url('/'),
+                ],
+            ],
+        ];
+
+        if ($firstTag) {
+            $breadcrumbs['itemListElement'][] = [
+                '@type' => 'ListItem',
+                'position' => 2,
+                'name' => $firstTag->name,
+                'item' => route('tag', ['tagId' => $firstTag->id]),
+            ];
+            $breadcrumbs['itemListElement'][] = [
+                '@type' => 'ListItem',
+                'position' => 3,
+                'name' => $article->title,
+                'item' => $canonicalUrl,
+            ];
+        } else {
+            $breadcrumbs['itemListElement'][] = [
+                '@type' => 'ListItem',
+                'position' => 2,
+                'name' => $article->title,
+                'item' => $canonicalUrl,
+            ];
+        }
+
+        $author = [
+            '@type' => 'Person',
+            'name' => 'Amanda',
+            'url' => url('/'),
+            'jobTitle' => 'Blogger',
+        ];
+        if (! empty($siteSocialUrls)) {
+            $author['sameAs'] = $siteSocialUrls;
+        }
+
+        $publisher = [
+            '@type' => 'Organization',
+            'name' => 'Amanda',
+            'url' => url('/'),
+            'logo' => [
+                '@type' => 'ImageObject',
+                'url' => $logoUrl,
+            ],
+        ];
 
         $articleJsonLd = [
             '@context' => 'https://schema.org',
@@ -80,16 +150,10 @@ class IndexController extends Controller
             'keywords' => implode(', ', $tagNames),
             'mainEntityOfPage' => [
                 '@type' => 'WebPage',
-                '@id' => $articleUrl,
+                '@id' => $canonicalUrl,
             ],
-            'author' => [
-                '@type' => 'Person',
-                'name' => 'Amanda',
-            ],
-            'publisher' => [
-                '@type' => 'Organization',
-                'name' => 'Amanda',
-            ],
+            'author' => $author,
+            'publisher' => $publisher,
             'isPartOf' => [
                 '@type' => 'Blog',
                 'name' => "Amanda's Blog",
@@ -97,11 +161,20 @@ class IndexController extends Controller
             ],
             'datePublished' => $articlePublishedAt,
             'dateModified' => $articleUpdatedAt,
+            'breadcrumb' => $breadcrumbs,
         ];
+
+        if ($firstTag) {
+            $articleJsonLd['articleSection'] = $firstTag->name;
+        }
 
         if ($articleImage) {
             $articleJsonLd['image'] = [$articleImage];
         }
+
+        $cacheControl = $isProtected
+            ? 'private, no-store'
+            : 'public, max-age=300, stale-while-revalidate=3600';
 
         return response()->view('article', [
             ...$this->layoutData(),
@@ -121,11 +194,12 @@ class IndexController extends Controller
             ],
             'isPasswordVerified' => $isPasswordVerified,
             'description' => $description,
-            'articleUrl' => $articleUrl,
+            'canonicalUrl' => $canonicalUrl,
+            'articleUrl' => $canonicalUrl,
             'articleImage' => $articleImage,
             'articleJsonLd' => $articleJsonLd,
             'robots' => $isProtected ? 'noindex, nofollow' : 'index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1',
-        ])->header('Cache-Control', 'private, no-store');
+        ])->header('Cache-Control', $cacheControl);
     }
 
     private function layoutData(): array

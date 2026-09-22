@@ -59,8 +59,21 @@ class Article extends Model
     public function getFirstImageAttribute(): ?string
     {
         preg_match('/<img[^>]+src=["\'](.*?)["\']/', (string) $this->content, $matches);
+        $src = $matches[1] ?? null;
 
-        return $matches[1] ?? null;
+        if (! $src) {
+            return null;
+        }
+
+        if (str_starts_with($src, 'http://') || str_starts_with($src, 'https://') || str_starts_with($src, 'data:')) {
+            return $src;
+        }
+
+        if (str_starts_with($src, '//')) {
+            return 'https:'.$src;
+        }
+
+        return url($src);
     }
 
     public function getExcerptAttribute(): string

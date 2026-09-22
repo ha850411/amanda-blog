@@ -1,8 +1,9 @@
 <?php echo '<?xml version="1.0" encoding="UTF-8"?>'; ?>
-<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2000/svg">
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Amanda | 探店 | 美食 | 生活 | 開箱</title>
     <link>{{ url('/') }}</link>
+    <atom:link href="{{ url('/rss.xml') }}" rel="self" type="application/rss+xml" />
     <description>Amanda 的探店、美食、生活與開箱紀錄</description>
     <language>zh-TW</language>
     <lastBuildDate>{{ now()->toRfc2822String() }}</lastBuildDate>

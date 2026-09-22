@@ -151,4 +151,74 @@ class AiOptimizationTest extends TestCase
         $this->assertStringNotContainsString('User-agent:', substr($rules, strpos($rules, 'Disallow:')));
         $this->assertStringNotContainsString('Allow: /', $rules);
     }
+
+    public function test_article_metadata_uses_absolute_image_url_canonical_and_rich_json_ld(): void
+    {
+        \App\Models\Social::create(['name' => 'Instagram', 'icon' => 'fa-brands fa-instagram', 'url' => 'https://instagram.com/amanda', 'status' => 1]);
+        $tag = Tag::factory()->create(['name' => '探店推薦']);
+        $article = Article::factory()->create([
+            'status' => 1,
+            'title' => '台北頂級義式餐廳開箱',
+            'content' => '<p>美食心得</p><img src="/storage/uploads/dining.jpg" alt="餐點"><p>總結</p>',
+        ]);
+        $article->tags()->attach($tag);
+
+        $response = $this->get('/article/'.$article->id.'?utm_source=facebook')->assertOk();
+        $xpath = $this->xpath($response->getContent());
+
+        // Canonical URL
+        $this->assertSame(route('article', ['id' => $article->id]), $xpath->query('//link[@rel="canonical"]')->item(0)->getAttribute('href'));
+        $this->assertSame(route('article', ['id' => $article->id]), $xpath->query('//meta[@property="og:url"]')->item(0)->getAttribute('content'));
+
+        // Absolute image URL
+        $expectedImageUrl = url('/storage/uploads/dining.jpg');
+        $this->assertSame($expectedImageUrl, $xpath->query('//meta[@property="og:image"]')->item(0)->getAttribute('content'));
+        $this->assertSame($expectedImageUrl, $xpath->query('//meta[@name="twitter:image"]')->item(0)->getAttribute('content'));
+
+        // Rich JSON-LD
+        $json = json_decode($xpath->query('//script[@type="application/ld+json"]')->item(0)->textContent, true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('BlogPosting', $json['@type']);
+        $this->assertSame([$expectedImageUrl], $json['image']);
+        $this->assertSame('BreadcrumbList', $json['breadcrumb']['@type']);
+        $this->assertCount(3, $json['breadcrumb']['itemListElement']);
+        $this->assertSame('首頁', $json['breadcrumb']['itemListElement'][0]['name']);
+        $this->assertSame('探店推薦', $json['breadcrumb']['itemListElement'][1]['name']);
+        $this->assertSame($article->title, $json['breadcrumb']['itemListElement'][2]['name']);
+
+        // Author E-E-A-T & Publisher
+        $this->assertSame(['https://instagram.com/amanda'], $json['author']['sameAs']);
+        $this->assertSame('Blogger', $json['author']['jobTitle']);
+        $this->assertSame('ImageObject', $json['publisher']['logo']['@type']);
+    }
+
+    public function test_cache_control_headers_differentiate_public_and_protected_pages(): void
+    {
+        $public = Article::factory()->create(['status' => 1]);
+        $locked = Article::factory()->create(['status' => 2, 'password' => 'secret']);
+        $tag = Tag::factory()->create();
+
+        $indexRes = $this->get('/')->assertOk();
+        $this->assertStringContainsString('public', $indexRes->headers->get('Cache-Control'));
+        $this->assertStringContainsString('max-age=180', $indexRes->headers->get('Cache-Control'));
+
+        $tagRes = $this->get('/tag/'.$tag->id)->assertOk();
+        $this->assertStringContainsString('public', $tagRes->headers->get('Cache-Control'));
+        $this->assertStringContainsString('max-age=180', $tagRes->headers->get('Cache-Control'));
+
+        $publicRes = $this->get('/article/'.$public->id)->assertOk();
+        $this->assertStringContainsString('public', $publicRes->headers->get('Cache-Control'));
+        $this->assertStringContainsString('max-age=300', $publicRes->headers->get('Cache-Control'));
+
+        $lockedRes = $this->get('/article/'.$locked->id)->assertOk();
+        $this->assertStringContainsString('no-store', $lockedRes->headers->get('Cache-Control'));
+    }
+
+    public function test_rss_feed_has_valid_atom_namespace_and_atom_link(): void
+    {
+        $response = $this->get('/rss.xml')->assertOk();
+        $content = $response->getContent();
+        $this->assertStringContainsString('xmlns:atom="http://www.w3.org/2005/Atom"', $content);
+        $this->assertStringNotContainsString('xmlns:atom="http://www.w3.org/2000/svg"', $content);
+        $this->assertStringContainsString('<atom:link href="'.url('/rss.xml').'" rel="self" type="application/rss+xml"', $content);
+    }
 }
