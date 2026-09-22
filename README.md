@@ -199,3 +199,17 @@ routes/
 ├── web.php                            # 頁面路由
 └── api.php                            # API 路由
 ```
+
+## 前台 SEO 與 AI 讀取
+
+前台導覽、側欄、公開文章正文與首頁／分類頁的第一批文章直接輸出為 HTML，不依賴 JavaScript 或 API 才能閱讀。Vue 保留選單、密碼驗證與無限捲動；停用 JavaScript、不支援 IntersectionObserver 或載入下一頁失敗時，改用頁尾的上一頁／下一頁連結。分頁網址為 `?page=N`，每頁使用自己的 canonical；文章標題的 h1／h2 沿用原本的字級樣式。
+
+公開頁面只提供狀態 1（公開）和 2（密碼）的文章；隱藏狀態 0／3 在文章 HTML、Markdown 與驗證 API 回傳 404，匿名文章列表也不會列出。後台管理員仍能查詢與編輯隱藏文章。密碼文章的正文與圖片不會出現在未驗證的 HTML、metadata 或文字匯出中；HTML／Markdown 均標示 noindex，包含個人驗證狀態的回應禁止共用快取。
+
+`/robots.txt` 由 Laravel 動態產生完整 sitemap 網址，各爬蟲共用後台／API 排除規則，原有 AI 爬蟲允許政策維持不變。部署時需移除舊的 `public/robots.txt`，重新建立路由快取（若有使用），並套用對應的 Nginx 設定，避免靜態檔或舊路由遮蔽新端點。Markdown 匯出保留表格、巢狀清單與圖片描述，合併儲存格則保留 HTML 表格。
+
+相關回歸測試可使用隔離的 SQLite 記憶體資料庫執行：
+
+```sh
+APP_ENV=testing DB_CONNECTION=sqlite DB_DATABASE=:memory: CACHE_STORE=array SESSION_DRIVER=array php artisan test --filter='AiOptimizationTest|ArticleTest|MarkdownHelperTest|ExampleTest'
+```

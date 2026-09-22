@@ -1,37 +1,16 @@
 User-agent: *
-Disallow: /admin/
-Disallow: /api/
-
-# Explicit permissions for AI & LLM Crawlers
 User-agent: GPTBot
-Allow: /
-
 User-agent: ChatGPT-User
-Allow: /
-
 User-agent: OAI-SearchBot
-Allow: /
-
 User-agent: PerplexityBot
-Allow: /
-
 User-agent: ClaudeBot
-Allow: /
-
 User-agent: Claude-Web
-Allow: /
-
 User-agent: Google-Extended
-Allow: /
-
 User-agent: Applebot-Extended
-Allow: /
-
 User-agent: Bytespider
-Allow: /
-
 User-agent: cohere-ai
-Allow: /
+Disallow: /admin
+Disallow: /api/
+Disallow: /log-viewer
 
-Sitemap: /sitemap.xml
-Link: /llms.txt
+Sitemap: {{ url('/sitemap.xml') }}

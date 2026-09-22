@@ -1,41 +1,42 @@
 <div class="top_header bg-dark bg-gradient sticky-top">
     <div class="container d-flex justify-content-between align-items-center">
         <div class="nav_toggle text-white d-md-none d-block" @click="toggleMenu"
-            :class="{ show_icon: base.isMenuOpen }">
+            :class="{ show_icon: base.isMenuOpen }" role="button" tabindex="0" @keydown.enter="toggleMenu" aria-label="切換選單" :aria-expanded="base.isMenuOpen">
             <i class="fa-solid fa-bars nav_burger"></i>
             <i class="fa-solid fa-x nav_close"></i>
         </div>
         <ul class="nav_menu" :class="{ show_menu: base.isMenuOpen }">
-            <li v-for="item in base.tags.data" :key="item.id">
-                <a :href="getTagUrl(item.id)" class="text-white text-center me-1"
-                    :class="{ active: base.tagId == item.id || item.children.some(child => child.id == base.tagId) }">
-                    <span>@{{ item.name }}</span>
-                    <i v-if="item.children && item.children.length > 0" class="fa-solid fa-caret-down"></i>
-                </a>
-                <template v-if="item.children && item.children.length > 0">
-                    <ul class="dropdown">
-                        <li v-for="child in item.children" :key="child.id">
-                            <a :href="getTagUrl(child.id)" class="text-center"
-                                :class="{ active: base.tagId == child.id }">@{{ child.name }}</a>
-                        </li>
-                    </ul>
-                </template>
-            </li>
-        </ul>
-        <div class="social fs-4">
-            <template v-for="social in base.socials.data" :key="social.id">
-                <template v-if="social.status === 1">
-                    <a :href="social.url" class="text-white me-1" target="_blank">
-                        <i :class="social.icon"></i>
+            @foreach ($siteTags as $item)
+                <li v-pre>
+                    <a href="{{ route('tag', ['tagId' => $item->id]) }}" class="text-white text-center me-1 {{ ($tagId ?? null) == $item->id || $item->children->contains('id', $tagId ?? null) ? 'active' : '' }}">
+                        <span>{{ $item->name }}</span>
+                        @if ($item->children->isNotEmpty())
+                            <i class="fa-solid fa-caret-down"></i>
+                        @endif
                     </a>
-                </template>
-            </template>
+                    @if ($item->children->isNotEmpty())
+                        <ul class="dropdown">
+                            @foreach ($item->children as $child)
+                                <li><a href="{{ route('tag', ['tagId' => $child->id]) }}" class="text-center {{ ($tagId ?? null) == $child->id ? 'active' : '' }}">{{ $child->name }}</a></li>
+                            @endforeach
+                        </ul>
+                    @endif
+                </li>
+            @endforeach
+        </ul>
+        <div class="social fs-4" v-pre>
+            @foreach ($siteSocials as $social)
+                <a href="{{ $social->url }}" class="text-white me-1" target="_blank" rel="noopener noreferrer" aria-label="社群連結">
+                    <i class="{{ $social->icon }}"></i>
+                </a>
+            @endforeach
         </div>
     </div>
 </div>
-<div class="header text-center py-5 px-2">
+<div class="header text-center py-5 px-2" v-pre>
     <a href="{{ route('index') }}" class="title text-dark">
-        <h2>@{{ base.about.data?.title || '' }}</h2>
+        <h2>{{ $siteAbout?->title ?? '' }}</h2>
     </a>
-    <p style="white-space: pre-line" v-html="base.about.data?.sub_title || ''"></p>
+    <p style="white-space: pre-line">{!! $siteAbout?->sub_title ?? '' !!}</p>
 </div>
+<noscript><style>.category.d-none { display: block !important; } .nav_toggle { display: none !important; }</style></noscript>

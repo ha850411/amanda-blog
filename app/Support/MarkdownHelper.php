@@ -2,67 +2,138 @@
 
 namespace App\Support;
 
+use DOMDocument;
+use DOMElement;
+use DOMNode;
+
 class MarkdownHelper
 {
-    /**
-     * Convert HTML content to clean Markdown for LLMs / AI summary crawlers.
-     */
     public static function htmlToMarkdown(?string $html): string
     {
         if (empty($html)) {
             return '';
         }
 
-        // Normalize line breaks
-        $text = str_replace(["\r\n", "\r"], "\n", $html);
+        $document = new DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $document->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NONET);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
 
-        // Convert headers
-        $text = preg_replace('/<h1[^>]*>(.*?)<\/h1>/is', "\n# $1\n", $text);
-        $text = preg_replace('/<h2[^>]*>(.*?)<\/h2>/is', "\n## $1\n", $text);
-        $text = preg_replace('/<h3[^>]*>(.*?)<\/h3>/is', "\n### $1\n", $text);
-        $text = preg_replace('/<h4[^>]*>(.*?)<\/h4>/is', "\n#### $1\n", $text);
-        $text = preg_replace('/<h5[^>]*>(.*?)<\/h5>/is', "\n##### $1\n", $text);
-        $text = preg_replace('/<h6[^>]*>(.*?)<\/h6>/is', "\n###### $1\n", $text);
+        $text = self::children($document->getElementsByTagName('body')->item(0) ?? $document);
 
-        // Convert links <a href="url">text</a> -> [text](url)
-        $text = preg_replace_callback('/<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/is', function ($matches) {
-            $url = $matches[1];
-            $linkText = trim(strip_tags($matches[2]));
+        return trim(preg_replace("/\n{3,}/", "\n\n", $text) ?? $text);
+    }
 
-            return $linkText ? "[{$linkText}]({$url})" : $url;
-        }, $text);
-
-        // Convert images <img src="url" alt="alt"> -> ![alt](url)
-        $text = preg_replace_callback('/<img[^>]+src=["\']([^"\']+)["\'][^>]*>/is', function ($matches) {
-            $src = $matches[1];
-            preg_match('/alt=["\']([^"\']*)["\']/', $matches[0], $altMatch);
-            $alt = $altMatch[1] ?? 'image';
-
-            return "\n![{$alt}]({$src})\n";
-        }, $text);
-
-        // Convert bold & italic
-        $text = preg_replace('/<(strong|b)[^>]*>(.*?)<\/(strong|b)>/is', '**$2**', $text);
-        $text = preg_replace('/<(em|i)[^>]*>(.*?)<\/(em|i)>/is', '*$2*', $text);
-
-        // Convert list items
-        $text = preg_replace('/<li[^>]*>(.*?)<\/li>/is', "- $1\n", $text);
-        $text = preg_replace('/<\/(ul|ol)>/i', "\n", $text);
-
-        // Convert paragraphs and line breaks
-        $text = preg_replace('/<p[^>]*>(.*?)<\/p>/is', "\n$1\n", $text);
-        $text = preg_replace('/<br\s*\/?>/i', "\n", $text);
-        $text = preg_replace('/<blockquote[^>]*>(.*?)<\/blockquote>/is', "\n> $1\n", $text);
-
-        // Strip remaining HTML tags
-        $text = strip_tags($text);
-
-        // Decode HTML entities
-        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-
-        // Clean up multiple empty lines
-        $text = preg_replace("/\n{3,}/", "\n\n", trim($text));
+    private static function children(DOMNode $node): string
+    {
+        $text = '';
+        foreach ($node->childNodes as $child) {
+            $text .= self::convert($child);
+        }
 
         return $text;
+    }
+
+    private static function convert(DOMNode $node): string
+    {
+        if ($node->nodeType === XML_TEXT_NODE) {
+            return preg_replace('/\s+/u', ' ', $node->textContent) ?? '';
+        }
+        if (! $node instanceof DOMElement) {
+            return '';
+        }
+
+        $tag = strtolower($node->tagName);
+        if (in_array($tag, ['script', 'style', 'template'], true)) {
+            return '';
+        }
+        if ($tag === 'table') {
+            return self::table($node);
+        }
+        if ($tag === 'ul' || $tag === 'ol') {
+            $items = [];
+            $number = $node->hasAttribute('start') ? (int) $node->getAttribute('start') : 1;
+            foreach ($node->childNodes as $child) {
+                if ($child instanceof DOMElement && $child->tagName === 'li') {
+                    $marker = $tag === 'ol' ? $number++.'. ' : '- ';
+                    $items[] = $marker.str_replace("\n", "\n    ", trim(self::children($child)));
+                }
+            }
+
+            return "\n".implode("\n", $items)."\n";
+        }
+        if ($tag === 'pre') {
+            $fence = str_repeat('`', max(3, self::longestBacktickRun($node->textContent) + 1));
+
+            return "\n\n{$fence}\n".trim($node->textContent, "\r\n")."\n{$fence}\n\n";
+        }
+        if ($tag === 'img') {
+            return '!['.$node->getAttribute('alt').']('.$node->getAttribute('src').')';
+        }
+
+        $text = self::children($node);
+        if (preg_match('/^h([1-6])$/', $tag, $matches)) {
+            return "\n\n".str_repeat('#', (int) $matches[1]).' '.trim($text)."\n\n";
+        }
+
+        return match ($tag) {
+            'a' => $node->hasAttribute('href') ? '['.trim($text).']('.$node->getAttribute('href').')' : $text,
+            'b', 'strong' => '**'.trim($text).'**',
+            'i', 'em' => '*'.trim($text).'*',
+            'br' => "\n",
+            'hr' => "\n\n---\n\n",
+            'p', 'div', 'section', 'figure', 'figcaption' => "\n\n".trim($text)."\n\n",
+            'blockquote' => "\n\n> ".str_replace("\n", "\n> ", trim($text))."\n\n",
+            'code' => '`'.$node->textContent.'`',
+            default => $text,
+        };
+    }
+
+    private static function table(DOMElement $table): string
+    {
+        $rows = [];
+        $hasHeader = false;
+        foreach ($table->getElementsByTagName('tr') as $row) {
+            $cells = [];
+            foreach ($row->childNodes as $cell) {
+                if (! $cell instanceof DOMElement || ! in_array($cell->tagName, ['th', 'td'], true)) {
+                    continue;
+                }
+                // Markdown cannot faithfully represent merged cells or nested tables.
+                if ($cell->hasAttribute('colspan') || $cell->hasAttribute('rowspan') || $cell->getElementsByTagName('table')->length) {
+                    return "\n\n".$table->ownerDocument->saveHTML($table)."\n\n";
+                }
+                $hasHeader = $hasHeader || ($rows === [] && $cell->tagName === 'th');
+                $value = trim(self::children($cell));
+                $cells[] = str_replace(['|', "\r", "\n"], ['\\|', '', '<br>'], $value);
+            }
+            if ($cells !== []) {
+                $rows[] = $cells;
+            }
+        }
+        if ($rows === []) {
+            return '';
+        }
+
+        $columns = max(array_map('count', $rows));
+        if (! $hasHeader) {
+            array_unshift($rows, array_fill(0, $columns, ''));
+        }
+        array_splice($rows, 1, 0, [array_fill(0, $columns, '---')]);
+        $lines = array_map(fn ($row) => '| '.implode(' | ', array_pad($row, $columns, '')).' |', $rows);
+        $caption = $table->getElementsByTagName('caption')->item(0)?->textContent;
+
+        return "\n\n".($caption ? $caption."\n\n" : '').implode("\n", $lines)."\n\n";
+    }
+
+    private static function longestBacktickRun(string $text): int
+    {
+        preg_match_all('/`+/', $text, $matches);
+
+        return $matches[0] ? max(array_map('strlen', $matches[0])) : 0;
     }
 }

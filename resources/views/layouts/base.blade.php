@@ -10,8 +10,8 @@
     @else
         <title>Amanda | 探店 | 美食 | 生活 | 開箱</title>
     @endif
-    <link rel="canonical" href="{{ url()->current() }}" />
-    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <link rel="canonical" href="{{ $canonicalUrl ?? url()->current() }}" />
+    <meta name="robots" content="{{ $robots ?? 'index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1' }}">
     <meta name="author" content="Amanda">
     <link rel="alternate" type="application/rss+xml" title="Amanda's Blog RSS Feed" href="{{ url('/rss.xml') }}" />
     <link rel="llms-txt" type="text/markdown" title="LLMs Summary Index" href="{{ url('/llms.txt') }}" />
@@ -35,7 +35,7 @@
     <!-- End Google Tag Manager -->
 </head>
 
-<body @class(['page-loading' => ! $__env->hasSection('static_content')])>
+<body>
     <!-- Google Tag Manager (noscript) -->
     <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WP6N5NTS"
     height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
@@ -49,32 +49,8 @@
     @else
     {{-- header --}}
     <div id="app">
-        <template v-if="!base.inital">
-            <div class="loading-page">
-                @include('layouts.loading_header')
-                <div class="loading-page-body">
-                    @hasSection('ssr_content')
-                        <div class="loading-shell">
-                            @yield('ssr_content')
-                            <div class="loading-overlay" aria-live="polite" aria-busy="true">
-                                @include('layouts.loading')
-                            </div>
-                        </div>
-                    @else
-                        <div class="loading-fallback" aria-live="polite" aria-busy="true">
-                            <div class="loading-fallback-inner">
-                                @include('layouts.loading')
-                            </div>
-                        </div>
-                    @endif
-                </div>
-            </div>
-        </template>
-        <template v-else>
-            @include('layouts/header')
-            {{-- main content --}}
-            @yield('content')
-        </template>
+        @include('layouts/header')
+        @yield('content')
     </div>
 
     <script src="{{ asset('js/vue/vue.global.min.js') }}"></script>
@@ -87,23 +63,6 @@
                 return {
                     base: {
                         isMenuOpen: false,
-                        inital: false,
-                        tagId: '{{ $tagId ?? null }}',
-                        about: {
-                            route: '{{ route('api.about.index') }}',
-                            loading: false,
-                            data: null,
-                        },
-                        tags: {
-                            route: '{{ route('api.tag.index') }}',
-                            loading: false,
-                            data: [],
-                        },
-                        socials: {
-                            route: '{{ route('api.social.index') }}',
-                            loading: false,
-                            data: [],
-                        },
                         visit: {
                             route: '{{ route('api.visit.index') }}',
                             store: '{{ route('api.visit.store') }}',
@@ -111,11 +70,6 @@
                         },
                         web: {
                             tag: '{{ route("tag", ["tagId" => "__TAG_ID__"]) }}',
-                        },
-                        newArticles: {
-                            route: '{{ route('api.article.index') }}',
-                            loading: false,
-                            data: [],
                         },
                         article_verify_route: '{{ route("api.article.verify", ["id" => "__ARTICLE_ID__"]) }}',
                         detail_route: '{{ route("article", ["id" => "__ARTICLE_ID__"]) }}',
@@ -125,49 +79,15 @@
             watch: {
             },
             mounted() {
-                document.body.classList.add('page-loading');
-                Promise.all([
-                    this.getAbout(),
-                    this.getTags(),
-                    this.getSocials(),
-                    this.getVisit(),
-                    this.getNewArticles(),
-                ]).then(() => {
-                    this.base.inital = true;
-                    document.body.classList.remove('page-loading');
-                    this.$nextTick(() => {
-                        document.dispatchEvent(new Event('amanda:content-ready'));
-                    });
-                });
+                this.getVisit();
                 this.addVisit();
+                this.$nextTick(() => {
+                    document.dispatchEvent(new Event('amanda:content-ready'));
+                });
             },
             methods: {
                 toggleMenu() {
                     this.base.isMenuOpen = !this.base.isMenuOpen;
-                },
-                async getAbout() {
-                    try {
-                        const res = await axios.get(this.base.about.route);
-                        this.base.about.data = res.data.data;
-                    } catch (error) {
-                        console.error(error);
-                    }
-                },
-                async getTags() {
-                    try {
-                        const res = await axios.get(this.base.tags.route);
-                        this.base.tags.data = res.data.data;
-                    } catch (error) {
-                        console.error(error);
-                    }
-                },
-                async getSocials() {
-                    try {
-                        const res = await axios.get(this.base.socials.route);
-                        this.base.socials.data = res.data.data;
-                    } catch (error) {
-                        console.error(error);
-                    }
                 },
                 async getVisit() {
                     try {
@@ -184,21 +104,6 @@
                         console.error(error);
                     }
                 },
-                async getNewArticles() {
-                    try {
-                        const res = await axios.get(this.base.newArticles.route, {
-                            params: {
-                                page: 1,
-                                perpage: 3,
-                                status: [1, 2],
-                            }
-                        });
-                        this.base.newArticles.data = res.data.data;
-                    } catch (error) {
-                        console.error(error);
-                    }
-                },
-
                 getTagUrl(tagId) {
                     return this.base.web.tag.replace('__TAG_ID__', encodeURIComponent(String(tagId)));
                 },

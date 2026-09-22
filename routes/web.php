@@ -25,6 +25,8 @@ Route::get('/article/{id}', [IndexController::class, 'article'])
 Route::get('/sitemap.xml', [IndexController::class, 'sitemap'])
     ->name('sitemap');
 
+Route::get('/robots.txt', [IndexController::class, 'robots'])->name('robots');
+
 Route::get('/llms.txt', [IndexController::class, 'llmsTxt'])
     ->name('llms.txt');
 

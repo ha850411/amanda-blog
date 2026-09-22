@@ -593,7 +593,8 @@ ul li:hover .fa-caret-down {
         font-size: 1.4em;
     }
 
-    h4 {
+    h4,
+    .title_area .h4 {
         font-size: 1.2em;
     }
 

@@ -134,13 +134,17 @@ class AdSenseTest extends TestCase
         $protected = Article::factory()->create(['status' => 2, 'password' => 'secret']);
         $hidden = Article::factory()->create(['status' => 0]);
 
-        foreach (['/article/'.$protected->id, '/article/'.$hidden->id, '/privacy', '/admin/login'] as $url) {
+        foreach (['/article/'.$protected->id, '/privacy', '/admin/login'] as $url) {
             $this->get($url)->assertOk()
                 ->assertDontSee('adsbygoogle.js', false)
                 ->assertDontSee('data-ad-slot=', false);
         }
 
-        $this->get('/article/999999')->assertNotFound()->assertDontSee('adsbygoogle.js', false);
+        foreach (['/article/'.$hidden->id, '/article/999999'] as $url) {
+            $this->get($url)->assertNotFound()
+                ->assertDontSee('adsbygoogle.js', false)
+                ->assertDontSee('data-ad-slot=', false);
+        }
     }
 
     public function test_privacy_policy_and_footer_link_are_available_without_javascript(): void

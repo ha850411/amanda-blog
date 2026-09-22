@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\About;
 use App\Models\Article;
+use App\Models\Social;
 use App\Models\Tag;
 use App\Support\ArticlePasswordCache;
 use Illuminate\Http\Request;
@@ -24,44 +26,49 @@ class IndexController extends Controller
             ],
         ];
 
-        return view('index')->with([
+        return response()->view('index', [
+            ...$this->layoutData(),
+            ...$this->listingData($request),
             'selectedTag' => null,
             'siteJsonLd' => $siteJsonLd,
-        ]);
+        ])->header('Cache-Control', 'private, no-store');
     }
 
-    public function tag(int $tagId)
+    public function tag(Request $request, int $tagId)
     {
         $selectedTag = Tag::findOrFail($tagId);
 
         $siteJsonLd = [
             '@context' => 'https://schema.org',
-            '@type' => 'WebSite',
+            '@type' => 'CollectionPage',
             'name' => "Amanda's Blog - ".$selectedTag->name,
             'url' => route('tag', ['tagId' => $tagId]),
             'description' => "Amanda 的「{$selectedTag->name}」文章整理與分享。",
             'inLanguage' => 'zh-TW',
         ];
 
-        return view('index')->with([
+        return response()->view('index', [
+            ...$this->layoutData(),
+            ...$this->listingData($request, $tagId),
             'tagId' => $tagId,
             'selectedTag' => $selectedTag,
             'siteJsonLd' => $siteJsonLd,
-        ]);
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function article(Request $request, int $id, ArticlePasswordCache $articlePasswordCache)
     {
-        $article = Article::where('id', $id)
+        $article = Article::visible()->where('id', $id)
             ->with('tags')
             ->firstOrFail();
         $isPasswordVerified = $articlePasswordCache->isVerified($request, $article);
 
-        $description = $article->excerpt;
+        $isProtected = (int) $article->status === 2;
+        $description = $isProtected ? '這篇文章受密碼保護，請輸入密碼後閱讀。' : $article->excerpt;
         $articleUrl = url()->current();
-        $articleImage = $article->first_image;
-        $articlePublishedAt = $article->created_at ? $article->created_at->tz('UTC')->toAtomString() : null;
-        $articleUpdatedAt = $article->updated_at ? $article->updated_at->tz('UTC')->toAtomString() : null;
+        $articleImage = $isProtected ? null : $article->first_image;
+        $articlePublishedAt = $article->created_at?->copy()->utc()->toAtomString();
+        $articleUpdatedAt = $article->updated_at?->copy()->utc()->toAtomString();
         $tagNames = $article->tags->pluck('name')->all();
 
         $articleJsonLd = [
@@ -69,7 +76,6 @@ class IndexController extends Controller
             '@type' => 'BlogPosting',
             'headline' => $article->title,
             'description' => $description,
-            'articleBody' => $description,
             'inLanguage' => 'zh-TW',
             'keywords' => implode(', ', $tagNames),
             'mainEntityOfPage' => [
@@ -89,10 +95,6 @@ class IndexController extends Controller
                 'name' => "Amanda's Blog",
                 'url' => url('/'),
             ],
-            'speakable' => [
-                '@type' => 'SpeakableSpecification',
-                'cssSelector' => ['.article-content', 'h1'],
-            ],
             'datePublished' => $articlePublishedAt,
             'dateModified' => $articleUpdatedAt,
         ];
@@ -101,12 +103,13 @@ class IndexController extends Controller
             $articleJsonLd['image'] = [$articleImage];
         }
 
-        return view('article')->with([
+        return response()->view('article', [
+            ...$this->layoutData(),
             'article' => $article,
             'frontendArticle' => [
                 'id' => $article->id,
                 'title' => $article->title,
-                'content' => (int) $article->status === 2 && ! $isPasswordVerified ? '' : $article->content,
+                'content' => '', // Readable content is rendered once in the HTML body.
                 'status' => $article->status,
                 'created_at' => $article->created_at?->format('Y/m/d H:i:s'),
                 'updated_at' => $article->updated_at?->format('Y/m/d H:i:s'),
@@ -121,7 +124,42 @@ class IndexController extends Controller
             'articleUrl' => $articleUrl,
             'articleImage' => $articleImage,
             'articleJsonLd' => $articleJsonLd,
-        ]);
+            'robots' => $isProtected ? 'noindex, nofollow' : 'index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1',
+        ])->header('Cache-Control', 'private, no-store');
+    }
+
+    private function layoutData(): array
+    {
+        return [
+            'siteAbout' => About::first(),
+            'siteTags' => Tag::where('parent_id', 0)->orderBy('sort')->with('children')->get(),
+            'siteSocials' => Social::where('status', 1)->get(),
+            'latestArticles' => Article::visible()->orderByDesc('updated_at')->orderByDesc('id')->limit(3)->get(['id', 'title', 'status']),
+        ];
+    }
+
+    private function listingData(Request $request, ?int $tagId = null): array
+    {
+        $page = filter_var($request->query('page', 1), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        abort_if($page === false, 404);
+
+        $articles = Article::visible()->with('tags')
+            ->when($tagId, fn ($query) => $query->whereHas('tags', fn ($tags) => $tags->where('tag.id', $tagId)))
+            ->orderByDesc('updated_at')->orderByDesc('id')
+            ->paginate(5, ['*'], 'page', $page);
+        abort_if($page > $articles->lastPage(), 404);
+        $passwordCache = app(ArticlePasswordCache::class);
+
+        return [
+            'articles' => $articles,
+            'initialArticles' => $articles->getCollection()->map(fn ($article) => $article->toListingArray($passwordCache->isVerified($request, $article)))->all(),
+            'canonicalUrl' => $page === 1 ? url()->current() : url()->current().'?page='.$page,
+        ];
+    }
+
+    public function robots()
+    {
+        return response()->view('robots')->header('Content-Type', 'text/plain; charset=UTF-8');
     }
 
     public function sitemap()
@@ -215,7 +253,7 @@ class IndexController extends Controller
 
     public function articleMarkdown(Request $request, int $id, ArticlePasswordCache $articlePasswordCache)
     {
-        $article = Article::where('id', $id)
+        $article = Article::visible()->where('id', $id)
             ->with('tags')
             ->firstOrFail();
 
@@ -240,6 +278,9 @@ class IndexController extends Controller
 
         return response($output, 200, [
             'Content-Type' => 'text/markdown; charset=UTF-8',
+            'Link' => '<'.$url.'>; rel="canonical"',
+            'X-Robots-Tag' => (int) $article->status === 2 ? 'noindex, nofollow' : 'index, follow',
+            'Cache-Control' => 'private, no-store',
         ]);
     }
 

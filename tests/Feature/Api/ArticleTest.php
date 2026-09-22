@@ -13,7 +13,7 @@ class ArticleTest extends ApiTestCase
     /** GET /api/article 應回傳分頁格式 */
     public function test_get_articles_returns_paginated_list(): void
     {
-        Article::factory()->count(3)->create();
+        Article::factory()->state(['status' => 1])->count(3)->create();
 
         $response = $this->getJson('/api/article');
 
@@ -25,7 +25,7 @@ class ArticleTest extends ApiTestCase
     /** perpage 參數應控制每頁筆數 */
     public function test_get_articles_respects_perpage(): void
     {
-        Article::factory()->count(5)->create();
+        Article::factory()->state(['status' => 1])->count(5)->create();
 
         $response = $this->getJson('/api/article?perpage=2');
 
@@ -38,7 +38,7 @@ class ArticleTest extends ApiTestCase
     /** page 參數應控制當前頁碼 */
     public function test_get_articles_respects_page(): void
     {
-        Article::factory()->count(5)->create();
+        Article::factory()->state(['status' => 1])->count(5)->create();
 
         $response = $this->getJson('/api/article?perpage=2&page=2');
 
@@ -49,8 +49,8 @@ class ArticleTest extends ApiTestCase
     /** status 篩選參數應只回傳符合狀態的文章 */
     public function test_get_articles_filter_by_status(): void
     {
-        Article::factory()->create(['status' => 1]);
-        Article::factory()->create(['status' => 0]);
+        Article::factory()->state(['status' => 1])->create(['status' => 1]);
+        Article::factory()->state(['status' => 1])->create(['status' => 0]);
 
         $response = $this->getJson('/api/article?status=1');
 
@@ -62,10 +62,10 @@ class ArticleTest extends ApiTestCase
     public function test_get_articles_filter_by_tag(): void
     {
         $tag = Tag::factory()->create(['name' => 'laravel']);
-        $article = Article::factory()->create();
+        $article = Article::factory()->state(['status' => 1])->create();
         $article->tags()->attach($tag->id);
 
-        Article::factory()->create(); // 無標籤文章
+        Article::factory()->state(['status' => 1])->create(); // 無標籤文章
 
         $response = $this->getJson('/api/article?tag=laravel');
 
@@ -77,10 +77,10 @@ class ArticleTest extends ApiTestCase
     public function test_get_articles_filter_by_tag_id(): void
     {
         $tag = Tag::factory()->create();
-        $article = Article::factory()->create();
+        $article = Article::factory()->state(['status' => 1])->create();
         $article->tags()->attach($tag->id);
 
-        Article::factory()->create(); // 無標籤文章
+        Article::factory()->state(['status' => 1])->create(); // 無標籤文章
 
         $response = $this->getJson("/api/article?tagId={$tag->id}");
 
@@ -91,8 +91,8 @@ class ArticleTest extends ApiTestCase
     /** start 篩選參數應只回傳建立時間在該日期之後的文章 */
     public function test_get_articles_filter_by_start(): void
     {
-        Article::factory()->create(['created_at' => Carbon::parse('2024-01-01')]);
-        Article::factory()->create(['created_at' => Carbon::parse('2024-06-01')]);
+        Article::factory()->state(['status' => 1])->create(['created_at' => Carbon::parse('2024-01-01')]);
+        Article::factory()->state(['status' => 1])->create(['created_at' => Carbon::parse('2024-06-01')]);
 
         $response = $this->getJson('/api/article?start=2024-03-01');
 
@@ -103,8 +103,8 @@ class ArticleTest extends ApiTestCase
     /** end 篩選參數應只回傳建立時間在該日期之前的文章 */
     public function test_get_articles_filter_by_end(): void
     {
-        Article::factory()->create(['created_at' => Carbon::parse('2024-01-01')]);
-        Article::factory()->create(['created_at' => Carbon::parse('2024-06-01')]);
+        Article::factory()->state(['status' => 1])->create(['created_at' => Carbon::parse('2024-01-01')]);
+        Article::factory()->state(['status' => 1])->create(['created_at' => Carbon::parse('2024-06-01')]);
 
         $response = $this->getJson('/api/article?end=2024-03-01');
 
@@ -115,7 +115,7 @@ class ArticleTest extends ApiTestCase
     /** show_first_image 參數應在每篇文章資料中附加 first_image 欄位 */
     public function test_get_articles_with_first_image(): void
     {
-        Article::factory()->create([
+        Article::factory()->state(['status' => 1])->create([
             'content' => '<p><img src="https://example.com/photo.jpg" /></p>',
             'status' => 1,
         ]);
@@ -132,7 +132,7 @@ class ArticleTest extends ApiTestCase
     /** 無圖片的文章，first_image 應為 null */
     public function test_get_articles_first_image_is_null_when_no_image(): void
     {
-        Article::factory()->create([
+        Article::factory()->state(['status' => 1])->create([
             'content' => '<p>純文字內容</p>',
             'status' => 1,
         ]);
@@ -188,7 +188,7 @@ class ArticleTest extends ApiTestCase
     public function test_store_article_updates_existing_article(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $article = Article::factory()->create(['title' => '舊標題']);
+        $article = Article::factory()->state(['status' => 1])->create(['title' => '舊標題']);
 
         $response = $this->actingAs($admin, 'admin')
             ->postJson('/api/article', [
@@ -214,7 +214,7 @@ class ArticleTest extends ApiTestCase
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
         $oldTag = Tag::factory()->create();
         $newTag = Tag::factory()->create();
-        $article = Article::factory()->create();
+        $article = Article::factory()->state(['status' => 1])->create();
         $article->tags()->attach($oldTag->id);
 
         $this->actingAs($admin, 'admin')
@@ -235,7 +235,7 @@ class ArticleTest extends ApiTestCase
     public function test_destroy_article(): void
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
-        $article = Article::factory()->create();
+        $article = Article::factory()->state(['status' => 1])->create();
 
         $response = $this->actingAs($admin, 'admin')
             ->deleteJson("/api/article/{$article->id}");
@@ -250,7 +250,7 @@ class ArticleTest extends ApiTestCase
     {
         $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
         $tag = Tag::factory()->create();
-        $article = Article::factory()->create();
+        $article = Article::factory()->state(['status' => 1])->create();
         $article->tags()->attach($tag->id);
 
         $this->actingAs($admin, 'admin')
@@ -264,7 +264,7 @@ class ArticleTest extends ApiTestCase
     {
         config(['cache.default' => 'array']);
 
-        $article = Article::factory()->create([
+        $article = Article::factory()->state(['status' => 1])->create([
             'status' => 2,
             'password' => 'secret',
         ]);
@@ -286,7 +286,7 @@ class ArticleTest extends ApiTestCase
         config(['cache.default' => 'file']);
         app('cache')->setDefaultDriver('file');
 
-        $article = Article::factory()->create([
+        $article = Article::factory()->state(['status' => 1])->create([
             'status' => 2,
             'password' => 'secret',
             'content' => '<p><img src="https://example.com/protected.jpg" /></p>',
@@ -340,7 +340,7 @@ class ArticleTest extends ApiTestCase
     /** 未登入時 DELETE /api/article/{id} 應回傳 401 */
     public function test_destroy_article_requires_authentication(): void
     {
-        $article = Article::factory()->create();
+        $article = Article::factory()->state(['status' => 1])->create();
 
         $response = $this->deleteJson("/api/article/{$article->id}");
 
