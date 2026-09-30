@@ -81,20 +81,18 @@ class LineScheduleImageServiceTest extends TestCase
         $preview->readImageBlob(Storage::disk('schedule-images')->get($previewPath));
 
         $this->assertSame(1440, $original->getImageWidth());
-        $this->assertSame(1630, $original->getImageHeight());
+        $this->assertSame(742, $original->getImageHeight());
         $this->assertSame(700, $preview->getImageWidth());
-        $this->assertSame(792, $preview->getImageHeight());
+        $this->assertSame(361, $preview->getImageHeight());
         $this->assertSame(
-            ['r' => 19, 'g' => 27, 'b' => 46, 'a' => 1],
+            ['r' => 17, 'g' => 24, 'b' => 39, 'a' => 1],
             $original->getImagePixelColor(520, 165)->getColor(),
         );
-        // H2H outcomes: winner is green and loser red
+        // Recent form pills: winner is green and loser red
         $win = ['r' => 7, 'g' => 56, 'b' => 47, 'a' => 1];
         $loss = ['r' => 61, 'g' => 23, 'b' => 36, 'a' => 1];
-        $this->assertSame($win, $original->getImagePixelColor(616, 591)->getColor());
-        $this->assertSame($loss, $original->getImagePixelColor(836, 591)->getColor());
-        $this->assertSame($win, $original->getImagePixelColor(86, 356)->getColor());
-        $this->assertSame($loss, $original->getImagePixelColor(86, 399)->getColor());
+        $this->assertSame($win, $original->getImagePixelColor(570, 195)->getColor());
+        $this->assertSame($loss, $original->getImagePixelColor(570, 222)->getColor());
 
         $original->clear();
         $preview->clear();
@@ -170,7 +168,7 @@ class LineScheduleImageServiceTest extends TestCase
 
         $image = new Imagick;
         $image->readImageBlob(Storage::disk('schedule-images')->get($originalPath));
-        $this->assertSame(9374, $image->getImageHeight());
+        $this->assertSame(3750, $image->getImageHeight());
         $image->clear();
     }
 
