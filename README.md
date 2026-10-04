@@ -12,6 +12,17 @@
 - docker-compose: https://docs.docker.com/compose/install/
 
 # 安裝
+本機 MySQL 與 Redis 由 `amanda-blog-system/database` 提供，請先啟動該專案的資料服務。應用容器透過主機發布的連接埠存取，根目錄 `.env` 應與 `.env.example` 一致：
+
+```env
+DB_HOST=host.docker.internal
+DB_PORT=33070
+REDIS_HOST=host.docker.internal
+REDIS_PORT=63800
+```
+
+帳號、密碼與資料庫名稱需符合資料服務的設定。Compose 已為 PHP、queue 與 scheduler 設定 `host.docker.internal:host-gateway`；不同 Docker 網路的容器不能直接透過 `redis` 服務名稱或資料庫容器 IP 連線。若資料服務自訂發布連接埠，請同步修改上述設定。
+
 啟動 docker
 ```
 /workspace/amanda-blog
@@ -36,8 +47,10 @@
 ```
 
 # 訪問專案 url
-- 前台: http://localhost:8091
-- 後台: http://localhost:8091/admin
+- 前台: http://localhost:8900
+- 後台: http://localhost:8900/admin
+
+以上使用 `.docker/compose/.env.example` 的 `APP_PORT=8900`；若自行修改，請使用對應連接埠。
 
 # Google AdSense 廣告收益
 

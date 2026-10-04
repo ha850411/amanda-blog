@@ -11,6 +11,8 @@ services:
       XDEBUG_MODE: ${XDEBUG_MODE:-off}
       COMPOSER_CACHE_DIR: /tmp/composer-cache
       TZ: Asia/Taipei
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # 專案原始碼（與 Nginx 共用）
       - ../../.:/var/www/html:delegated
@@ -44,6 +46,8 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Taipei
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../../.:/var/www/html:delegated
       - ../php/local.ini:/usr/local/etc/php/conf.d/99-local.ini:ro
@@ -58,6 +62,8 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Taipei
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../../.:/var/www/html:delegated
       - ../php/local.ini:/usr/local/etc/php/conf.d/99-local.ini:ro

@@ -3,6 +3,8 @@
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\AdsTxtController;
 use App\Http\Controllers\IndexController;
+use App\Http\Controllers\SportsController;
+use App\Http\Controllers\SportsPlayerController;
 use App\Http\Middleware\AdminMiddleware;
 use Illuminate\Support\Facades\Route;
 
@@ -10,6 +12,12 @@ Route::get('/', [IndexController::class, 'index'])
     ->name('index');
 
 Route::get('/ads.txt', AdsTxtController::class)->name('ads.txt');
+
+Route::get('/sports', [SportsController::class, 'index'])->name('sports.index');
+Route::get('/sports/events/{id}', [SportsController::class, 'show'])
+    ->where('id', '[a-zA-Z0-9_-]{1,240}')->name('sports.show');
+Route::get('/sports/player/{token}', [SportsPlayerController::class, 'show'])
+    ->where('token', '[a-f0-9]{64}')->name('sports.player');
 
 Route::view('/privacy', 'privacy')->name('privacy');
 
