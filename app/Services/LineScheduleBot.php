@@ -85,12 +85,21 @@ class LineScheduleBot
         $hasMlb = in_array('mlb', $command['games'], true);
         if ($esports !== []) {
             try {
-                $allMatches = $this->schedules->forRange(
+                $schedule = $this->schedules->forRange(
                     $esports,
                     $command['start_date'],
                     $command['end_date'],
                     $command['tiers'],
                 );
+                $allMatches = $schedule['matches'];
+                if ($schedule['failed_requests'] !== []) {
+                    $failed = array_map(
+                        fn (array $request): string => (self::GAME_LABELS[$request['game']] ?? $request['game'])
+                            .' '.CarbonImmutable::parse($request['date'])->format('m/d'),
+                        $schedule['failed_requests'],
+                    );
+                    $sourceErrors[] = 'bo3.gg（'.implode('、', $failed).'）';
+                }
             } catch (Throwable $exception) {
                 report($exception);
                 $sourceErrors[] = 'bo3.gg';
@@ -103,9 +112,6 @@ class LineScheduleBot
                 report($exception);
                 $sourceErrors[] = 'MLB';
             }
-        }
-        if ($allMatches === [] && $sourceErrors !== []) {
-            return new LineBotReply('目前無法取得 '.implode('、', $sourceErrors).' 賽程，請稍後再試。');
         }
         foreach ($allMatches as $index => $match) {
             $allMatches[$index]['game_label'] = self::GAME_LABELS[$match['game']] ?? mb_strtoupper($match['game']);
@@ -199,9 +205,10 @@ class LineScheduleBot
 
         if ($allMatches === []) {
             $noMatchLabel = $isMultiGame ? '綜合賽程' : $label;
+            $status = $sourceErrors === [] ? '查無賽程。' : '暫時無法取得完整賽程，請稍後再試。';
 
             return new LineBotReply(
-                "{$noMatchLabel} {$dateLabel} 查無賽程。\n{$scheduleLinks}".($warning === '' ? '' : "\n{$warning}"),
+                "{$noMatchLabel} {$dateLabel} {$status}\n{$scheduleLinks}".($warning === '' ? '' : "\n{$warning}"),
                 $filteredUrl,
             );
         }

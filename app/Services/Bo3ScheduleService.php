@@ -3,7 +3,10 @@
 namespace App\Services;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -29,13 +32,17 @@ class Bo3ScheduleService
      */
     public function forDate(string $game, CarbonImmutable $date, array $tiers = ['s', 'a']): array
     {
-        $matches = $this->forRange([$game], $date, $date, $tiers);
+        $result = $this->forRange([$game], $date, $date, $tiers);
+
+        if ($result['failed_requests'] !== []) {
+            throw new RuntimeException('bo3.gg schedule request failed.');
+        }
 
         return array_map(function (array $match): array {
             unset($match['game']);
 
             return $match;
-        }, $this->enrichLiveDetailsAndMissingFormats($matches));
+        }, $this->enrichLiveDetailsAndMissingFormats($result['matches']));
     }
 
     /**
@@ -43,7 +50,7 @@ class Bo3ScheduleService
      * apply their team filter and display limit before requesting them.
      *
      * @param  array<int, string>  $games
-     * @return array<int, array<string, mixed>>
+     * @return array{matches: array<int, array<string, mixed>>, failed_requests: array<int, array{game: string, date: string}>}
      */
     public function forRange(array $games, CarbonImmutable $startDate, CarbonImmutable $endDate, array $tiers = ['s', 'a']): array
     {
@@ -69,38 +76,118 @@ class Bo3ScheduleService
                     $query['tiers'] = implode(',', $tiers);
                 }
 
-                $pool->as($key.':html')
+                $this->scheduleRequest($pool, $key.':html')
                     ->accept('text/html')
-                    ->withUserAgent('AmandaBlogLineBot/1.0')
-                    ->timeout((int) config('services.bo3.timeout_seconds', 10))
-                    ->retry(2, 200)
                     ->get($this->baseUrl().self::PATHS[$request['game']], $query);
 
-                $pool->as($key.':api')
+                $this->scheduleRequest($pool, $key.':api')
                     ->acceptJson()
-                    ->withUserAgent('AmandaBlogLineBot/1.0')
-                    ->timeout((int) config('services.bo3.timeout_seconds', 10))
-                    ->retry(2, 200)
                     ->get($this->apiUrl().'/matches', $this->dailyApiQuery($request['game'], $request['date'], $tiers));
             }
         }, 5);
 
-        $matches = [];
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
+        $apiMatches = [];
+        $fallbackRequests = [];
+        $fallbackUrl = $this->baseUrl().'/api/v1';
 
         foreach ($requests as $key => $request) {
-            $response = $responses[$key.':html'] ?? null;
+            $response = $responses[$key.':api'] ?? null;
+            $apiMatches[$key] = $this->extractApiMatches($request['game'], $request['date'], $timezone, $response);
 
-            if (! $response instanceof Response) {
-                throw $response instanceof Throwable ? $response : new RuntimeException('bo3.gg schedule request failed.');
+            if ($apiMatches[$key] === null && $fallbackUrl !== $this->apiUrl() && $this->canUseApiFallback($response)) {
+                $fallbackRequests[$key] = $request;
+            }
+        }
+
+        // The site exposes the same public API on its own origin. Use it only
+        // when the primary API failed, without repeating successful requests or
+        // switching endpoints after an access denial or rate-limit response.
+        $fallbackResponses = $fallbackRequests === [] ? [] : Http::pool(function (Pool $pool) use ($fallbackRequests, $fallbackUrl, $tiers): void {
+            foreach ($fallbackRequests as $key => $request) {
+                $this->scheduleRequest($pool, $key, attempts: 1)->acceptJson()
+                    ->get($fallbackUrl.'/matches', $this->dailyApiQuery($request['game'], $request['date'], $tiers));
+            }
+        }, 5);
+
+        foreach ($fallbackRequests as $key => $request) {
+            $apiMatches[$key] = $this->extractApiMatches(
+                $request['game'], $request['date'], $timezone, $fallbackResponses[$key] ?? null, 'fallback_api',
+            );
+        }
+
+        $matches = [];
+        $failedRequests = [];
+
+        foreach ($requests as $key => $request) {
+            try {
+                $dailyMatches = $this->parseSchedule(
+                    $request['game'],
+                    $request['date'],
+                    $responses[$key.':html'] ?? null,
+                    $apiMatches[$key],
+                );
+            } catch (Throwable $exception) {
+                $failedRequests[] = $request;
+                Log::warning('bo3.gg daily schedule unavailable from all sources.', [
+                    ...$request,
+                    'html' => $this->sourceFailure($responses[$key.':html'] ?? null, $exception),
+                    'api' => $this->sourceFailure($responses[$key.':api'] ?? null),
+                    'fallback_api' => isset($fallbackRequests[$key]) ? $this->sourceFailure($fallbackResponses[$key] ?? null) : null,
+                ]);
+
+                continue;
             }
 
-            foreach ($this->parseSchedule($request['game'], $request['date'], $response, $responses[$key.':api'] ?? null) as $match) {
+            foreach ($dailyMatches as $match) {
                 $match['game'] = $request['game'];
                 $matches[] = $match;
             }
         }
 
-        return $matches;
+        return ['matches' => $matches, 'failed_requests' => $failedRequests];
+    }
+
+    private function scheduleRequest(Pool $pool, string $key, int $attempts = 2): PendingRequest
+    {
+        $timeout = max(1, (int) config('services.bo3.timeout_seconds', 10));
+
+        return $pool->as($key)
+            ->withUserAgent('AmandaBlogLineBot/1.0')
+            ->connectTimeout(min(3, $timeout))
+            ->timeout($timeout)
+            ->retry($attempts, 200, fn (?Throwable $exception): bool => $exception instanceof ConnectionException
+                || ($exception instanceof RequestException && ($exception->response->status() === 408 || $exception->response->serverError())), throw: false);
+    }
+
+    private function canUseApiFallback(mixed $response): bool
+    {
+        return $response instanceof ConnectionException
+            || ($response instanceof Response && ($response->successful() || $response->status() === 408 || $response->serverError()));
+    }
+
+    /** @return array{reason: string, status: ?int, type: ?string, curl_errno: ?int} */
+    private function sourceFailure(mixed $response, ?Throwable $exception = null): array
+    {
+        $exception ??= $response instanceof Throwable ? $response : null;
+        if ($response instanceof RequestException) {
+            $response = $response->response;
+        }
+        $previous = $exception?->getPrevious();
+        $curlError = $previous instanceof \GuzzleHttp\Exception\ConnectException
+            ? ($previous->getHandlerContext()['errno'] ?? null) : null;
+
+        return [
+            'reason' => match (true) {
+                $curlError === 28 => 'timeout',
+                $exception instanceof ConnectionException => 'connection',
+                $response instanceof Response && ! $response->successful() => 'http',
+                default => 'invalid_data',
+            },
+            'status' => $response instanceof Response ? $response->status() : null,
+            'type' => $exception === null ? null : $exception::class,
+            'curl_errno' => $curlError,
+        ];
     }
 
     public function filteredUrl(string $game, CarbonImmutable $date, array $tiers = ['s', 'a']): string
@@ -131,7 +218,7 @@ class Bo3ScheduleService
     /**
      * @return array<int, array{name: string, team1: string, team2: string, tournament: string, format: string, start_at: CarbonImmutable, url: string}>
      */
-    private function parseSchedule(string $game, string $date, Response $response, mixed $apiResponse): array
+    private function extractStructuredMatches(string $date, Response $response): array
     {
         $response->throw();
 
@@ -140,10 +227,15 @@ class Bo3ScheduleService
         }
 
         $events = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
+
+        if (! is_array($events) || ! array_is_list($events)) {
+            throw new RuntimeException('bo3.gg schedule data was invalid.');
+        }
+
         $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         $metadata = $this->extractMatchMetadata($response->body());
 
-        $structuredMatches = collect($events)
+        return collect($events)
             ->filter(fn (mixed $event): bool => is_array($event)
                 && ($event['@type'] ?? null) === 'SportsEvent'
                 && isset($event['name'], $event['startDate'], $event['url']))
@@ -168,11 +260,28 @@ class Bo3ScheduleService
             })
             ->filter(fn (array $event): bool => $event['start_at']->format('Y-m-d') === $date)
             ->all();
+    }
 
+    /** @return array<int, array<string, mixed>> */
+    private function extractHtmlMatches(string $game, string $date, Response $response): array
+    {
+        $response->throw();
+        $timezone = (string) config('services.bo3.timezone', 'Asia/Taipei');
         // bo3.gg leaves matches with an undecided participant (for example,
         // "TBD vs JD Gaming") out of its JSON-LD SportsEvent list. The visible
-        // schedule table still contains those rows, so merge it in as a fallback.
+        // table is also usable when JSON-LD is absent or malformed.
         $tableMatches = $this->extractTableMatches($response->body(), $game, $date, $timezone);
+
+        try {
+            $structuredMatches = $this->extractStructuredMatches($date, $response);
+        } catch (Throwable $exception) {
+            if ($tableMatches === []) {
+                throw $exception;
+            }
+
+            $structuredMatches = [];
+        }
+
         $knownMatches = collect($structuredMatches)
             ->mapWithKeys(fn (array $match, int $index): array => [$this->matchKey($match) => $index])
             ->all();
@@ -186,11 +295,37 @@ class Bo3ScheduleService
             }
         }
 
+        return $structuredMatches;
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function parseSchedule(string $game, string $date, mixed $response, ?array $apiMatches): array
+    {
+        try {
+            if (! $response instanceof Response) {
+                throw $response instanceof Throwable ? $response : new RuntimeException('bo3.gg schedule request failed.');
+            }
+
+            $structuredMatches = $this->extractHtmlMatches($game, $date, $response);
+        } catch (Throwable $exception) {
+            // Empty schedule pages can omit micro-markup entirely. A valid API
+            // response, including an empty results list, is an independent source.
+            if ($apiMatches === null) {
+                throw $exception;
+            }
+
+            $structuredMatches = [];
+        }
+
+        $knownMatches = collect($structuredMatches)
+            ->mapWithKeys(fn (array $match, int $index): array => [$this->matchKey($match) => $index])
+            ->all();
+
         // The current schedule page is paginated and can omit matches that
         // started earlier in the same local day. This is especially visible
         // on busy VALORANT days. Merge the date-bounded API result so the
         // daily schedule does not depend on whichever page rows were SSR'd.
-        foreach ($this->extractApiMatches($game, $date, $timezone, $apiResponse) as $match) {
+        foreach ($apiMatches ?? [] as $match) {
             $key = $this->matchKey($match);
 
             if (! array_key_exists($key, $knownMatches)) {
@@ -254,25 +389,26 @@ class Bo3ScheduleService
     }
 
     /**
-     * @return array<int, array<string, mixed>>
+     * @return array<int, array<string, mixed>>|null Null means unavailable; [] means a successfully fetched empty schedule.
      */
-    private function extractApiMatches(string $game, string $date, string $timezone, mixed $response): array
+    private function extractApiMatches(string $game, string $date, string $timezone, mixed $response, string $source = 'api'): ?array
     {
         try {
             if (! $response instanceof Response || ! $response->successful()) {
-                Log::warning('bo3.gg complete daily schedule request failed.', [
+                Log::warning('bo3.gg schedule API unavailable.', [
                     'game' => $game,
                     'date' => $date,
-                    'status' => $response instanceof Response ? $response->status() : null,
+                    'source' => $source,
+                    ...$this->sourceFailure($response),
                 ]);
 
-                return [];
+                return null;
             }
 
             $results = $response->json('results');
 
-            if (! is_array($results)) {
-                return [];
+            if (! is_array($results) || ! array_is_list($results)) {
+                throw new RuntimeException('bo3.gg schedule API data was invalid.');
             }
 
             return collect($results)
@@ -314,13 +450,14 @@ class Bo3ScheduleService
                 ->values()
                 ->all();
         } catch (Throwable $exception) {
-            Log::warning('bo3.gg complete daily schedule connection failed.', [
+            Log::warning('bo3.gg schedule API unavailable.', [
                 'game' => $game,
                 'date' => $date,
-                'type' => $exception::class,
+                'source' => $source,
+                ...$this->sourceFailure($response, $exception),
             ]);
 
-            return [];
+            return null;
         }
     }
 

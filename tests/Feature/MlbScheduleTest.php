@@ -218,7 +218,8 @@ class MlbScheduleTest extends TestCase
             'start_at' => CarbonImmutable::parse('2026-09-22T00:00:00Z')->setTimezone('Asia/Taipei'), 'url' => 'https://bo3.gg/matches/test',
         ];
         $this->mock(Bo3ScheduleService::class, function ($mock) use ($esport): void {
-            $mock->shouldReceive('forRange')->once()->with(['lol', 'valorant', 'cs'], \Mockery::any(), \Mockery::any(), ['s'])->andReturn([$esport]);
+            $mock->shouldReceive('forRange')->once()->with(['lol', 'valorant', 'cs'], \Mockery::any(), \Mockery::any(), ['s'])
+                ->andReturn(['matches' => [$esport], 'failed_requests' => []]);
             $mock->shouldReceive('enrichLiveDetailsAndMissingFormats')->once()->andReturnUsing(fn (array $matches): array => $matches);
         });
         Http::fake(['https://api.bo3.gg/api/v1/matches/test' => Http::response([])]);
@@ -231,13 +232,16 @@ class MlbScheduleTest extends TestCase
     public function test_mlb_failure_is_clear_and_does_not_hide_other_sports(): void
     {
         Http::fake(['https://statsapi.mlb.com/*' => Http::response([], 503)]);
-        $this->assertSame('目前無法取得 MLB 賽程，請稍後再試。', app(LineScheduleBot::class)->reply('!mlb 明天')->text);
+        $failedReply = app(LineScheduleBot::class)->reply('!mlb 明天');
+        $this->assertStringContainsString('MLB 暫時無法取得', $failedReply->text);
+        $this->assertStringContainsString('完整賽程｜https://www.mlb.com/schedule/', $failedReply->text);
+        $this->assertStringNotContainsString('查無賽程', $failedReply->text);
         $esport = [
             'game' => 'cs', 'name' => 'Alpha vs Beta', 'team1' => 'Alpha', 'team2' => 'Beta', 'format' => 'BO3', 'tournament' => 'Test Cup',
             'start_at' => CarbonImmutable::parse('2026-09-22T00:00:00Z'), 'url' => 'https://bo3.gg/matches/test',
         ];
         $this->mock(Bo3ScheduleService::class, function ($mock) use ($esport): void {
-            $mock->shouldReceive('forRange')->once()->andReturn([$esport]);
+            $mock->shouldReceive('forRange')->once()->andReturn(['matches' => [$esport], 'failed_requests' => []]);
             $mock->shouldReceive('enrichLiveDetailsAndMissingFormats')->once()->andReturnUsing(fn (array $matches): array => $matches);
         });
         Http::fake(['https://api.bo3.gg/api/v1/matches/test' => Http::response([])]);

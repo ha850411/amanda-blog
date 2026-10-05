@@ -57,6 +57,7 @@ class Bo3ScheduleServiceTest extends TestCase
             'https://api.bo3.gg/api/v1/matches?*' => $failure === 'connection'
                 ? Http::failedConnection()
                 : Http::response([], 503),
+            'https://bo3.gg/api/v1/matches?*' => Http::response([], 503),
         ]);
 
         $matches = app(Bo3ScheduleService::class)->forDate('valorant', CarbonImmutable::parse('2026-08-15', 'Asia/Taipei'), ['s']);

@@ -78,16 +78,20 @@ class LineScheduleRangeTest extends TestCase
             && basename($request->url()) !== 'cs-2026-09-18-0');
     }
 
-    public function test_failed_required_schedule_source_returns_the_existing_error(): void
+    public function test_all_schedule_sources_failing_returns_an_error_with_the_requested_schedule_link(): void
     {
         Http::fake([
             'https://bo3.gg/*' => Http::failedConnection(),
-            'https://api.bo3.gg/api/v1/matches?*' => Http::response(['results' => []]),
+            'https://api.bo3.gg/api/v1/matches?*' => Http::response([], 503),
         ]);
 
         $reply = app(LineScheduleBot::class)->reply('!lol 0914');
 
-        $this->assertSame('目前無法取得 bo3.gg 賽程，請稍後再試。', $reply->text);
+        $this->assertStringContainsString('LoL 09/14', $reply->text);
+        $this->assertStringContainsString('暫時無法取得', $reply->text);
+        $this->assertStringContainsString('bo3.gg（LoL 09/14）', $reply->text);
+        $this->assertStringContainsString('完整賽程｜https://bo3.gg/lol/matches/current?tiers=s&date=2026-09-14', $reply->text);
+        $this->assertStringNotContainsString('查無賽程', $reply->text);
         $this->assertNull($reply->imageData);
     }
 
