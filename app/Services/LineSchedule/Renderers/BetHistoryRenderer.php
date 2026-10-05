@@ -79,48 +79,68 @@ class BetHistoryRenderer extends AbstractImageRenderer
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
         }
 
-        // 4. KPI Dashboard Cards (y = 146 ~ 302, height = 156)
+        // 4. KPI Dashboard Cards (y = 146 ~ 318, height = 172)
         $dashY = 146;
-        $dashHeight = 156;
+        $dashHeight = 172;
 
-        // Card 1: 淨損益 (Net Profit/Loss)
+        // Card 1: 淨損益主卡 (Hero Net Profit/Loss)
         $c1X1 = 44;
-        $c1W = 344;
+        $c1W = 560;
         $c1X2 = $c1X1 + $c1W;
         $netProfitVal = (float) ($summary['net_profit_val'] ?? 0);
         $isProfitable = $netProfitVal > 0.001;
         $isLoss = $netProfitVal < -0.001;
 
-        $c1Bg = $isProfitable ? '#064e3b' : ($isLoss ? '#450a0a' : '#1e293b');
-        $c1Border = $isProfitable ? '#059669' : ($isLoss ? '#dc2626' : '#475569');
+        $c1Bg = $isProfitable ? '#043c2e' : ($isLoss ? '#3b0b14' : '#111c2e');
+        $c1Border = $isProfitable ? '#059669' : ($isLoss ? '#dc2626' : '#334155');
         $c1Text = $isProfitable ? '#34d399' : ($isLoss ? '#f87171' : '#cbd5e1');
 
         $draw->setFillColor($c1Bg);
         $draw->setStrokeColor($c1Border);
-        $draw->setStrokeWidth(1.5);
+        $draw->setStrokeWidth(2.0);
         $draw->roundRectangle($c1X1, $dashY, $c1X2, $dashY + $dashHeight, 14, 14);
 
         $draw->setFillColor($isProfitable ? '#a7f3d0' : ($isLoss ? '#fecaca' : '#94a3b8'));
         $draw->setStrokeColor('none');
         $draw->setStrokeWidth(0);
-        $draw->setFontSize(18);
+        $draw->setFontSize(20);
         $draw->setFontWeight(600);
-        $draw->annotation($c1X1 + 22, $dashY + 36, '淨損益 (Net P/L)');
+        $draw->annotation($c1X1 + 24, $dashY + 36, '淨損益 (Net P/L)');
 
         $draw->setFillColor($c1Text);
-        $draw->setFontSize(34);
+        $draw->setFontSize(46);
         $draw->setFontWeight(800);
         $netProfitText = (string) ($summary['net_profit'] ?? '0.00 USDT');
-        $draw->annotation($c1X1 + 22, $dashY + 84, $netProfitText);
+        $fitNetProfit = $this->fitText($image, $draw, $netProfitText, $c1W - 48, 28);
+        $draw->annotation($c1X1 + 24, $dashY + 96, $fitNetProfit);
 
         $tagLabel = $isProfitable ? '▲ 盈利' : ($isLoss ? '▼ 虧損' : '平手');
-        $draw->setFontSize(18);
+        $draw->setFontSize(19);
         $draw->setFontWeight(700);
-        $draw->annotation($c1X1 + 22, $dashY + 124, $tagLabel);
+        $tagMetrics = $image->queryFontMetrics($draw, $tagLabel);
+        $tagW = (int) round($tagMetrics['textWidth']) + 24;
 
-        // Card 2: 總投注 & 總返還 (x: 406, w: 304)
-        $c2X1 = 406;
-        $c2W = 304;
+        $draw->setFillColor($isProfitable ? '#065f46' : ($isLoss ? '#4c0519' : '#1e293b'));
+        $draw->setStrokeColor($isProfitable ? '#10b981' : ($isLoss ? '#ef4444' : '#475569'));
+        $draw->setStrokeWidth(1);
+        $draw->roundRectangle($c1X1 + 24, $dashY + 120, $c1X1 + 24 + $tagW, $dashY + 154, 6, 6);
+
+        $draw->setFillColor($isProfitable ? '#6ee7b7' : ($isLoss ? '#fca5a5' : '#cbd5e1'));
+        $draw->setStrokeColor('none');
+        $draw->setStrokeWidth(0);
+        $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+        $draw->annotation($c1X1 + 24 + (int) round($tagW / 2), $dashY + 144, $tagLabel);
+        $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+        $roiText = 'ROI：'.($summary['roi'] ?? '0.0%');
+        $draw->setFillColor($isProfitable ? '#6ee7b7' : ($isLoss ? '#fca5a5' : '#cbd5e1'));
+        $draw->setFontSize(20);
+        $draw->setFontWeight(700);
+        $draw->annotation($c1X1 + 24 + $tagW + 16, $dashY + 144, $roiText);
+
+        // Card 2: 戰績與勝率 (Record & Win Rate)
+        $c2X1 = 624;
+        $c2W = 368;
         $c2X2 = $c2X1 + $c2W;
 
         $draw->setFillColor('#0f172a');
@@ -131,70 +151,15 @@ class BetHistoryRenderer extends AbstractImageRenderer
         $draw->setFillColor('#94a3b8');
         $draw->setStrokeColor('none');
         $draw->setStrokeWidth(0);
-        $draw->setFontSize(18);
+        $draw->setFontSize(20);
         $draw->setFontWeight(600);
-        $draw->annotation($c2X1 + 20, $dashY + 36, '總投注 / 總返還');
-
-        $draw->setFillColor('#cbd5e1');
-        $draw->setFontSize(22);
-        $draw->setFontWeight(700);
-        $draw->annotation($c2X1 + 20, $dashY + 76, '投注：'.($summary['total_staked'] ?? '0 USDT'));
-
-        $draw->setFillColor('#38bdf8');
-        $draw->setFontSize(22);
-        $draw->setFontWeight(700);
-        $draw->annotation($c2X1 + 20, $dashY + 118, '返還：'.($summary['total_payout'] ?? '0 USDT'));
-
-        // Card 3: 勝率 & 投資報酬率 (x: 728, w: 304)
-        $c3X1 = 728;
-        $c3W = 304;
-        $c3X2 = $c3X1 + $c3W;
-
-        $draw->setFillColor('#0f172a');
-        $draw->setStrokeColor('#1e2d45');
-        $draw->setStrokeWidth(1.5);
-        $draw->roundRectangle($c3X1, $dashY, $c3X2, $dashY + $dashHeight, 14, 14);
-
-        $draw->setFillColor('#94a3b8');
-        $draw->setStrokeColor('none');
-        $draw->setStrokeWidth(0);
-        $draw->setFontSize(18);
-        $draw->setFontWeight(600);
-        $draw->annotation($c3X1 + 20, $dashY + 36, '勝率 / 投資報酬率');
-
-        $draw->setFillColor('#fbbf24');
-        $draw->setFontSize(22);
-        $draw->setFontWeight(700);
-        $draw->annotation($c3X1 + 20, $dashY + 76, '勝率：'.($summary['win_rate'] ?? '0.0%'));
-
-        $roiVal = (float) ($summary['roi_val'] ?? 0);
-        $roiColor = $roiVal > 0.001 ? '#34d399' : ($roiVal < -0.001 ? '#f87171' : '#cbd5e1');
-        $draw->setFillColor($roiColor);
-        $draw->setFontSize(22);
-        $draw->setFontWeight(700);
-        $draw->annotation($c3X1 + 20, $dashY + 118, 'ROI：'.($summary['roi'] ?? '0.0%'));
-
-        // Card 4: 戰績總覽 (x: 1050, w: 346)
-        $c4X1 = 1050;
-        $c4W = 346;
-        $c4X2 = $c4X1 + $c4W;
-
-        $draw->setFillColor('#0f172a');
-        $draw->setStrokeColor('#1e2d45');
-        $draw->setStrokeWidth(1.5);
-        $draw->roundRectangle($c4X1, $dashY, $c4X2, $dashY + $dashHeight, 14, 14);
-
-        $draw->setFillColor('#94a3b8');
-        $draw->setStrokeColor('none');
-        $draw->setStrokeWidth(0);
-        $draw->setFontSize(18);
-        $draw->setFontWeight(600);
-        $draw->annotation($c4X1 + 20, $dashY + 36, '戰績總覽 (Record)');
+        $draw->annotation($c2X1 + 22, $dashY + 36, '戰績與勝率 (Record)');
 
         $draw->setFillColor('#f8fafc');
-        $draw->setFontSize(22);
-        $draw->setFontWeight(700);
-        $draw->annotation($c4X1 + 20, $dashY + 76, ($summary['won_count'] ?? 0).' 勝  '.($summary['lost_count'] ?? 0).' 負');
+        $draw->setFontSize(34);
+        $draw->setFontWeight(800);
+        $recordBigText = sprintf('%d 勝  %d 負', $summary['won_count'] ?? 0, $summary['lost_count'] ?? 0);
+        $draw->annotation($c2X1 + 22, $dashY + 92, $recordBigText);
 
         $extraDetailParts = [];
         if (($summary['cashout_count'] ?? 0) > 0) {
@@ -206,12 +171,40 @@ class BetHistoryRenderer extends AbstractImageRenderer
         if (($summary['void_count'] ?? 0) > 0) {
             $extraDetailParts[] = $summary['void_count'].' 退款';
         }
-        $extraDetail = $extraDetailParts !== [] ? implode('  ', $extraDetailParts) : '全部結算';
+        $extraDetail = $extraDetailParts !== [] ? '（'.implode(' ', $extraDetailParts).'）' : '';
+
+        $draw->setFillColor('#fbbf24');
+        $draw->setFontSize(22);
+        $draw->setFontWeight(700);
+        $winRateText = '勝率：'.($summary['win_rate'] ?? '0.0%').$extraDetail;
+        $draw->annotation($c2X1 + 22, $dashY + 144, $this->fitText($image, $draw, $winRateText, $c2W - 36, 16));
+
+        // Card 3: 總投注與總返還 (Staked & Payout)
+        $c3X1 = 1012;
+        $c3W = 384;
+        $c3X2 = $c3X1 + $c3W;
+
+        $draw->setFillColor('#0f172a');
+        $draw->setStrokeColor('#1e2d45');
+        $draw->setStrokeWidth(1.5);
+        $draw->roundRectangle($c3X1, $dashY, $c3X2, $dashY + $dashHeight, 14, 14);
 
         $draw->setFillColor('#94a3b8');
+        $draw->setStrokeColor('none');
+        $draw->setStrokeWidth(0);
         $draw->setFontSize(20);
-        $draw->setFontWeight(500);
-        $draw->annotation($c4X1 + 20, $dashY + 118, $extraDetail);
+        $draw->setFontWeight(600);
+        $draw->annotation($c3X1 + 22, $dashY + 36, '投注規模與返還');
+
+        $draw->setFillColor('#cbd5e1');
+        $draw->setFontSize(24);
+        $draw->setFontWeight(700);
+        $draw->annotation($c3X1 + 22, $dashY + 90, '投注：'.($summary['total_staked'] ?? '0 USDT'));
+
+        $draw->setFillColor('#38bdf8');
+        $draw->setFontSize(24);
+        $draw->setFontWeight(700);
+        $draw->annotation($c3X1 + 22, $dashY + 142, '返還：'.($summary['total_payout'] ?? '0 USDT'));
 
         // 5. Bet List or Empty State
         $cardWidth = 1352;
@@ -323,24 +316,24 @@ class BetHistoryRenderer extends AbstractImageRenderer
                 : ($profitVal > 0.001 ? '#34d399' : ($profitVal < -0.001 ? '#f87171' : '#94a3b8'));
 
             $draw->setFillColor($pColor);
-            $draw->setFontSize(26);
+            $draw->setFontSize(28);
             $draw->setFontWeight(800);
             $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
             $draw->annotation($left + $cardWidth - 24, $y + 40, $profitStr);
             $draw->setTextAlignment(Imagick::ALIGN_LEFT);
 
             // Middle: Legs Detail
-            $legStartY = $y + 76;
+            $legStartY = $y + 80;
             foreach ($legs as $idx => $leg) {
-                $curLegY = $legStartY + ($idx * 46);
+                $curLegY = $legStartY + ($idx * 52);
 
                 $sportStr = ! empty($leg['sport_name']) ? "【{$leg['sport_name']}】" : '';
                 $tournStr = ! empty($leg['tournament_name']) ? $leg['tournament_name'].' ｜ ' : '';
                 $matchStr = $leg['fixture_name'] ?? '';
-                $legHeader = $this->fitText($image, $draw, $sportStr.$tournStr.$matchStr, 640, 20);
+                $legHeader = $this->fitText($image, $draw, $sportStr.$tournStr.$matchStr, 880, 18);
 
                 $draw->setFillColor('#94a3b8');
-                $draw->setFontSize(18);
+                $draw->setFontSize(20);
                 $draw->setFontWeight(500);
                 $draw->annotation($left + 24, $curLegY, $legHeader);
 
@@ -351,15 +344,17 @@ class BetHistoryRenderer extends AbstractImageRenderer
                     $leg['status_symbol'] ?? ''
                 );
                 $draw->setFillColor('#f8fafc');
-                $draw->setFontSize(20);
+                $draw->setFontSize(22);
                 $draw->setFontWeight(700);
-                $draw->annotation($left + 680, $curLegY, $outcomeText);
+                $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+                $draw->annotation($left + $cardWidth - 24, $curLegY, $outcomeText);
+                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
             }
 
             // Bottom Right Financial Bar
             $finY = $y + $cardHeight - 16;
             $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-            $draw->setFontSize(18);
+            $draw->setFontSize(19);
 
             $finText = sprintf(
                 '投注：%s   賠率：%s   返還：%s',
@@ -393,12 +388,12 @@ class BetHistoryRenderer extends AbstractImageRenderer
 
     private function betHistoryCardHeight(int $legCount): int
     {
-        return 112 + ($legCount * 46);
+        return 116 + ($legCount * 52);
     }
 
     private function betHistoryCanvasHeight(array $bets, bool $isEmpty, int $omittedCount = 0): int
     {
-        $height = 146 + 156 + 24;
+        $height = 146 + 172 + 24;
 
         if ($isEmpty) {
             return $height + 220 + self::CANVAS_BOTTOM_PADDING;

@@ -96,6 +96,8 @@ class StakeBetServiceTest extends TestCase
         $this->assertFalse($reply->imageData['bets'][0]['cashout_disabled']);
         $this->assertSame(1.287, $reply->imageData['bets'][0]['cashout_multiplier']);
         $this->assertSame('0.0083 USDT', $reply->imageData['balance_formatted']);
+        $this->assertNotNull($reply->quickReplies);
+        $this->assertCount(5, $reply->quickReplies);
 
         Http::assertSent(function ($request): bool {
             return $request->url() === 'https://stake.com/_api/graphql'
@@ -699,6 +701,8 @@ class StakeBetServiceTest extends TestCase
         $this->assertStringContainsString('投資報酬率（ROI）：', $reply->text);
         $this->assertTrue($reply->prefersImage());
         $this->assertSame('bet_history', $reply->imageData['type']);
+        $this->assertNotNull($reply->quickReplies);
+        $this->assertCount(5, $reply->quickReplies);
     }
 
     public function test_bet_history_supports_specified_date_and_aliases(): void

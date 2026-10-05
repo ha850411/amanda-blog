@@ -180,10 +180,10 @@ class BetsRenderer extends AbstractImageRenderer
                     $cText = '#94a3b8';
                 } elseif ($cashoutMultiplier >= 1.0) {
                     $cBg = '#064e3b';
-                    $cBorder = '#059669';
-                    $cText = '#34d399';
+                    $cBorder = '#10b981';
+                    $cText = '#4ade80';
                 } else {
-                    $cBg = '#451a03';
+                    $cBg = '#3d1a04';
                     $cBorder = '#d97706';
                     $cText = '#fbbf24';
                 }
@@ -197,7 +197,7 @@ class BetsRenderer extends AbstractImageRenderer
 
                 $draw->setFillColor($cBg);
                 $draw->setStrokeColor($cBorder);
-                $draw->setStrokeWidth(1);
+                $draw->setStrokeWidth(1.2);
                 $draw->roundRectangle($cBadgeX1, $y + 16, $cBadgeX2, $y + 54, 8, 8);
 
                 $draw->setFillColor($cText);
@@ -336,9 +336,9 @@ class BetsRenderer extends AbstractImageRenderer
                         $badgeX2 = $rightMargin;
                         $badgeX1 = $badgeX2 - $badgeW;
 
-                        $draw->setFillColor('#3b0811');
+                        $draw->setFillColor('#450a0a');
                         $draw->setStrokeColor('#ef4444');
-                        $draw->setStrokeWidth(1);
+                        $draw->setStrokeWidth(1.2);
                         $draw->roundRectangle($badgeX1, $legY + 12, $badgeX2, $legY + 42, 6, 6);
 
                         $draw->setFillColor('#ef4444');
@@ -346,7 +346,7 @@ class BetsRenderer extends AbstractImageRenderer
                         $draw->setStrokeWidth(0);
                         $draw->circle($badgeX1 + 14, $legY + 27, $badgeX1 + 18, $legY + 27);
 
-                        $draw->setFillColor('#fca5a5');
+                        $draw->setFillColor('#fecaca');
                         $draw->setFontSize(18);
                         $draw->setFontWeight(700);
                         $fitStatus = $this->fitText($image, $draw, $matchStatus, $badgeW - 28, 13);
@@ -404,9 +404,17 @@ class BetsRenderer extends AbstractImageRenderer
                 $fittedMatch = $this->fitText($image, $draw, $matchName, 1230, 22);
                 $draw->annotation($x + 36, $legY + 80, $fittedMatch);
 
-                $draw->setFillColor('#0e1a2d');
-                $draw->setStrokeColor('#1d3354');
-                $draw->setStrokeWidth(1);
+                // Selection & Market box with status theming
+                $selBoxTheme = match ($rawStatus) {
+                    'won' => ['bg' => '#052e16', 'border' => '#16a34a', 'borderWidth' => 1.5, 'selColor' => '#4ade80'],
+                    'lost' => ['bg' => '#3b0811', 'border' => '#dc2626', 'borderWidth' => 1.5, 'selColor' => '#f87171'],
+                    'void', 'refund', 'cancelled' => ['bg' => '#1e293b', 'border' => '#475569', 'borderWidth' => 1.0, 'selColor' => '#cbd5e1'],
+                    default => ['bg' => '#0c1a2e', 'border' => '#0284c7', 'borderWidth' => 1.2, 'selColor' => '#38bdf8'],
+                };
+
+                $draw->setFillColor($selBoxTheme['bg']);
+                $draw->setStrokeColor($selBoxTheme['border']);
+                $draw->setStrokeWidth($selBoxTheme['borderWidth']);
                 $draw->roundRectangle($x + 34, $legY + 96, $x + $cardWidth - 34, $legY + 136, 8, 8);
 
                 $marketText = (string) ($leg['market'] ?? '');
@@ -421,15 +429,10 @@ class BetsRenderer extends AbstractImageRenderer
                 }
 
                 $selOdds = (string) ($leg['selection'] ?? '').' @ '.(string) ($leg['odds'] ?? '');
-                $selColor = match ($rawStatus) {
-                    'won' => '#4ade80',
-                    'lost' => '#f87171',
-                    default => '#38bdf8',
-                };
-                $draw->setFillColor($selColor);
+                $draw->setFillColor($selBoxTheme['selColor']);
                 $draw->setStrokeColor('none');
                 $draw->setStrokeWidth(0);
-                $draw->setFontSize(24);
+                $draw->setFontSize(25);
                 $draw->setFontWeight(800);
                 $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
                 $fittedSel = $this->fitText($image, $draw, $selOdds, 620, 16);

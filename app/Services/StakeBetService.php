@@ -752,7 +752,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 }
                 $lines[] = '完整注單｜https://stake.com/zh/my-bets/sports';
 
-                return new LineBotReply(implode("\n", $lines), 'https://stake.com/zh/my-bets/sports');
+                return new LineBotReply(implode("\n", $lines), 'https://stake.com/zh/my-bets/sports', null, $this->betQuickReplies());
             }
 
             $text = $this->formatBetsMessage($bets, $count, $balance);
@@ -763,7 +763,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 $imageData = $this->buildImageData($bets, $count, $balance);
             }
 
-            return new LineBotReply($text, $linkUrl, $imageData);
+            return new LineBotReply($text, $linkUrl, $imageData, $this->betQuickReplies());
         } catch (RequestException $exception) {
             return $this->handleRequestException($exception);
         } catch (ConnectionException $exception) {
@@ -1257,7 +1257,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 $imageData = $this->buildBetHistoryImageData($startDate, $endDate, $bets, $summary, $balance, $timezone);
             }
 
-            return new LineBotReply($text, $linkUrl, $imageData);
+            return new LineBotReply($text, $linkUrl, $imageData, $this->recordQuickReplies());
         } catch (RequestException $exception) {
             return $this->handleRequestException($exception);
         } catch (ConnectionException $exception) {
@@ -1357,7 +1357,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 );
             }
 
-            return new LineBotReply($text, $linkUrl, $imageData);
+            return new LineBotReply($text, $linkUrl, $imageData, $this->balanceQuickReplies());
         } catch (RequestException $exception) {
             return $this->handleRequestException($exception);
         } catch (ConnectionException $exception) {
@@ -3991,6 +3991,48 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             'multiplier' => 0.0,
             'amount' => 0.0,
             'formatted' => null,
+        ];
+    }
+
+    /**
+     * @return array<int, array{label: string, text: string}>
+     */
+    public function betQuickReplies(): array
+    {
+        return [
+            ['label' => '🔄 刷新注單', 'text' => '!bet'],
+            ['label' => '📅 今日損益', 'text' => '!r'],
+            ['label' => '⏪ 昨天損益', 'text' => '!r 昨天'],
+            ['label' => '📊 近 7 天損益', 'text' => '!r 7d'],
+            ['label' => '📈 資金水位', 'text' => '!bal'],
+        ];
+    }
+
+    /**
+     * @return array<int, array{label: string, text: string}>
+     */
+    public function recordQuickReplies(): array
+    {
+        return [
+            ['label' => '📅 今日損益', 'text' => '!r'],
+            ['label' => '⏪ 昨天損益', 'text' => '!r 昨天'],
+            ['label' => '📊 近 7 天損益', 'text' => '!r 7d'],
+            ['label' => '🎯 進行中注單', 'text' => '!bet'],
+            ['label' => '📈 資金水位', 'text' => '!bal'],
+        ];
+    }
+
+    /**
+     * @return array<int, array{label: string, text: string}>
+     */
+    public function balanceQuickReplies(): array
+    {
+        return [
+            ['label' => '📈 3 天水位', 'text' => '!bal 3d'],
+            ['label' => '📈 7 天水位', 'text' => '!bal 7d'],
+            ['label' => '📈 30 天水位', 'text' => '!bal 30d'],
+            ['label' => '🎯 進行中注單', 'text' => '!bet'],
+            ['label' => '📅 今日損益', 'text' => '!r'],
         ];
     }
 }

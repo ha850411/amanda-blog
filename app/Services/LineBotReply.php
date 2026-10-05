@@ -43,11 +43,13 @@ final readonly class LineBotReply
      *         status_label?: ?string
      *     }>
      * }|null  $imageData
+     * @param  array<int, array{label: string, text: string}>|null  $quickReplies
      */
     public function __construct(
         public string $text,
         public ?string $linkUrl = null,
         public ?array $imageData = null,
+        public ?array $quickReplies = null,
     ) {}
 
     public function prefersImage(): bool

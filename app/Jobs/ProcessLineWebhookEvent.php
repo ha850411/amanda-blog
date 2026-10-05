@@ -123,14 +123,14 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
 
                 $deliveryMethod = 'push_expired_reply_token';
                 $deliveryResult = $imageUrl !== null
-                    ? $line->pushImageWithLink($target, $imageUrl, $reply->linkUrl)
-                    : $line->push($target, $reply->text);
+                    ? $line->pushImageWithLink($target, $imageUrl, $reply->linkUrl, $reply->quickReplies)
+                    : $line->push($target, $reply->text, $reply->quickReplies);
             } else {
                 try {
                     if ($imageUrl !== null) {
-                        $deliveryResult = $line->replyImageWithLink($replyToken, $imageUrl, $reply->linkUrl);
+                        $deliveryResult = $line->replyImageWithLink($replyToken, $imageUrl, $reply->linkUrl, $reply->quickReplies);
                     } else {
-                        $deliveryResult = $line->reply($replyToken, $reply->text);
+                        $deliveryResult = $line->reply($replyToken, $reply->text, $reply->quickReplies);
                     }
                 } catch (Throwable $replyException) {
                     // Queue latency or slow upstream APIs can make LINE's short-lived
@@ -151,7 +151,7 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
                     // Use text for the recovery path. If LINE rejected the image URL,
                     // retrying the same image as a push would fail for the same reason.
                     $deliveryMethod = 'push_after_reply_failure';
-                    $deliveryResult = $line->push($target, $reply->text);
+                    $deliveryResult = $line->push($target, $reply->text, $reply->quickReplies);
                 }
             }
 

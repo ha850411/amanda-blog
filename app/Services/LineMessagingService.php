@@ -20,38 +20,55 @@ class LineMessagingService
         return hash_equals($expected, $signature);
     }
 
-    /** @return array{status: int, request_id: ?string} */
-    public function reply(string $replyToken, string $text): array
+    /**
+     * @param  array<int, array{label: string, text: string}>|null  $quickReplies
+     * @return array{status: int, request_id: ?string}
+     */
+    public function reply(string $replyToken, string $text, ?array $quickReplies = null): array
     {
-        return $this->sendReply($replyToken, $this->textMessages($text));
+        return $this->sendReply($replyToken, $this->textMessages($text, $quickReplies));
     }
 
-    /** @return array{status: int, request_id: ?string} */
+    /**
+     * @param  array<int, array{label: string, text: string}>|null  $quickReplies
+     * @return array{status: int, request_id: ?string}
+     */
     public function replyImageWithLink(
         string $replyToken,
         string $baseUrl,
         ?string $linkUrl = null,
+        ?array $quickReplies = null,
     ): array {
-        return $this->sendReply($replyToken, $this->imageMessages($baseUrl, $linkUrl));
+        return $this->sendReply($replyToken, $this->imageMessages($baseUrl, $linkUrl, $quickReplies));
     }
 
-    /** @return array{status: int, request_id: ?string} */
-    public function push(string $to, string $text): array
+    /**
+     * @param  array<int, array{label: string, text: string}>|null  $quickReplies
+     * @return array{status: int, request_id: ?string}
+     */
+    public function push(string $to, string $text, ?array $quickReplies = null): array
     {
-        return $this->sendPush($to, $this->textMessages($text));
+        return $this->sendPush($to, $this->textMessages($text, $quickReplies));
     }
 
-    /** @return array{status: int, request_id: ?string} */
+    /**
+     * @param  array<int, array{label: string, text: string}>|null  $quickReplies
+     * @return array{status: int, request_id: ?string}
+     */
     public function pushImageWithLink(
         string $to,
         string $baseUrl,
         ?string $linkUrl = null,
+        ?array $quickReplies = null,
     ): array {
-        return $this->sendPush($to, $this->imageMessages($baseUrl, $linkUrl));
+        return $this->sendPush($to, $this->imageMessages($baseUrl, $linkUrl, $quickReplies));
     }
 
-    /** @return array<int, array<string, mixed>> */
-    private function textMessages(string $text): array
+    /**
+     * @param  array<int, array{label: string, text: string}>|null  $quickReplies
+     * @return array<int, array<string, mixed>>
+     */
+    private function textMessages(string $text, ?array $quickReplies = null): array
     {
         // Detailed schedule histories can exceed one text bubble. LINE accepts
         // up to five messages, each limited to 5,000 UTF-16 code units.
@@ -77,6 +94,11 @@ class LineMessagingService
             $messages[$last]['text'] = $this->textPrefix($messages[$last]['text'], 5000 - mb_strlen($notice)).$notice;
         }
 
+        if (! empty($quickReplies) && ! empty($messages)) {
+            $last = array_key_last($messages);
+            $messages[$last]['quickReply'] = $this->buildQuickReply($quickReplies);
+        }
+
         return $messages;
     }
 
@@ -92,18 +114,49 @@ class LineMessagingService
         return $prefix;
     }
 
-    /** @return array<int, array<string, mixed>> */
-    private function imageMessages(string $baseUrl, ?string $linkUrl = null): array
+    /**
+     * @param  array<int, array{label: string, text: string}>|null  $quickReplies
+     * @return array<int, array<string, mixed>>
+     */
+    private function imageMessages(string $baseUrl, ?string $linkUrl = null, ?array $quickReplies = null): array
     {
         $baseUrl = rtrim($baseUrl, '/');
 
-        return [
-            [
-                'type' => 'image',
-                'originalContentUrl' => $baseUrl.'/1440',
-                'previewImageUrl' => $baseUrl.'/700',
-            ],
+        $message = [
+            'type' => 'image',
+            'originalContentUrl' => $baseUrl.'/1440',
+            'previewImageUrl' => $baseUrl.'/700',
         ];
+
+        if (! empty($quickReplies)) {
+            $message['quickReply'] = $this->buildQuickReply($quickReplies);
+        }
+
+        return [$message];
+    }
+
+    /**
+     * @param  array<int, array{label: string, text: string}>  $quickReplies
+     * @return array{items: array<int, array<string, mixed>>}
+     */
+    private function buildQuickReply(array $quickReplies): array
+    {
+        $items = [];
+        foreach (array_slice($quickReplies, 0, 13) as $item) {
+            if (! isset($item['label'], $item['text'])) {
+                continue;
+            }
+            $items[] = [
+                'type' => 'action',
+                'action' => [
+                    'type' => 'message',
+                    'label' => mb_substr((string) $item['label'], 0, 20),
+                    'text' => (string) $item['text'],
+                ],
+            ];
+        }
+
+        return ['items' => $items];
     }
 
     /**

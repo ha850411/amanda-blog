@@ -63,4 +63,51 @@ class LineMessagingServiceTest extends TestCase
             return true;
         });
     }
+
+    public function test_reply_attaches_quick_reply_to_the_last_message(): void
+    {
+        $quickReplies = [
+            ['label' => '🔄 刷新', 'text' => '!bet'],
+            ['label' => '📅 今日損益', 'text' => '!r'],
+        ];
+
+        app(LineMessagingService::class)->reply('reply-token', '測試訊息', $quickReplies);
+
+        Http::assertSent(function (Request $request): bool {
+            $messages = $request['messages'];
+            $this->assertCount(1, $messages);
+            $this->assertArrayHasKey('quickReply', $messages[0]);
+            $items = $messages[0]['quickReply']['items'];
+            $this->assertCount(2, $items);
+            $this->assertSame('🔄 刷新', $items[0]['action']['label']);
+            $this->assertSame('!bet', $items[0]['action']['text']);
+            $this->assertSame('📅 今日損益', $items[1]['action']['label']);
+            $this->assertSame('!r', $items[1]['action']['text']);
+
+            return true;
+        });
+    }
+
+    public function test_reply_image_attaches_quick_reply_to_image_message(): void
+    {
+        $quickReplies = [
+            ['label' => '🎯 進行中注單', 'text' => '!bet'],
+            ['label' => '📈 水位', 'text' => '!bal'],
+        ];
+
+        app(LineMessagingService::class)->replyImageWithLink('reply-token', 'https://example.com/line-schedules/hash', null, $quickReplies);
+
+        Http::assertSent(function (Request $request): bool {
+            $messages = $request['messages'];
+            $this->assertCount(1, $messages);
+            $this->assertSame('image', $messages[0]['type']);
+            $this->assertArrayHasKey('quickReply', $messages[0]);
+            $items = $messages[0]['quickReply']['items'];
+            $this->assertCount(2, $items);
+            $this->assertSame('🎯 進行中注單', $items[0]['action']['label']);
+            $this->assertSame('!bet', $items[0]['action']['text']);
+
+            return true;
+        });
+    }
 }
