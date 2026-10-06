@@ -212,6 +212,8 @@ const app = Vue.createApp({
         }
     },
 });
+// Preserve stored line breaks, including text inside v-pre content.
+app.config.compilerOptions.whitespace = 'preserve';
 const vm = app.mount('#app');
 </script>
 @endsection

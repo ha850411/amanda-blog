@@ -26,10 +26,6 @@
 @endif
 @endsection
 
-@section('styles')
-<link rel="stylesheet" href="{{ asset('js/ckeditor5/ckeditor5.css') }}">
-@endsection
-
 @section('content')
 <main class="container">
     <div class="col-12">
@@ -106,6 +102,8 @@
                 }
             },
         });
+        // Preserve stored line breaks, including text inside v-pre content.
+        app.config.compilerOptions.whitespace = 'preserve';
         const vm = app.mount('#app');
     </script>
 @endsection
