@@ -2738,7 +2738,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             $isParlay = $legCount > 1;
 
             $legs = [];
-            foreach ($outcomes as $outcome) {
+            foreach ($outcomes as $legIndex => $outcome) {
                 $marketOutcome = is_array($outcome['outcome'] ?? null) ? $outcome['outcome'] : [];
                 $market = is_array($outcome['market'] ?? null) ? $outcome['market'] : [];
                 $fixture = is_array($outcome['fixture'] ?? null) ? $outcome['fixture'] : [];
@@ -2758,17 +2758,58 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 $legStatus = match ($legRawStatus) {
                     'won' => 'won',
                     'lost' => 'lost',
-                    'void', 'refund', 'refunded', 'cancelled' => 'void',
-                    default => 'pending',
+                    'half_won', 'half-won' => 'half_won',
+                    'half_lost', 'half-lost' => 'half_lost',
+                    'void', 'refund', 'refunded', 'cancelled', 'push' => 'void',
+                    'pending', 'active', 'confirmed', 'open' => 'pending',
+                    default => null,
                 };
+
+                if ($legStatus === null) {
+                    if ($status === 'won') {
+                        $legStatus = 'won';
+                    } elseif ($status === 'void') {
+                        $legStatus = 'void';
+                    } elseif (! $isParlay) {
+                        $legStatus = $status;
+                    } else {
+                        $legStatus = 'pending';
+                    }
+                }
+
+                // 若整張注單獲勝且該關未被標記為退款，則該關必為過關
+                if ($status === 'won' && $legStatus !== 'void') {
+                    $legStatus = 'won';
+                }
+
+                $legStatusLabel = match ($legStatus) {
+                    'won' => '已過 ✅',
+                    'lost' => '未過 ❌',
+                    'half_won' => '贏半 ✅',
+                    'half_lost' => '輸半 ❌',
+                    'void' => '退本金 ⚪',
+                    default => '進行中 ⏳',
+                };
+
+                $legStatusText = match ($legStatus) {
+                    'won' => '已過',
+                    'lost' => '未過',
+                    'half_won' => '贏半',
+                    'half_lost' => '輸半',
+                    'void' => '退款',
+                    default => '進行中',
+                };
+
                 $legSymbol = match ($legStatus) {
-                    'won' => '✔️',
-                    'lost' => '❌',
+                    'won', 'half_won' => '✔️',
+                    'lost', 'half_lost' => '❌',
                     'void' => '⚪',
                     default => '⏳',
                 };
 
                 $legs[] = [
+                    'leg_index' => $legIndex + 1,
+                    'total_legs' => $legCount,
                     'sport_name' => ChineseConverter::toTraditional($sportName),
                     'sport_slug' => $sportSlug,
                     'tournament_name' => ChineseConverter::toTraditional($tournamentName),
@@ -2777,6 +2818,8 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                     'outcome_name' => ChineseConverter::toTraditional($outcomeName),
                     'odds' => $odds,
                     'status' => $legStatus,
+                    'status_label' => $legStatusLabel,
+                    'status_text' => $legStatusText,
                     'status_symbol' => $legSymbol,
                 ];
             }
@@ -2961,22 +3004,25 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             }
 
             $legs = $bet['legs'];
+            $legCount = count($legs);
             if ($bet['is_parlay']) {
                 $lines[] = '・賽事關卡：';
                 foreach ($legs as $legIdx => $leg) {
                     $prefix = $leg['sport_name'] !== '' ? "【{$leg['sport_name']}】" : '';
+                    $statusTag = $leg['status_label'] ?? ($leg['status_symbol'] ?? '');
+                    $lines[] = sprintf('  關卡 %d/%d｜%s', $legIdx + 1, $legCount, $statusTag);
                     $lines[] = sprintf(
-                        '  %d. %s%s｜%s',
-                        $legIdx + 1,
+                        '  %s%s｜%s',
                         $prefix,
                         $leg['tournament_name'] ?: $leg['fixture_name'],
                         $leg['fixture_name']
                     );
+                    $marketDesc = $leg['market_name'] !== '' ? "（{$leg['market_name']}）" : '';
                     $lines[] = sprintf(
-                        '     選項：%s @ %.2f（%s）',
+                        '  選項：%s @ %.2f%s',
                         $leg['outcome_name'] ?: $leg['market_name'],
                         $leg['odds'],
-                        $leg['status_symbol']
+                        $marketDesc
                     );
                 }
             } else {
@@ -2992,12 +3038,13 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                         $lines[] = "  {$leg['fixture_name']}";
                     }
                     $marketDesc = $leg['market_name'] !== '' ? "（{$leg['market_name']}）" : '';
+                    $statusTag = $leg['status_label'] ?? ($leg['status_symbol'] ?? '');
                     $lines[] = sprintf(
                         '  選項：%s @ %.2f%s（%s）',
                         $leg['outcome_name'],
                         $leg['odds'],
                         $marketDesc,
-                        $leg['status_symbol']
+                        $statusTag
                     );
                 }
             }

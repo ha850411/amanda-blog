@@ -1064,6 +1064,170 @@ class StakeBetServiceTest extends TestCase
         $this->assertSame([], $reply->imageData['bets']);
     }
 
+    public function test_bet_history_marks_parlay_legs_with_passed_and_failed_status(): void
+    {
+        $parlayBet = [
+            'id' => 'parlay-history-bet-1',
+            'status' => 'settled',
+            'amount' => 50.0,
+            'payout' => 0.0,
+            'currency' => 'usdt',
+            'potentialMultiplier' => 4.25,
+            'createdAt' => 'Sun, 06 Sep 2026 12:00:00 GMT',
+            'bet' => ['iid' => 'sport:99887766'],
+            'outcomes' => [
+                [
+                    'status' => 'won',
+                    'odds' => 1.70,
+                    'market' => ['name' => '獲勝'],
+                    'outcome' => ['name' => 'T1 Esports', 'odds' => 1.70],
+                    'fixture' => [
+                        'name' => 'T1 vs DK',
+                        'tournament' => [
+                            'name' => 'LCK 2026 Season Playoffs',
+                            'category' => ['sport' => ['name' => '英雄聯盟']],
+                        ],
+                    ],
+                ],
+                [
+                    'status' => 'lost',
+                    'odds' => 1.50,
+                    'market' => ['name' => '獲勝'],
+                    'outcome' => ['name' => 'Team Vitality', 'odds' => 1.50],
+                    'fixture' => [
+                        'name' => 'Vitality vs G2',
+                        'tournament' => [
+                            'name' => 'ESL Pro League',
+                            'category' => ['sport' => ['name' => '反恐精英']],
+                        ],
+                    ],
+                ],
+                [
+                    'status' => 'pending',
+                    'odds' => 1.66,
+                    'market' => ['name' => '地圖讓分'],
+                    'outcome' => ['name' => 'DRX +1.5', 'odds' => 1.66],
+                    'fixture' => [
+                        'name' => 'DRX vs PRX',
+                        'tournament' => [
+                            'name' => 'VCT Pacific',
+                            'category' => ['sport' => ['name' => '無畏契約']],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($parlayBet) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse([$parlayBet]), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $bot = app(LineScheduleBot::class);
+
+        // 1. Text mode verification
+        $textReply = $bot->reply('!r 2026-09-06 text');
+        $this->assertNotNull($textReply);
+        $this->assertStringContainsString('3 關串關', $textReply->text);
+        $this->assertStringContainsString('關卡 1/3｜已過 ✅', $textReply->text);
+        $this->assertStringContainsString('T1 vs DK', $textReply->text);
+        $this->assertStringContainsString('關卡 2/3｜未過 ❌', $textReply->text);
+        $this->assertStringContainsString('Vitality vs G2', $textReply->text);
+        $this->assertStringContainsString('關卡 3/3｜進行中 ⏳', $textReply->text);
+        $this->assertStringContainsString('DRX vs PRX', $textReply->text);
+
+        // 2. Image data mode verification
+        $imgReply = $bot->reply('!r 2026-09-06');
+        $this->assertNotNull($imgReply);
+        $this->assertTrue($imgReply->prefersImage());
+        $this->assertNotEmpty($imgReply->imageData['bets']);
+
+        $legs = $imgReply->imageData['bets'][0]['legs'];
+        $this->assertCount(3, $legs);
+
+        $this->assertSame('won', $legs[0]['status']);
+        $this->assertSame('已過 ✅', $legs[0]['status_label']);
+        $this->assertSame('已過', $legs[0]['status_text']);
+
+        $this->assertSame('lost', $legs[1]['status']);
+        $this->assertSame('未過 ❌', $legs[1]['status_label']);
+        $this->assertSame('未過', $legs[1]['status_text']);
+
+        $this->assertSame('pending', $legs[2]['status']);
+        $this->assertSame('進行中 ⏳', $legs[2]['status_label']);
+        $this->assertSame('進行中', $legs[2]['status_text']);
+    }
+
+    public function test_bet_history_marks_won_parlay_legs_as_won_when_bet_settled_won(): void
+    {
+        $wonParlayBet = [
+            'id' => 'won-parlay-1',
+            'status' => 'settled',
+            'amount' => 100.0,
+            'payout' => 350.0,
+            'currency' => 'usdt',
+            'potentialMultiplier' => 3.5,
+            'createdAt' => 'Sun, 06 Sep 2026 15:00:00 GMT',
+            'bet' => ['iid' => 'sport:11223344'],
+            'outcomes' => [
+                [
+                    'status' => 'settled',
+                    'odds' => 1.80,
+                    'market' => ['name' => '獲勝'],
+                    'outcome' => ['name' => 'Invictus Gaming', 'odds' => 1.80],
+                    'fixture' => [
+                        'name' => 'IG vs WE',
+                        'tournament' => [
+                            'name' => 'LPL',
+                            'category' => ['sport' => ['name' => '英雄聯盟']],
+                        ],
+                    ],
+                ],
+                [
+                    'status' => 'settled',
+                    'odds' => 1.94,
+                    'market' => ['name' => '獲勝'],
+                    'outcome' => ['name' => 'EDG', 'odds' => 1.94],
+                    'fixture' => [
+                        'name' => 'EDG vs RNG',
+                        'tournament' => [
+                            'name' => 'LPL',
+                            'category' => ['sport' => ['name' => '英雄聯盟']],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) use ($wonParlayBet) {
+                $op = $request->header('x-operation-name')[0] ?? '';
+
+                return match ($op) {
+                    'FetchActiveSportBets' => Http::response($this->sampleActiveSportBetsResponse(), 200),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse([$wonParlayBet]), 200),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse(), 200),
+                    default => Http::response([], 200),
+                };
+            },
+        ]);
+
+        $bot = app(LineScheduleBot::class);
+        $reply = $bot->reply('!r 2026-09-06 text');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('關卡 1/2｜已過 ✅', $reply->text);
+        $this->assertStringContainsString('關卡 2/2｜已過 ✅', $reply->text);
+    }
+
     public function test_bet_history_image_rendering(): void
     {
         if (! extension_loaded('imagick')) {

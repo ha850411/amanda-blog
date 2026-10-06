@@ -324,31 +324,85 @@ class BetHistoryRenderer extends AbstractImageRenderer
 
             // Middle: Legs Detail
             $legStartY = $y + 80;
+            $isParlay = (bool) ($bet['is_parlay'] ?? false);
             foreach ($legs as $idx => $leg) {
                 $curLegY = $legStartY + ($idx * 52);
+                $legStatus = (string) ($leg['status'] ?? 'pending');
+                $badgeText = (string) ($leg['status_text'] ?? match ($legStatus) {
+                    'won' => '已過',
+                    'lost' => '未過',
+                    'half_won' => '贏半',
+                    'half_lost' => '輸半',
+                    'void' => '退款',
+                    default => '進行中',
+                });
 
+                $badgeTheme = match ($legStatus) {
+                    'won' => ['bg' => '#052e16', 'border' => '#16a34a', 'text' => '#4ade80'],
+                    'lost' => ['bg' => '#3b0811', 'border' => '#dc2626', 'text' => '#fca5a5'],
+                    'half_won' => ['bg' => '#064e3b', 'border' => '#10b981', 'text' => '#6ee7b7'],
+                    'half_lost' => ['bg' => '#450a0a', 'border' => '#ef4444', 'text' => '#fca5a5'],
+                    'void' => ['bg' => '#1e293b', 'border' => '#475569', 'text' => '#cbd5e1'],
+                    default => ['bg' => '#082f49', 'border' => '#0284c7', 'text' => '#38bdf8'],
+                };
+
+                // 1. Status Pill Badge on the right
+                $draw->setFontSize(17);
+                $draw->setFontWeight(800);
+                $badgeMetrics = $image->queryFontMetrics($draw, $badgeText);
+                $badgeW = max(62, (int) round($badgeMetrics['textWidth']) + 20);
+                $badgeX2 = $left + $cardWidth - 24;
+                $badgeX1 = $badgeX2 - $badgeW;
+
+                $draw->setFillColor($badgeTheme['bg']);
+                $draw->setStrokeColor($badgeTheme['border']);
+                $draw->setStrokeWidth(1.2);
+                $draw->roundRectangle($badgeX1, $curLegY - 23, $badgeX2, $curLegY + 7, 5, 5);
+
+                $draw->setFillColor($badgeTheme['text']);
+                $draw->setStrokeColor('none');
+                $draw->setStrokeWidth(0);
+                $draw->setTextAlignment(Imagick::ALIGN_CENTER);
+                $draw->annotation($badgeX1 + (int) round($badgeW / 2), $curLegY - 2, $badgeText);
+                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+                // 2. Outcome Name and Odds to the left of the badge
+                $outcomeRightX = $badgeX1 - 14;
+                $outcomeName = (string) ($leg['outcome_name'] ?? '');
+                $oddsFormatted = sprintf('%.2f', (float) ($leg['odds'] ?? 1.0));
+                $outcomeText = $outcomeName !== '' ? "{$outcomeName} @ {$oddsFormatted}" : "@ {$oddsFormatted}";
+
+                $draw->setFontSize(21);
+                $draw->setFontWeight(700);
+                $oMetrics = $image->queryFontMetrics($draw, $outcomeText);
+                $maxOutcomeW = 440;
+                if ((int) round($oMetrics['textWidth']) > $maxOutcomeW) {
+                    $outcomeText = $this->fitText($image, $draw, $outcomeText, $maxOutcomeW, 16);
+                    $oMetrics = $image->queryFontMetrics($draw, $outcomeText);
+                }
+                $outcomeW = (int) round($oMetrics['textWidth']);
+
+                $draw->setFillColor('#f8fafc');
+                $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
+                $draw->annotation($outcomeRightX, $curLegY, $outcomeText);
+                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+
+                // 3. Leg Header (Tournament / Match) on the left
+                $leftStart = $left + 24;
+                $availHeaderW = max(200, $outcomeRightX - $outcomeW - 20 - $leftStart);
+
+                $prefixIdx = $isParlay ? ($idx + 1).'. ' : '';
                 $sportStr = ! empty($leg['sport_name']) ? "【{$leg['sport_name']}】" : '';
                 $tournStr = ! empty($leg['tournament_name']) ? $leg['tournament_name'].' ｜ ' : '';
                 $matchStr = $leg['fixture_name'] ?? '';
-                $legHeader = $this->fitText($image, $draw, $sportStr.$tournStr.$matchStr, 880, 18);
+                $fullHeader = $prefixIdx.$sportStr.$tournStr.$matchStr;
+
+                $legHeader = $this->fitText($image, $draw, $fullHeader, $availHeaderW, 16);
 
                 $draw->setFillColor('#94a3b8');
                 $draw->setFontSize(20);
                 $draw->setFontWeight(500);
-                $draw->annotation($left + 24, $curLegY, $legHeader);
-
-                $outcomeText = sprintf(
-                    '%s @ %.2f  %s',
-                    $leg['outcome_name'] ?? '',
-                    (float) ($leg['odds'] ?? 1.0),
-                    $leg['status_symbol'] ?? ''
-                );
-                $draw->setFillColor('#f8fafc');
-                $draw->setFontSize(22);
-                $draw->setFontWeight(700);
-                $draw->setTextAlignment(Imagick::ALIGN_RIGHT);
-                $draw->annotation($left + $cardWidth - 24, $curLegY, $outcomeText);
-                $draw->setTextAlignment(Imagick::ALIGN_LEFT);
+                $draw->annotation($leftStart, $curLegY, $legHeader);
             }
 
             // Bottom Right Financial Bar
