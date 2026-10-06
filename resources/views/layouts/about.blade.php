@@ -6,7 +6,9 @@
                 <img src="{{ $siteAbout->picture }}" alt="Amanda" class="w-100">
             </div>
         @endif
-        <p style="white-space: pre-line">{{ $siteAbout?->description ?? '' }}</p>
+        <div class="about-description ck-content" style="white-space: pre-line">
+            {!! $siteAbout?->description ?? '' !!}
+        </div>
     </div>
     @include('layouts.ad-unit', ['placement' => 'sidebar'])
     <div class="new_article text-left" v-pre>
