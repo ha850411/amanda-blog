@@ -142,10 +142,10 @@ class ArticleController extends Controller
                     ]);
                 }
                 // 前端傳來的是物件陣列，需取出 id ['id' => 1, ...] -> [1, ...]
-                $tagIds = collect($request->input('selectedTags', []))->pluck('id')->toArray();
+                $tagIds = collect($request->input('selectedTags', []))->pluck('id')->filter()->unique()->values()->all();
                 $article->tags()->attach($tagIds);
 
-                $badgeIds = collect($request->input('selectedBadges', []))->pluck('id')->filter()->toArray();
+                $badgeIds = collect($request->input('selectedBadges', []))->pluck('id')->filter()->unique()->values()->all();
                 $article->badges()->sync($badgeIds);
 
                 return $article;

@@ -181,4 +181,54 @@ class BadgeTest extends ApiTestCase
             ->assertSee('background-color: #6f42c1', false)
             ->assertSee('米其林一星');
     }
+
+    /** 提交重複徽章 ID 時應自動去重，資料庫中僅保留一筆關聯 */
+    public function test_store_article_with_duplicate_badges_is_deduplicated(): void
+    {
+        $admin = Admin::create(['username' => 'admin', 'password' => 'secret']);
+        $badge = Badge::create(['name' => '已歇業', 'color' => 'danger']);
+
+        $response = $this->actingAs($admin, 'admin')
+            ->postJson('/api/article', [
+                'title' => '去重測試文章',
+                'content' => '<p>內容</p>',
+                'status' => 1,
+                'selectedTags' => [],
+                'selectedBadges' => [
+                    ['id' => $badge->id],
+                    ['id' => $badge->id],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+
+        $article = Article::latest('id')->first();
+        $badgeCount = \Illuminate\Support\Facades\DB::table('article_badge')
+            ->where('article_id', $article->id)
+            ->where('badge_id', $badge->id)
+            ->count();
+
+        $this->assertEquals(1, $badgeCount);
+        $this->assertCount(1, $article->badges);
+    }
+
+    /** article_badge 資料表應具有 (article_id, badge_id) 唯一約束，重複插入會拋出例外 */
+    public function test_article_badge_table_enforces_unique_constraint(): void
+    {
+        $this->expectException(\Illuminate\Database\QueryException::class);
+
+        \Illuminate\Support\Facades\DB::table('article_badge')->insert([
+            'article_id' => 999,
+            'badge_id' => 888,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        \Illuminate\Support\Facades\DB::table('article_badge')->insert([
+            'article_id' => 999,
+            'badge_id' => 888,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
 }

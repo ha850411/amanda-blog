@@ -161,8 +161,13 @@
                         </div>
                     </div>
                     <div class="mt-3 text-center">
-                        <button type="button" class="btn btn-secondary me-1" @click="cancel()">取消</button>
-                        <button type="button" class="btn btn-primary" @click="confirm()">確認</button>
+                        <button type="button" class="btn btn-secondary me-1" :disabled="submitting" @click="cancel()">取消</button>
+                        <button type="button" class="btn btn-primary" :disabled="submitting" @click="confirm()">
+                            <span v-if="submitting">
+                                <i class="fa-solid fa-spinner fa-spin me-1"></i>處理中...
+                            </span>
+                            <span v-else>確認</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -181,6 +186,7 @@
             data() {
                 return {
                     initial: true,
+                    submitting: false,
                     tags: @json($tags),
                     badges: @json($badges ?? []),
                     article: @json($article),
@@ -252,7 +258,13 @@
                         this.title = '修改';
                         this.form.title = this.article.title;
                         this.form.selectedTags = this.article.tags || [];
-                        this.form.selectedBadges = this.article.badges || [];
+                        const rawBadges = this.article.badges || [];
+                        const seenBadgeIds = new Set();
+                        this.form.selectedBadges = rawBadges.filter(b => {
+                            if (seenBadgeIds.has(b.id)) return false;
+                            seenBadgeIds.add(b.id);
+                            return true;
+                        });
                         this.form.status = this.article.status;
                         this.form.password = this.article.password;
                         this.form.content = this.article.content;
@@ -294,9 +306,9 @@
                     this.newBadge.color = this.newBadgeColorPicker;
                 },
                 toggleBadge(badge) {
-                    const index = this.form.selectedBadges.findIndex(b => b.id === badge.id);
-                    if (index > -1) {
-                        this.form.selectedBadges.splice(index, 1);
+                    const isSelected = this.form.selectedBadges.some(b => b.id === badge.id);
+                    if (isSelected) {
+                        this.form.selectedBadges = this.form.selectedBadges.filter(b => b.id !== badge.id);
                     } else {
                         this.form.selectedBadges.push(badge);
                     }
@@ -313,8 +325,12 @@
                         });
                         if (res.data.status === 'success') {
                             const created = res.data.data;
-                            this.allBadges.push(created);
-                            this.form.selectedBadges.push(created);
+                            if (!this.allBadges.some(b => b.id === created.id)) {
+                                this.allBadges.push(created);
+                            }
+                            if (!this.form.selectedBadges.some(b => b.id === created.id)) {
+                                this.form.selectedBadges.push(created);
+                            }
                             this.newBadge.name = '';
                             this.showNewBadgeModal = false;
                             Swal.fire({
@@ -346,7 +362,9 @@
                     window.location.href = this.route.article;
                 },
                 async confirm() {
+                    if (this.submitting) return;
                     if (!this.checkForm()) return;
+                    this.submitting = true;
                     axios.post(this.route.submit, {
                         id: this.article?.id ?? null,
                         title: this.form.title,
@@ -366,7 +384,10 @@
                             this.cancel();
                         })
                         .catch(error => {
-                            this.showError(error.response.data.message);
+                            this.showError(error.response?.data?.message || '儲存失敗');
+                        })
+                        .finally(() => {
+                            this.submitting = false;
                         });
                 },
                 checkForm() {

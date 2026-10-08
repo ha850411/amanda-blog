@@ -37,7 +37,10 @@ class Article extends Model
 
     public function badges()
     {
-        return $this->belongsToMany(Badge::class, 'article_badge', 'article_id', 'badge_id')->orderBy('sort', 'asc')->orderBy('id', 'asc');
+        return $this->belongsToMany(Badge::class, 'article_badge', 'article_id', 'badge_id')
+            ->withTimestamps()
+            ->orderBy('sort', 'asc')
+            ->orderBy('id', 'asc');
     }
 
     public function scopeVisible(Builder $query): Builder

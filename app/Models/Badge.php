@@ -34,6 +34,6 @@ class Badge extends Model
 
     public function articles()
     {
-        return $this->belongsToMany(Article::class, 'article_badge', 'badge_id', 'article_id');
+        return $this->belongsToMany(Article::class, 'article_badge', 'badge_id', 'article_id')->withTimestamps();
     }
 }
