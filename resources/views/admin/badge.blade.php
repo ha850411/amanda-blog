@@ -50,14 +50,14 @@
                 <table class="table align-middle">
                     <thead class="table-dark">
                         <tr>
-                            <th style="width: 70px;">排序</th>
-                            <th>徽章名稱</th>
-                            <th>前台預覽</th>
-                            <th>顏色代碼</th>
-                            <th style="width: 100px;">狀態</th>
-                            <th>建立時間</th>
-                            <th>更新時間</th>
-                            <th style="width: 140px;">操作</th>
+                            <th class="text-nowrap" style="width: 70px;">排序</th>
+                            <th class="text-nowrap">徽章名稱</th>
+                            <th class="text-nowrap">前台預覽</th>
+                            <th class="text-nowrap">顏色代碼</th>
+                            <th class="text-nowrap" style="width: 100px;">狀態</th>
+                            <th class="text-nowrap">建立時間</th>
+                            <th class="text-nowrap">更新時間</th>
+                            <th class="text-nowrap" style="width: 170px;">操作</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -89,15 +89,17 @@
                                     @{{ item.status == 1 ? '啟用中' : '已停用' }}
                                 </button>
                             </td>
-                            <td class="small text-secondary">@{{ formatDate(item.created_at) }}</td>
-                            <td class="small text-secondary">@{{ formatDate(item.updated_at) }}</td>
-                            <td>
-                                <button type="button" class="btn btn-sm btn-secondary me-1" @click="openEditModal(item)">
-                                    <i class="fa-solid fa-pen-to-square"></i> 編輯
-                                </button>
-                                <button type="button" class="btn btn-sm btn-danger" @click="deleteBadge(item)">
-                                    <i class="fa-solid fa-trash"></i> 刪除
-                                </button>
+                            <td class="small text-secondary text-nowrap">@{{ formatDate(item.created_at) }}</td>
+                            <td class="small text-secondary text-nowrap">@{{ formatDate(item.updated_at) }}</td>
+                            <td class="text-nowrap">
+                                <div class="d-inline-flex align-items-center gap-2">
+                                    <button type="button" class="btn btn-sm btn-secondary" @click="openEditModal(item)">
+                                        <i class="fa-solid fa-pen-to-square me-1"></i>編輯
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-danger" @click="deleteBadge(item)">
+                                        <i class="fa-solid fa-trash me-1"></i>刪除
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     </tbody>
