@@ -24,7 +24,9 @@ a:hover .fa-angles-right {
     transition: .5s;
 }
 
-.nav_menu {
+/* Reset both menu levels without affecting CKEditor content lists. */
+.nav_menu,
+.nav_menu ul.dropdown {
     margin: 0;
     padding: 0;
     list-style: none;
