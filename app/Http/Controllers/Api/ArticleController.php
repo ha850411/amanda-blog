@@ -19,7 +19,7 @@ class ArticleController extends Controller
             $page = $request->input('page', 1);
             $perpage = $request->input('perpage', 10);
 
-            $query = Article::query()->with('tags');
+            $query = Article::query()->with(['tags', 'badges']);
             if (! Auth::guard('admin')->check()) {
                 $query->visible();
             }
@@ -79,7 +79,7 @@ class ArticleController extends Controller
     public function verify(Request $request, int $id, ArticlePasswordCache $articlePasswordCache)
     {
         $article = Article::visible()
-            ->with('tags')
+            ->with(['tags', 'badges'])
             ->findOrFail($id);
 
         if ((int) $article->status !== 2) {
@@ -145,6 +145,9 @@ class ArticleController extends Controller
                 $tagIds = collect($request->input('selectedTags', []))->pluck('id')->toArray();
                 $article->tags()->attach($tagIds);
 
+                $badgeIds = collect($request->input('selectedBadges', []))->pluck('id')->filter()->toArray();
+                $article->badges()->sync($badgeIds);
+
                 return $article;
             });
 
@@ -169,8 +172,9 @@ class ArticleController extends Controller
         try {
             DB::transaction(function () use ($id) {
                 $article = Article::findOrFail($id);
-                // 刪除文章與標籤的關聯
+                // 刪除文章與標籤、徽章的關聯
                 $article->tags()->detach();
+                $article->badges()->detach();
                 // 刪除文章
                 $article->delete();
             });

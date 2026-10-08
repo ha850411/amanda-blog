@@ -67,7 +67,7 @@ class IndexController extends Controller
     public function article(Request $request, int $id, ArticlePasswordCache $articlePasswordCache)
     {
         $article = Article::visible()->where('id', $id)
-            ->with('tags')
+            ->with(['tags', 'badges'])
             ->firstOrFail();
         $isPasswordVerified = $articlePasswordCache->isVerified($request, $article);
 
@@ -182,6 +182,7 @@ class IndexController extends Controller
             'frontendArticle' => [
                 'id' => $article->id,
                 'title' => $article->title,
+                'badges' => $article->badges->map(fn ($b) => ['id' => $b->id, 'name' => $b->name, 'color' => $b->color])->values()->all(),
                 'content' => '', // Readable content is rendered once in the HTML body.
                 'status' => $article->status,
                 'created_at' => $article->created_at?->format('Y/m/d H:i:s'),
@@ -208,7 +209,7 @@ class IndexController extends Controller
             'siteAbout' => About::first(),
             'siteTags' => Tag::where('parent_id', 0)->orderBy('sort')->with('children')->get(),
             'siteSocials' => Social::where('status', 1)->get(),
-            'latestArticles' => Article::visible()->orderByDesc('updated_at')->orderByDesc('id')->limit(3)->get(['id', 'title', 'status']),
+            'latestArticles' => Article::visible()->with('badges')->orderByDesc('updated_at')->orderByDesc('id')->limit(3)->get(),
         ];
     }
 
@@ -217,7 +218,7 @@ class IndexController extends Controller
         $page = filter_var($request->query('page', 1), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         abort_if($page === false, 404);
 
-        $articles = Article::visible()->with('tags')
+        $articles = Article::visible()->with(['tags', 'badges'])
             ->when($tagId, fn ($query) => $query->whereHas('tags', fn ($tags) => $tags->where('tag.id', $tagId)))
             ->orderByDesc('updated_at')->orderByDesc('id')
             ->paginate(5, ['*'], 'page', $page);

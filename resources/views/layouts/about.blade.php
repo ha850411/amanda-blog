@@ -16,7 +16,16 @@
                 <h6 class="py-1 px-4 m-0">
                     <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                         @if ((int) $latestArticle->status === 2)<i class="fa-solid fa-key"></i>@endif
-                        <span>{{ $latestArticle->title }}</span>
+                        @if (!empty($latestArticle->badges))
+                            @foreach ($latestArticle->badges as $badge)
+                                @php
+                                    $bColor = data_get($badge, 'color', 'danger');
+                                    $isHex = str_starts_with($bColor, '#') || str_starts_with($bColor, 'rgb');
+                                @endphp
+                                <span class="badge {{ $isHex ? '' : 'bg-' . $bColor }} me-1 align-middle" style="font-size: 0.72rem;{{ $isHex ? ' background-color: ' . $bColor . '; color: #fff;' : '' }}">{{ data_get($badge, 'name') }}</span>
+                            @endforeach
+                        @endif
+                        <span class="align-middle">{{ $latestArticle->title }}</span>
                     </div>
                 </h6>
             </a>

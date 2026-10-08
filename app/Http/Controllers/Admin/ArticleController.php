@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Models\Article;
+use App\Models\Badge;
 use App\Models\Tag;
 
 class ArticleController extends Controller
@@ -16,8 +17,11 @@ class ArticleController extends Controller
             ->with('children')
             ->get();
 
+        $badges = Badge::enabled()->orderBy('sort', 'asc')->orderBy('id', 'asc')->get();
+
         view()->share([
             'tags' => $tags,
+            'badges' => $badges,
         ]);
     }
 
@@ -38,7 +42,7 @@ class ArticleController extends Controller
 
     public function editArticle($id)
     {
-        $article = Article::with('tags')->find($id);
+        $article = Article::with(['tags', 'badges'])->find($id);
 
         return view('admin.article_add')->with([
             'active' => 'article',

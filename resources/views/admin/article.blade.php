@@ -79,7 +79,16 @@
                         </tr>
                         <tr v-else v-for="item in list" :key="item.id">
                             <td>@{{ formatDate(item.created_at) }}</td>
-                            <td>@{{ item.title }}</td>
+                            <td>
+                                <template v-if="item.badges && item.badges.length > 0">
+                                    <span v-for="(badge, bIdx) in item.badges" :key="bIdx"
+                                        :class="['badge me-1', isHexColor(badge.color) ? '' : ('bg-' + (badge.color || 'danger'))]"
+                                        :style="isHexColor(badge.color) ? { backgroundColor: badge.color, color: '#fff' } : {}">
+                                        @{{ badge.name }}
+                                    </span>
+                                </template>
+                                @{{ item.title }}
+                            </td>
                             <td>
                                 <button v-for="tag in item.tags" :key="tag.id" type="button" class="btn btn-success btn-sm me-1">@{{ tag.name }}</button>
                             </td>
@@ -239,6 +248,9 @@
                     } finally {
                         this.loading = false;
                     }
+                },
+                isHexColor(color) {
+                    return typeof color === 'string' && (color.startsWith('#') || color.startsWith('rgb'));
                 }
             },
         });

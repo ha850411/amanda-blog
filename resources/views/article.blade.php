@@ -35,7 +35,18 @@
                     <header class="title_area">
                         <time class="time text-secondary" datetime="{{ $article->created_at?->toIso8601String() }}" v-pre>{{ $article->created_at?->format('Y年n月d日') }}</time>
                         <div class="title">
-                            <h1 class="h4 m-0 py-2" v-pre>{{ $article->title }}</h1>
+                            <h1 class="h4 m-0 py-2" v-pre>
+                                @if (!empty($article->badges))
+                                    @foreach ($article->badges as $badge)
+                                        @php
+                                            $bColor = data_get($badge, 'color', 'danger');
+                                            $isHex = str_starts_with($bColor, '#') || str_starts_with($bColor, 'rgb');
+                                        @endphp
+                                        <span class="badge {{ $isHex ? '' : 'bg-' . $bColor }} me-1 align-middle" style="font-size: 0.85rem;{{ $isHex ? ' background-color: ' . $bColor . '; color: #fff;' : '' }}">{{ data_get($badge, 'name') }}</span>
+                                    @endforeach
+                                @endif
+                                <span class="align-middle">{{ $article->title }}</span>
+                            </h1>
                         </div>
                         @if ($article->tags->isNotEmpty())
                             <div class="tag py-2 mb-4" v-pre>

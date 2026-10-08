@@ -59,6 +59,8 @@ Route::prefix('admin')->group(function () {
             ->name('admin.about');
         Route::get('/tag', [Admin\TagController::class, 'tag'])
             ->name('admin.tag');
+        Route::get('/badge', [Admin\BadgeController::class, 'badge'])
+            ->name('admin.badge');
         // 文章
         Route::get('/article', [Admin\ArticleController::class, 'article'])
             ->name('admin.article');

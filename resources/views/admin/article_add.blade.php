@@ -32,6 +32,66 @@
                         </label>
                         <input type="text" class="form-control" placeholder="請輸入您的標題內容" v-model="form.title">
                     </div>
+                    <div class="mt-3">
+                        <label class="form-label d-flex justify-content-between align-items-center mb-1">
+                            <span>標題徽章 (如已歇業、已搬遷等)</span>
+                            <div>
+                                <a href="{{ route('admin.badge') }}" target="_blank" class="btn btn-sm btn-outline-secondary me-1">
+                                    <i class="fa-solid fa-gear me-1"></i>徽章管理
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-primary" @click="showNewBadgeModal = !showNewBadgeModal">
+                                    <i class="fa-solid fa-plus me-1"></i>快速建立徽章
+                                </button>
+                            </div>
+                        </label>
+
+                        {{-- 建立新徽章小表單 --}}
+                        <div v-if="showNewBadgeModal" class="p-3 mb-2 border rounded bg-light">
+                            <div class="fw-bold mb-2 small">快速建立新徽章</div>
+                            <div class="row g-2 align-items-center">
+                                <div class="col-sm-4 col-12">
+                                    <input type="text" class="form-control form-control-sm" placeholder="徽章名稱 (如：必比登推薦)" v-model="newBadge.name">
+                                </div>
+                                <div class="col-sm-5 col-12">
+                                    <div class="input-group input-group-sm">
+                                        <input type="color" class="form-control form-control-color" v-model="newBadgeColorPicker" @input="onNewBadgeColorPickerChange" title="點擊開啟調色盤">
+                                        <input type="text" class="form-control" placeholder="#dc3545 或 danger" v-model="newBadge.color">
+                                    </div>
+                                </div>
+                                <div class="col-sm-3 col-12">
+                                    <button type="button" class="btn btn-sm btn-success w-100" @click="createNewBadge">儲存並選取</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- 快速點選/取消徽章 --}}
+                        <div class="p-2 border rounded bg-light mb-2">
+                            <span class="text-secondary small d-block mb-1">點擊快速加入 / 取消：</span>
+                            <div class="d-flex flex-wrap gap-1">
+                                <button type="button"
+                                    v-for="badge in allBadges" :key="badge.id"
+                                    :class="badgeButtonClass(badge)"
+                                    :style="badgeButtonStyle(badge)"
+                                    @click="toggleBadge(badge)">
+                                    <i :class="isBadgeSelected(badge.id) ? 'fa-solid fa-check me-1' : 'fa-solid fa-plus me-1'"></i>@{{ badge.name }}
+                                </button>
+                                <span v-if="allBadges.length === 0" class="text-muted small">尚無可用徽章</span>
+                            </div>
+                        </div>
+
+                        {{-- 前台標題預覽 --}}
+                        <div class="p-2 border rounded bg-white" v-if="form.selectedBadges.length > 0 || form.title">
+                            <div class="text-secondary small mb-1">前台標題即時預覽：</div>
+                            <h5 class="m-0">
+                                <span v-for="b in form.selectedBadges" :key="b.id"
+                                    :class="['badge me-1 align-middle', isHexColor(b.color) ? 'text-white' : ('bg-' + (b.color || 'danger'))]"
+                                    :style="isHexColor(b.color) ? { backgroundColor: b.color, color: '#fff' } : {}">
+                                    @{{ b.name }}
+                                </span>
+                                <span class="align-middle">@{{ form.title || '(文章標題)' }}</span>
+                            </h5>
+                        </div>
+                    </div>
                     <div class="mt-2">
                         <label class="form-label">
                             <span class="text-danger">*</span>文章標籤
@@ -122,11 +182,20 @@
                 return {
                     initial: true,
                     tags: @json($tags),
+                    badges: @json($badges ?? []),
                     article: @json($article),
                     allTags: [],
+                    allBadges: [],
+                    showNewBadgeModal: false,
+                    newBadge: {
+                        name: '',
+                        color: '#dc3545',
+                    },
+                    newBadgeColorPicker: '#dc3545',
                     form: {
                         title: '',
                         selectedTags: [],
+                        selectedBadges: [],
                         status: 1,
                         password: '',
                         content: '',
@@ -138,6 +207,7 @@
                     route: {
                         article: '{{ route('admin.article') }}',
                         submit: '{{ route('api.article.store') }}',
+                        createBadge: '{{ route('api.badge.store') }}',
                     },
                     title: ''
                 }
@@ -158,6 +228,7 @@
             },
             methods: {
                 init() {
+                    this.allBadges = [...this.badges];
                     this.tags.forEach(tag => {
                         this.availableTags.push({
                             id: tag.id,
@@ -180,7 +251,8 @@
                     if (this.article) {
                         this.title = '修改';
                         this.form.title = this.article.title;
-                        this.form.selectedTags = this.article.tags;
+                        this.form.selectedTags = this.article.tags || [];
+                        this.form.selectedBadges = this.article.badges || [];
                         this.form.status = this.article.status;
                         this.form.password = this.article.password;
                         this.form.content = this.article.content;
@@ -195,6 +267,66 @@
                         });
                     });
                     this.initial = false;
+                },
+                isBadgeSelected(badgeId) {
+                    return this.form.selectedBadges.some(b => b.id === badgeId);
+                },
+                badgeButtonClass(badge) {
+                    const isSelected = this.isBadgeSelected(badge.id);
+                    if (!isSelected) return 'btn btn-outline-secondary btn-sm';
+                    if (this.isHexColor(badge.color)) return 'btn btn-sm text-white';
+                    return 'btn btn-' + (badge.color || 'danger') + ' btn-sm';
+                },
+                badgeButtonStyle(badge) {
+                    if (this.isBadgeSelected(badge.id) && this.isHexColor(badge.color)) {
+                        return {
+                            backgroundColor: badge.color,
+                            borderColor: badge.color,
+                            color: '#fff'
+                        };
+                    }
+                    return {};
+                },
+                isHexColor(color) {
+                    return typeof color === 'string' && (color.startsWith('#') || color.startsWith('rgb'));
+                },
+                onNewBadgeColorPickerChange() {
+                    this.newBadge.color = this.newBadgeColorPicker;
+                },
+                toggleBadge(badge) {
+                    const index = this.form.selectedBadges.findIndex(b => b.id === badge.id);
+                    if (index > -1) {
+                        this.form.selectedBadges.splice(index, 1);
+                    } else {
+                        this.form.selectedBadges.push(badge);
+                    }
+                },
+                async createNewBadge() {
+                    if (!this.newBadge.name.trim()) {
+                        this.showError('請輸入徽章名稱');
+                        return;
+                    }
+                    try {
+                        const res = await axios.post(this.route.createBadge, {
+                            name: this.newBadge.name.trim(),
+                            color: this.newBadge.color || 'danger',
+                        });
+                        if (res.data.status === 'success') {
+                            const created = res.data.data;
+                            this.allBadges.push(created);
+                            this.form.selectedBadges.push(created);
+                            this.newBadge.name = '';
+                            this.showNewBadgeModal = false;
+                            Swal.fire({
+                                icon: 'success',
+                                title: '徽章建立成功並已選取',
+                                showConfirmButton: false,
+                                timer: 1200
+                            });
+                        }
+                    } catch (e) {
+                        this.showError(e.response?.data?.message || '建立徽章失敗');
+                    }
                 },
                 hideTagDropdown() {
                     setTimeout(() => {
@@ -219,6 +351,7 @@
                         id: this.article?.id ?? null,
                         title: this.form.title,
                         selectedTags: this.form.selectedTags,
+                        selectedBadges: this.form.selectedBadges,
                         status: this.form.status,
                         password: this.form.password,
                         content: window.myEditor.getData(),

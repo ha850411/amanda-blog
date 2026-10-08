@@ -39,7 +39,14 @@
                         <div class="title_area">
                             <div class="time text-secondary">@{{ formatDate(item.updated_at) }}</div>
                             <div class="title">
-                                <h2 class="h4 m-0 py-2"><a :href="getArticleUrl(item.id)" class="text-dark">@{{ item.title }}</a></h2>
+                                <h2 class="h4 m-0 py-2">
+                                    <a :href="getArticleUrl(item.id)" class="text-dark">
+                                        <template v-if="item.badges && item.badges.length > 0">
+                                            <span v-for="(badge, bIdx) in item.badges" :key="bIdx" :class="badgeClass(badge.color)" :style="badgeStyle(badge.color)">@{{ badge.name }}</span>
+                                        </template>
+                                        <span class="align-middle">@{{ item.title }}</span>
+                                    </a>
+                                </h2>
                             </div>
                             <div class="tag py-2 mb-4" v-if="item.tags && item.tags.length > 0">
                                 <template v-for="(tag, tagIndex) in item.tags" :key="tagIndex">
@@ -209,6 +216,18 @@ const app = Vue.createApp({
                     item.temp_pwd = '';
                 });
             }
+        },
+        badgeClass(color) {
+            if (color && (color.startsWith('#') || color.startsWith('rgb'))) {
+                return 'badge me-1 align-middle text-white';
+            }
+            return 'badge bg-' + (color || 'danger') + ' me-1 align-middle';
+        },
+        badgeStyle(color) {
+            if (color && (color.startsWith('#') || color.startsWith('rgb'))) {
+                return { backgroundColor: color, color: '#fff', fontSize: '0.85rem' };
+            }
+            return { fontSize: '0.85rem' };
         }
     },
 });

@@ -18,6 +18,12 @@
                 <span class="title">標籤管理</span>
             </a>
         </li>
+        <li class="{{ $active == 'badge' ? 'active' : '' }}">
+            <a href="{{ route('admin.badge') }}">
+                <span class="icon"><i class="fa-solid fa-ribbon"></i></span>
+                <span class="title">徽章管理</span>
+            </a>
+        </li>
         <li class="{{ $active == 'article' ? 'active' : '' }}">
             <a href="{{ route('admin.article') }}">
                 <span class="icon"><i class="fa-solid fa-scroll"></i></span>

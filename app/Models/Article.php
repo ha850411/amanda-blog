@@ -35,6 +35,11 @@ class Article extends Model
         return $this->belongsToMany(Tag::class, 'article_tag', 'article_id', 'tag_id');
     }
 
+    public function badges()
+    {
+        return $this->belongsToMany(Badge::class, 'article_badge', 'article_id', 'badge_id')->orderBy('sort', 'asc')->orderBy('id', 'asc');
+    }
+
     public function scopeVisible(Builder $query): Builder
     {
         return $query->whereIn('status', [1, 2]);
@@ -47,6 +52,9 @@ class Article extends Model
         return [
             'id' => $this->id,
             'title' => $this->title,
+            'badges' => $this->relationLoaded('badges')
+                ? $this->badges->map(fn ($b) => ['id' => $b->id, 'name' => $b->name, 'color' => $b->color])->values()->all()
+                : $this->badges()->get()->map(fn ($b) => ['id' => $b->id, 'name' => $b->name, 'color' => $b->color])->values()->all(),
             'status' => $this->status,
             'created_at' => $this->created_at?->format('Y/m/d H:i:s'),
             'updated_at' => $this->updated_at?->format('Y/m/d H:i:s'),

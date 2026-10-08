@@ -3,7 +3,20 @@
         <header class="title_area">
             <time class="time text-secondary" datetime="{{ \Carbon\Carbon::parse($item['updated_at'])->toIso8601String() }}">{{ \Carbon\Carbon::parse($item['updated_at'])->format('Y年n月d日') }}</time>
             <div class="title">
-                <h2 class="h4 m-0 py-2"><a href="{{ route('article', ['id' => $item['id']]) }}" class="text-dark">{{ $item['title'] }}</a></h2>
+                <h2 class="h4 m-0 py-2">
+                    <a href="{{ route('article', ['id' => $item['id']]) }}" class="text-dark">
+                        @if (!empty($item['badges']))
+                            @foreach ($item['badges'] as $badge)
+                                @php
+                                    $bColor = $badge['color'] ?? 'danger';
+                                    $isHex = str_starts_with($bColor, '#') || str_starts_with($bColor, 'rgb');
+                                @endphp
+                                <span class="badge {{ $isHex ? '' : 'bg-' . $bColor }} me-1 align-middle" style="font-size: 0.85rem;{{ $isHex ? ' background-color: ' . $bColor . '; color: #fff;' : '' }}">{{ $badge['name'] }}</span>
+                            @endforeach
+                        @endif
+                        <span class="align-middle">{{ $item['title'] }}</span>
+                    </a>
+                </h2>
             </div>
             @if ($item['tags'])
                 <div class="tag py-2 mb-4">

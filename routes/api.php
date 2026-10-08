@@ -53,7 +53,23 @@ Route::middleware(AdminMiddleware::class)->group(function () {
     // 上傳圖片
     Route::post('/image/upload', [Api\ImageController::class, 'upload'])
         ->name('image.upload');
+    // 新增徽章
+    Route::post('/badge', [Api\BadgeController::class, 'store'])
+        ->name('badge.store');
+    // 更新徽章
+    Route::put('/badge/{id}', [Api\BadgeController::class, 'update'])
+        ->name('badge.update');
+    // 切換徽章狀態
+    Route::patch('/badge/{id}/status', [Api\BadgeController::class, 'toggleStatus'])
+        ->name('badge.toggleStatus');
+    // 刪除徽章
+    Route::delete('/badge/{id}', [Api\BadgeController::class, 'destroy'])
+        ->name('badge.destroy');
 });
+
+// 取得徽章列表
+Route::get('/badge', [Api\BadgeController::class, 'index'])
+    ->name('badge.index');
 
 // 取得瀏覽數
 Route::get('/visit', [Api\VisitController::class, 'index'])
