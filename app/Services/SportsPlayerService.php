@@ -8,15 +8,13 @@ class SportsPlayerService
 {
     public function register(array $match, array $stream): ?string
     {
-        if (! $this->supports($stream['url'] ?? null)) {
+        $player = ['event_id' => $match['id'], 'title' => $match['translated_title'] ?? '', 'stream' => $stream];
+        if (! $this->mode($player)) {
             return null;
         }
 
         $token = hash_hmac('sha256', $match['id'].'|'.$stream['url'], config('app.key'));
-        Cache::put('sports:player:'.$token, [
-            'event_id' => $match['id'], 'title' => $match['translated_title'],
-            'stream' => $stream,
-        ], config('sports_player.lifetime_seconds'));
+        Cache::put('sports:player:'.$token, $player, config('sports_player.lifetime_seconds'));
 
         return $token;
     }
@@ -24,23 +22,26 @@ class SportsPlayerService
     public function find(string $token): ?array
     {
         $player = Cache::get('sports:player:'.$token);
-        $url = $player['stream']['url'] ?? null;
-
-        // Revalidate cached links too. Only the client loads the external player;
-        // this service must never fetch playlists, segments, or player scripts.
-        if (! is_array($player) || ! $this->supports($url)) {
+        // Registration and lookup never fetch upstream. Media loads only on play.
+        $mode = is_array($player) ? $this->mode($player) : null;
+        if (! $mode) {
             return null;
         }
 
-        return $player;
+        return $player + ['mode' => $mode, 'token' => $token];
     }
 
-    private function supports(mixed $url): bool
+    private function mode(array $player): ?string
     {
-        // A safe URL or a successful iframe load does not prove playback works.
-        // Only exact sources verified with our current sandbox can be offered.
-        return is_string($url) && $this->safeEmbedUrl($url)
-            && in_array($url, config('sports_player.verified_embed_urls', []), true);
+        $url = $player['stream']['url'] ?? null;
+        if (! is_string($url) || ! $this->safeEmbedUrl($url)) {
+            return null;
+        }
+        if (app(SportsHlsService::class)->source($player)) {
+            return 'hls';
+        }
+
+        return in_array($url, config('sports_player.verified_embed_urls', []), true) ? 'embed' : null;
     }
 
     private function safeEmbedUrl(string $url): bool

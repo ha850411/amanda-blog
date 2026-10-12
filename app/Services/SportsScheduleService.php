@@ -14,7 +14,12 @@ class SportsScheduleService
 {
     public function schedule(): array
     {
-        return $this->fetchMany(['schedule' => '/matches/all'], fn (array $rows) => $this->normalizeMatches($rows))['schedule'];
+        $schedule = $this->fetchMany(['schedule' => '/matches/all'], fn (array $rows) => $this->normalizeMatches($rows))['schedule'];
+        // Apply the scope after reading the cache as well, including old/stale feeds.
+        $schedule['data'] = array_values(array_filter($schedule['data'],
+            fn ($match) => in_array($match['league'] ?? null, ['NBA', 'MLB'], true)));
+
+        return $schedule;
     }
 
     public function streams(array $match): array
@@ -41,7 +46,7 @@ class SportsScheduleService
             }
             foreach ($result['data'] as $stream) {
                 $stream['provider'] = $provider;
-                $stream['platform'] = 'Sportsurge';
+                $stream['platform'] = 'GKStreams / Sportsurge';
                 $streams[$stream['url']] ??= $stream;
             }
         }

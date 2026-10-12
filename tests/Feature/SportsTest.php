@@ -145,13 +145,52 @@ class SportsTest extends TestCase
         }
     }
 
-    public function test_unknown_sports_and_missing_logos_preserve_names_and_fallback_initials(): void
+    public function test_only_nba_and_mlb_are_available_in_lists_counts_and_event_pages(): void
     {
-        $game = $this->game('unknown', 'volleyball', 'Alpha Team', 'Beta Team');
-        unset($game['teams']['home']['badge'], $game['teams']['away']['badge']);
-        Http::fake(['*/matches/all' => Http::response([$game])]);
-        $this->get('/sports?sport=volleyball')->assertOk()->assertSee('Alpha Team')
-            ->assertSee('volleyball')->assertSee('badge-fallback')->assertDontSee('class="team-badge"', false);
+        $excluded = [
+            $this->game('nfl', 'american-football', 'Dallas Cowboys', 'New York Giants'),
+            $this->game('wnba', 'basketball', 'Las Vegas Aces', 'New York Liberty'),
+            $this->game('nbl', 'basketball', 'Adelaide 36ers', 'New Zealand Breakers'),
+            $this->game('college', 'basketball', 'Duke Blue Devils', 'Kansas Jayhawks'),
+            $this->game('npb', 'baseball', 'Hanshin Tigers', 'Yomiuri Giants'),
+            $this->game('mixed', 'basketball', 'Los Angeles Lakers', 'Adelaide 36ers'),
+            $this->game('unknown', 'volleyball', 'Alpha Team', 'Beta Team'),
+        ];
+        Http::fake(['*/matches/all' => Http::response([
+            $this->game(),
+            $this->game('nba', 'basketball', 'Toronto Raptors', 'Miami Heat'),
+            ...$excluded,
+            $this->game('old-nfl', 'american-football', 'Dallas Cowboys', 'New York Giants', '2026-10-03T00:30:00Z'),
+        ])]);
+        $response = $this->get('/sports')->assertOk()
+            ->assertSee('/sports/events/brewers-padres')->assertSee('/sports/events/nba')
+            ->assertViewHas('total', 2)->assertViewHas('count', 2)
+            ->assertViewHas('leagueCounts', ['MLB' => 1, 'NBA' => 1])
+            ->assertViewHas('rangeCounts', ['current' => 2, 'history' => 0])
+            ->assertViewHas('categories', fn ($categories) => $categories->keys()->sort()->values()->all() === ['baseball', 'basketball']);
+        foreach ($excluded as $game) {
+            $response->assertDontSee('/sports/events/'.$game['id']);
+            $this->get('/sports/events/'.$game['id'])->assertNotFound();
+        }
+        $this->get('/sports?sport=volleyball')->assertOk()->assertViewHas('count', 0);
+        $this->get('/sports?range=history')->assertOk()->assertViewHas('count', 0);
+        $this->get('/sports?date=2026-10-03')->assertOk()->assertViewHas('count', 0);
+        Http::assertSentCount(1);
+    }
+
+    public function test_old_and_stale_cached_schedules_cannot_restore_excluded_leagues(): void
+    {
+        $key = 'sports:v3:'.hash('sha256', config('sports.api_url').'/matches/all');
+        Cache::put($key, ['timestamp' => now()->timestamp, 'data' => [
+            ['id' => 'nfl', 'league' => null], ['id' => 'unknown'],
+        ]], 900);
+        Http::fake(['*/matches/all' => Http::response([], 503)]);
+        $this->get('/sports')->assertOk()->assertViewHas('total', 0);
+        Http::assertNothingSent();
+        $this->travel(61)->seconds();
+        $this->get('/sports')->assertOk()->assertViewHas('total', 0)->assertSee('最近一次取得的賽程');
+        $this->get('/sports/events/nfl')->assertNotFound();
+        Http::assertSentCount(1);
     }
 
     public function test_title_only_games_support_dash_and_vs_without_misclassifying_non_nba_teams(): void
@@ -245,7 +284,7 @@ class SportsTest extends TestCase
     public function test_rejects_unsafe_stream_urls_and_escapes_remote_text(): void
     {
         $game = $this->game();
-        $game['teams']['home']['name'] = '<script>alert(1)</script>';
+        $game['title'] = '<script>alert(1)</script>';
         $game['sources'][] = ['source' => '..', 'id' => '../../metadata'];
         Http::fake([
             '*/matches/all' => Http::response([$game]),

@@ -15,7 +15,7 @@ class StreameastService
     public function streams(array $match): array
     {
         $result = ['data' => [], 'matched' => false, 'unavailable' => false, 'stale' => false, 'updated_at' => null, 'source_url' => null];
-        if (! config('streameast.enabled')) {
+        if (! config('streameast.enabled') || ! in_array($match['league'] ?? null, ['NBA', 'MLB'], true)) {
             return $result;
         }
         $paths = config('streameast.catalogs.'.$match['category'], []);

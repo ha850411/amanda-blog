@@ -130,8 +130,10 @@ class StreameastTest extends TestCase
 
     public function test_unsupported_sports_never_fetch_catalogs(): void
     {
-        $match = array_replace($this->match(), ['category' => 'tennis', 'league' => null]);
-        $this->assertSame([], app(StreameastService::class)->streams($match)['data']);
+        foreach (['tennis', 'basketball', 'baseball', 'american-football'] as $category) {
+            $match = array_replace($this->match(), ['category' => $category, 'league' => null]);
+            $this->assertSame([], app(StreameastService::class)->streams($match)['data']);
+        }
         Http::assertNothingSent();
     }
 

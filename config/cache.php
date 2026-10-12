@@ -34,6 +34,12 @@ return [
 
     'stores' => [
 
+        'sports_manifests' => [
+            'driver' => 'file',
+            'path' => storage_path('framework/cache/sports-manifests'),
+            'lock_path' => storage_path('framework/cache/sports-manifests'),
+        ],
+
         'array' => [
             'driver' => 'array',
             'serialize' => false,

@@ -14,6 +14,7 @@
     @if ($east['unavailable'])<div class="notice warning" role="status">Streameast 暫時無法更新，已取得的其他平台來源仍可使用。</div>@endif
     <div class="section-heading"><div><p class="eyebrow">STREAM SOURCES</p><h2>轉播來源 <span>{{ count($streams['data']) }}</span></h2></div><a class="button" href="{{ $match['source_url'] }}" target="_blank" rel="noopener noreferrer nofollow">原站賽事頁 ↗</a></div>
     <p class="status-note">請使用原連結觀看；已確認支援站內播放的來源才會提供「站內播放器」。HD 為來源標示的畫質。</p>
+    <p class="status-note"><a href="{{ config('sports.gkstream_page').rawurlencode($match['id']) }}" target="_blank" rel="noopener noreferrer nofollow">GKStreams 賽事頁 ↗</a> · GKStreams 與 Sportsurge 使用相同的串流來源，列表合併顯示。</p>
     @if ($east['matched'])
         <p class="status-note">已配對 Streameast 同場賽事：<a href="{{ $east['source_url'] }}" target="_blank" rel="noopener noreferrer nofollow">Streameast 賽事頁 ↗</a>@if ($east['updated_at']) · 更新於 {{ \Carbon\CarbonImmutable::parse($east['updated_at'])->setTimezone(config('sports.timezone'))->format('m/d H:i:s') }}@endif @if (!$east['data']) · 目前尚未取得支援的播放器連結。@endif</p>
     @elseif (!$east['unavailable'] && config('streameast.enabled'))

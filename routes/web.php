@@ -19,6 +19,19 @@ Route::get('/sports/events/{id}', [SportsController::class, 'show'])
 Route::get('/sports/player/{token}', [SportsPlayerController::class, 'show'])
     ->where('token', '[a-f0-9]{64}')->name('sports.player');
 
+// Public, read-only media metadata: polling needs neither sessions nor cookies.
+Route::withoutMiddleware([
+    \Illuminate\Session\Middleware\StartSession::class,
+    \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+    \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
+    \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+])->group(function () {
+    Route::get('/sports/player/{token}/hls/playlist', [SportsPlayerController::class, 'playlist'])
+        ->where('token', '[a-f0-9]{64}')->middleware('throttle:180,1')->name('sports.hls.playlist');
+    Route::get('/sports/player/{token}/hls/resource', [SportsPlayerController::class, 'resource'])
+        ->where('token', '[a-f0-9]{64}')->middleware('throttle:180,1')->name('sports.hls.resource');
+});
+
 Route::view('/privacy', 'privacy')->name('privacy');
 
 Route::get('/tag/{tagId}', [IndexController::class, 'tag'])

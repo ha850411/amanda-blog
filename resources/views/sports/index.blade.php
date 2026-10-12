@@ -1,7 +1,7 @@
 @extends('sports.layout')
 @section('content')
     <section class="hero">
-        <div><p class="eyebrow">THE GAME STARTS HERE / 賽事一覽</p><h1>找到你的<span>下一場比賽。</span></h1><p class="intro">中英隊名、球隊標誌與轉播來源，一眼掌握賽程。</p></div>
+        <div><p class="eyebrow">NBA / MLB · 賽事一覽</p><h1>找到你的<span>下一場比賽。</span></h1><p class="intro">專注 NBA 與 MLB，中英隊名、球隊標誌與轉播來源，一眼掌握賽程。</p></div>
         <div class="hero-stat"><strong>{{ $total }}</strong><span>{{ !empty($filters['date']) ? '指定日期' : ($filters['range'] === 'history' ? '歷史賽事' : '今天起') }} · {{ $sportCount }} 種運動</span><small>TAIPEI · UTC+8</small></div>
     </section>
 

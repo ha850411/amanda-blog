@@ -4,6 +4,7 @@ return [
     // Sportsurge's schedule and player pages currently use this public feed.
     'api_url' => 'https://streamed.pk/api',
     'source_page' => 'https://raaj648.github.io/streampage2sportsurge/',
+    'gkstream_page' => 'https://gkstreams.site/#/match/',
     'timezone' => 'Asia/Taipei',
     'cache_seconds' => 60,
     'stale_seconds' => 900,
@@ -12,15 +13,10 @@ return [
 
     'categories' => [
         'baseball' => '棒球', 'basketball' => '籃球',
-        'american-football' => '美式足球', 'football' => '足球',
-        'hockey' => '冰球', 'fight' => '格鬥／摔角',
-        'motor-sports' => '賽車', 'tennis' => '網球', 'golf' => '高爾夫',
-        'rugby' => '橄欖球', 'cricket' => '板球', 'afl' => '澳式足球',
-        'billiards' => '撞球', 'darts' => '飛鏢', 'other' => '其他',
     ],
 
     // The upstream has sports, but no reliable league field. Only classify
-    // MLB/NBA when BOTH team names match; other games keep their sport category.
+    // MLB/NBA when BOTH team names match; other games are excluded from /sports.
     'league_teams' => [
         'MLB' => [
             'Arizona Diamondbacks', 'Atlanta Braves', 'Baltimore Orioles',
