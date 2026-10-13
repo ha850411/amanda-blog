@@ -5,6 +5,7 @@
     <section class="detail-hero">
         <p class="eyebrow">{{ $match['league'] ?? $match['category_label'] }} / {{ $match['date'] }} / {{ $match['time'] }} 台灣時間</p>
         <h1 class="detail-title">{{ $match['translated_title'] }}</h1>
+        <p><a class="button primary" href="{{ route('sports.index', ['watch' => $match['id']]) }}">同頁觀看・切換來源</a></p>
         @if ($match['translated_title'] !== $match['title'])<p class="original-title" lang="en">{{ $match['title'] }}</p>@endif
         @include('sports.teams')
         <p class="status-note">{{ \Carbon\CarbonImmutable::parse($match['start_at'])->isAfter($now) ? '尚未到排定開賽時間，部分來源可能於開賽前才開放。' : '已到排定開賽時間；是否仍在直播，請以播放器的實際內容為準。' }}</p>
@@ -19,6 +20,11 @@
         <p class="status-note">已配對 Streameast 同場賽事：<a href="{{ $east['source_url'] }}" target="_blank" rel="noopener noreferrer nofollow">Streameast 賽事頁 ↗</a>@if ($east['updated_at']) · 更新於 {{ \Carbon\CarbonImmutable::parse($east['updated_at'])->setTimezone(config('sports.timezone'))->format('m/d H:i:s') }}@endif @if (!$east['data']) · 目前尚未取得支援的播放器連結。@endif</p>
     @elseif (!$east['unavailable'] && config('streameast.enabled'))
         <p class="status-note">Streameast 目前沒有可確認為同場的來源。</p>
+    @endif
+    @if ($webcast['unavailable'])
+        <p class="status-note">MLBWebcast 暫時無法更新，其他來源仍可使用。</p>
+    @elseif ($webcast['matched'])
+        <p class="status-note">已配對 MLBWebcast 同場賽事：<a href="{{ $webcast['source_url'] }}" target="_blank" rel="noopener noreferrer nofollow">MLBWebcast 賽事頁 ↗</a></p>
     @endif
     <div class="source-grid">
         @forelse ($streams['data'] as $stream)

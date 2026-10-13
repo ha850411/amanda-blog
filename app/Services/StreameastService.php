@@ -48,7 +48,11 @@ class StreameastService
                 continue;
             }
             $result['matched'] = true;
-            $result['data'] = $event['streams'];
+            $result['data'] = array_map(function ($stream) use ($match) {
+                return $stream + ['resolver' => 'streameast', 'event_id' => $match['id'] ?? null,
+                    'event_expires_at' => CarbonImmutable::parse($match['start_at'])
+                        ->addSeconds(config('streameast.event_lifetime_seconds', 21600))->toIso8601String()];
+            }, $event['streams']);
             $result['source_url'] = rtrim(config('streameast.base_url'), '/').$candidate['path'];
             $result['updated_at'] = $detail['updated_at'];
             $result['stale'] = $result['stale'] || $detail['stale'];

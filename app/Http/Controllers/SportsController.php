@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\MlbWebcastService;
 use App\Services\SportsPlayerService;
 use App\Services\SportsScheduleService;
 use App\Services\StreameastService;
@@ -20,7 +21,10 @@ class SportsController extends Controller
             'q' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', Rule::in(['upcoming', 'started'])],
             'range' => ['nullable', Rule::in(['current', 'history'])],
+            'watch' => ['nullable', 'string', 'regex:/^[a-zA-Z0-9_-]{1,240}$/D'],
         ]);
+        $initialEvent = $filters['watch'] ?? null;
+        unset($filters['watch']);
         $schedule = $sports->schedule();
         $all = collect($schedule['data']);
         $now = CarbonImmutable::now(config('sports.timezone'));
@@ -47,6 +51,7 @@ class SportsController extends Controller
 
         return response()->view('sports.index', [
             'schedule' => $schedule, 'matches' => $days,
+            'initialEvent' => $initialEvent,
             'count' => $matches->count(), 'total' => $scoped->count(),
             'categories' => $categories, 'filters' => $filters, 'now' => $now,
             'sportCount' => $scoped->pluck('category')->unique()->count(),
@@ -58,10 +63,14 @@ class SportsController extends Controller
         ], $schedule['unavailable'] ? 503 : 200)->header('X-Robots-Tag', 'noindex, nofollow');
     }
 
-    public function show(string $id, SportsScheduleService $sports, StreameastService $streameast, SportsPlayerService $players)
+    public function show(string $id, Request $request, SportsScheduleService $sports, StreameastService $streameast, SportsPlayerService $players, MlbWebcastService $mlbwebcast)
     {
         $schedule = $sports->schedule();
         if ($schedule['unavailable']) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => '目前無法取得賽程，請稍後重試。'], 503);
+            }
+
             return response()->view('sports.unavailable', [], 503)->header('X-Robots-Tag', 'noindex, nofollow');
         }
         $match = collect($schedule['data'])->firstWhere('id', $id);
@@ -69,16 +78,36 @@ class SportsController extends Controller
 
         $streams = $sports->streams($match);
         $east = $streameast->streams($match);
-        $streams['data'] = array_merge($streams['data'], $east['data']);
+        $webcast = $mlbwebcast->streams($match);
+        $streams['data'] = array_merge($streams['data'], $east['data'], $webcast['data']);
         $streams['stale'] = $streams['stale'] || $east['stale'];
         foreach ($streams['data'] as &$stream) {
             $token = $players->register($match, $stream);
             $stream['player_url'] = $token ? route('sports.player', $token) : null;
+            $player = $token ? $players->find($token) : null;
+            $stream['playback'] = ($player['mode'] ?? '') === 'hls' ? [
+                'url' => route('sports.hls.playlist', $token, false),
+                'adapter' => $player['media_adapter'],
+            ] : null;
         }
         unset($stream);
 
+        if ($request->expectsJson()) {
+            return response()->json([
+                'match' => collect($match)->only(['id', 'translated_title', 'title', 'league', 'start_at', 'date', 'time']),
+                'streams' => $streams['data'],
+                'stale' => $streams['stale'],
+                'warnings' => array_values(array_filter([
+                    $streams['stale'] ? '部分來源暫時無法更新，目前顯示最近取得的連結。' : null,
+                    $streams['failed_sources'] ? '部分轉播平台暫時無法取得來源。' : null,
+                    $east['unavailable'] ? 'Streameast 暫時無法取得來源。' : null,
+                    $webcast['unavailable'] ? 'MLBWebcast 暫時無法取得來源。' : null,
+                ])),
+            ])->header('Cache-Control', 'no-store')->header('X-Robots-Tag', 'noindex, nofollow');
+        }
+
         return response()->view('sports.show', [
-            'match' => $match, 'streams' => $streams, 'east' => $east,
+            'match' => $match, 'streams' => $streams, 'east' => $east, 'webcast' => $webcast,
             'schedule' => $schedule, 'now' => CarbonImmutable::now(config('sports.timezone')),
         ])->header('X-Robots-Tag', 'noindex, nofollow');
     }

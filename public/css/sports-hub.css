@@ -1,0 +1,114 @@
+.sports-hub-page .shell{width:min(1500px,calc(100% - 64px))}
+.sports-hub-page .header-inner{min-height:70px}
+.sports-hub-page .site-header{background:#0d141e}
+.hub-heading{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:32px 0 28px}
+.hub-heading .eyebrow{margin-bottom:9px;font-size:10px;letter-spacing:2.6px}
+.hub-heading h1{font-size:30px;letter-spacing:-.8px;line-height:1.4}
+.hub-heading h1 span{display:inline;color:var(--ink)}
+.hub-clock{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:1px;color:#dce4ef;flex-wrap:wrap;justify-content:flex-end}
+.hub-clock small{flex-basis:100%;text-align:right;font-size:10px;letter-spacing:.5px;color:var(--muted)}
+.hub-clock-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px #d2f36b55}
+.hub-grid{display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:26px;align-items:start}
+.hub-watch{min-width:0;scroll-margin-top:12px}
+.watch-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:94px;padding:0 0 20px}
+.watch-heading .eyebrow{font-size:10px;letter-spacing:.6px;margin-bottom:7px}
+.watch-heading h2{font-size:clamp(18px,2.1vw,27px);line-height:1.4;letter-spacing:-.4px;margin:0}
+.watch-heading #watch-original{font-size:11px;color:var(--muted);margin:8px 0 0}
+.schedule-jump{display:none;white-space:nowrap;font-size:11px;color:var(--accent)}
+.hub-watch .sports-player{border-radius:14px}
+.hub-watch .player-topbar{padding:11px 16px}
+.hub-watch .player-state{font-size:11px}
+.hub-watch .player-summary{padding:11px 16px;gap:10px;font-size:11px}
+.hub-watch .player-toolbar{padding:10px 14px}
+.hub-watch .player-toolbar .button{min-height:36px;padding:7px 12px;font-size:11px}
+.hub-watch .player-shortcuts{font-size:10px}
+.hub-watch .player-controls-hint{font-size:10px}
+.hub-watch .player-overlay{background:radial-gradient(ellipse at 50% 30%,#1b2c3b 0,#0b121b 60%);gap:18px}
+.hub-watch .player-overlay .play-symbol{border-color:#688044;color:var(--accent);width:64px;height:64px;font-size:32px;background:#d2f36b08}
+.hub-watch .player-overlay button:disabled{display:none}
+.hub-sources{padding:25px 0 0}
+.sources-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.sources-heading .eyebrow{font-size:9px;letter-spacing:2px;margin-bottom:4px;color:#91a0b3}
+.sources-heading h2{font-size:18px;font-weight:650;margin:0}
+.sources-heading h2 span{font-size:12px;color:var(--accent);margin-left:8px;font-variant-numeric:tabular-nums}
+.sources-heading .button{font-size:11px;min-height:34px;padding:6px 11px}
+.sources-heading .button:disabled{opacity:.45;cursor:default}
+.hub-status{font-size:12px;color:var(--muted);line-height:1.8;margin:14px 0 18px;min-height:22px}
+.hub-source-list{display:flex;flex-direction:column;gap:19px}
+.source-group h3{font-size:10px;letter-spacing:.7px;color:#8c9bb0;margin:0 0 8px;text-transform:uppercase}
+.source-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.hub-source{display:flex;border:1px solid var(--edge);border-radius:8px;background:#111b28;overflow:hidden;min-width:0}
+.source-choice{flex:1;display:flex;flex-direction:column;gap:5px;text-align:left;min-width:0;background:transparent;border:0;color:var(--ink);padding:12px;font:inherit;line-height:1.35}
+button.source-choice{cursor:pointer}
+.source-choice strong{font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.source-choice small{font-size:10px;color:var(--muted)}
+div.source-choice{opacity:.6}
+.source-external{display:flex;align-items:center;justify-content:center;flex:0 0 32px;border-left:1px solid #ffffff09;font-size:15px;color:#8b9bb0}
+.source-choice:focus-visible,.source-external:focus-visible{outline-offset:-3px}
+@media(max-width:600px){.source-external{flex-basis:44px}}
+.hub-source:has(button):hover{border-color:#687747;background:#182332}
+.hub-source.is-selected{border-color:var(--accent);background:#1b281f;box-shadow:inset 3px 0 var(--accent)}
+.hub-source.is-selected strong,.hub-source.is-selected small{color:var(--accent)}
+.hub-footnote{font-size:11px;line-height:1.8;color:#7f8ea3;margin:22px 0 0}
+.hub-schedule{border:1px solid var(--edge);border-radius:14px;background:#101923;overflow:hidden;min-width:0}
+.schedule-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:22px 20px 16px;border-bottom:1px solid #ffffff09}
+.schedule-heading .eyebrow{font-size:9px;letter-spacing:2px;color:#8f9eb2;margin:0 0 4px}
+.schedule-heading h2{font-size:19px;margin:0;font-weight:650}
+#schedule-feedback{font-size:10px;max-width:145px;color:var(--accent)}
+#sports-schedule{padding:18px 16px 4px;max-height:calc(100vh - 235px);min-height:570px;overflow:auto;scrollbar-width:thin;scrollbar-color:#344356 transparent;scroll-margin-top:16px}
+#sports-schedule[aria-busy="true"]{opacity:.6;pointer-events:none}
+#sports-schedule .quick-filters{gap:6px;margin-bottom:10px}
+#sports-schedule .chip{padding:6px 10px;font-size:10px;border-radius:6px;background:#15202e}
+#sports-schedule .chip.selected{background:var(--accent)}
+#sports-schedule .chip span{margin-left:5px}
+#sports-schedule .filters{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 0 10px;border:0;background:transparent;border-radius:0}
+#sports-schedule .filters label{min-width:0;font-size:10px;gap:5px}
+#sports-schedule .filters .search-label{grid-column:1/-1;min-width:0}
+#sports-schedule .schedule-options{grid-column:1/-1;font-size:10px;color:var(--muted)}
+#sports-schedule .schedule-options summary{cursor:pointer;padding:2px 0 5px;min-height:24px}
+#sports-schedule .schedule-options summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#sports-schedule .schedule-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0}
+#sports-schedule .filters input,#sports-schedule .filters select{min-height:36px;font-size:11px;padding:7px 8px;background:#0c141e}
+#sports-schedule .filters .button{min-height:34px;font-size:11px;padding:6px 12px}
+#sports-schedule .reset{font-size:11px;line-height:34px;padding-left:8px}
+#sports-schedule .results-bar{padding-top:12px;font-size:10px;gap:6px}
+#sports-schedule .results-bar p:last-child{font-size:9px}
+#sports-schedule .results-bar a{margin-left:8px}
+#sports-schedule .status-note{font-size:10px;line-height:1.7;margin:9px 0 12px;color:#7f8ea3}
+#sports-schedule .status-note+.status-note{display:none}
+#sports-schedule .day-section{margin-bottom:18px}
+#sports-schedule .day-heading{margin:18px 0 9px}
+#sports-schedule .day-heading h2{font-size:15px}
+#sports-schedule .day-heading h2 span{font-size:10px;margin-left:7px}
+#sports-schedule .day-heading>span{font-size:10px}
+#sports-schedule .match-grid{display:grid;grid-template-columns:1fr;gap:10px}
+#sports-schedule .match-card{background:#15202e;border-radius:9px;position:relative}
+#sports-schedule .match-card.is-selected{border-color:#a9c654;background:#1a2929}
+#sports-schedule .match-card.is-selected .match-bottom a{color:var(--accent)}
+#sports-schedule .match-card.is-selected .match-top::after{content:'已選取';position:absolute;right:12px;top:37px;font-size:9px;color:var(--accent)}
+#sports-schedule .match-top{padding:11px 12px 3px;font-size:10px}
+#sports-schedule .time{font-size:9px;gap:4px}
+#sports-schedule .time time{font-size:11px}
+#sports-schedule .teams{display:flex;flex-direction:column;gap:11px;padding:15px 12px 17px}
+#sports-schedule .team{flex-direction:row;gap:10px;text-align:left;width:100%}
+#sports-schedule .badge-wrap{width:32px;height:32px;border-radius:7px}
+#sports-schedule .team-badge{width:26px;height:26px;inset:2px}
+#sports-schedule .badge-fallback{font-size:9px;letter-spacing:0}
+#sports-schedule .team-name{gap:1px;padding-right:24px}
+#sports-schedule .team-name strong{font-size:12px}
+#sports-schedule .team-name span{font-size:9px}
+#sports-schedule .versus{display:none}
+#sports-schedule .match-bottom{font-size:9px;padding:9px 12px;gap:5px}
+#sports-schedule .match-bottom>span{max-width:180px;line-height:1.5;color:#7d8da2}
+#sports-schedule .match-bottom a{white-space:nowrap;font-size:11px}
+#sports-schedule .match-bottom a span{margin-left:7px;font-size:8px}
+#sports-schedule .empty{padding:35px 15px;margin:18px 0}
+#sports-schedule .empty strong{font-size:14px}
+#sports-schedule .empty p{font-size:11px}
+#sports-schedule .notice{font-size:11px;margin:0 0 12px;padding:12px}
+.sports-hub-page .site-footer{margin-top:38px}
+@media(max-width:1000px){.sports-hub:not(.has-selection) .hub-watch{display:none}}
+@media(min-width:1500px){.hub-grid{grid-template-columns:minmax(0,1fr) 405px;gap:32px}.hub-heading{padding:38px 0 30px}}
+@media(max-width:1200px){.sports-hub-page .shell{width:calc(100% - 40px)}.hub-grid{grid-template-columns:minmax(0,1fr) 340px;gap:20px}.source-options{grid-template-columns:repeat(2,minmax(0,1fr))}.hub-watch .player-shortcuts{display:none}.watch-heading h2{font-size:21px}}
+@media(max-width:1000px){.hub-grid{grid-template-columns:minmax(0,1fr)}.hub-schedule{margin-top:10px}.schedule-jump{display:inline-block}#sports-schedule{max-height:none;min-height:0;padding-bottom:14px}#sports-schedule .match-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#sports-schedule .filters{grid-template-columns:repeat(4,minmax(0,1fr))}#sports-schedule .filters .search-label{grid-column:span 2}.source-options{grid-template-columns:repeat(3,minmax(0,1fr))}.hub-watch .video-stage{max-height:58vh}.hub-heading{padding:24px 0}.hub-heading h1{font-size:27px}.hub-sources{padding-top:20px}}
+@media(max-width:600px){.sports-hub-page .shell{width:calc(100% - 28px)}.hub-heading{padding:24px 0 22px}.hub-heading h1{font-size:23px}.hub-clock{font-size:9px;gap:5px}.hub-clock small{font-size:8px}.hub-heading .eyebrow{font-size:8px}.watch-heading{gap:10px;padding-bottom:14px;min-height:80px}.watch-heading h2{font-size:18px}.watch-heading #watch-original{font-size:9px}.watch-heading .eyebrow{font-size:9px;line-height:1.7}.hub-watch .player-brand{font-size:11px}.hub-watch .player-state{font-size:10px}.hub-watch .sports-player{border-radius:10px}.source-options{grid-template-columns:repeat(2,minmax(0,1fr))}.source-choice{padding:11px 10px}.source-choice strong{font-size:11px}.hub-status{font-size:11px}.hub-footnote{font-size:10px}.hub-watch .player-toolbar .button{min-height:36px}#sports-schedule .match-grid{grid-template-columns:1fr}#sports-schedule .filters{grid-template-columns:1fr 1fr}#sports-schedule .filters .search-label{grid-column:1/-1}.sources-heading h2{font-size:17px}.hub-watch .player-summary{font-size:10px;padding:10px 12px}.schedule-heading{padding:18px 16px}.hub-watch .player-overlay{gap:8px}.hub-watch .player-overlay .play-symbol{width:44px;height:44px;font-size:24px}}

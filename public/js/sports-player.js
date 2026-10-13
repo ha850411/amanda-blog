@@ -93,6 +93,9 @@
             return;
         }
         video.hidden = false;
+        video.defaultMuted = false;
+        video.muted = false;
+        video.volume = 0.7;
         try {
             // Prefer MSE for consistent controls and TS demuxing; native HLS is the fallback.
             if (!window.MediaSource && video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -167,12 +170,6 @@
         quality.addEventListener('change', () => { if (hls) hls.nextLevel = Number(quality.value); });
         mode.addEventListener('change', () => { applyMode(); if (active && mode.value === 'live') goLive(); });
         live.addEventListener('click', () => { goLive(); playVideo(); });
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden && active && document.pictureInPictureElement !== video) {
-                if (hasPlayed) video.pause();
-                else disconnect('已暫停');
-            }
-        });
     }
     start.addEventListener('click', connect);
     el('player-retry').addEventListener('click', connect);

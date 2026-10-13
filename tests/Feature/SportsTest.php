@@ -46,6 +46,40 @@ class SportsTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_hub_deep_link_renders_one_idle_player_without_fetching_sources(): void
+    {
+        config(['mlbwebcast.enabled' => false]);
+        Http::fake(['*/matches/all' => Http::response([$this->game()])]);
+        $page = $this->get('/sports?watch=brewers-padres')->assertOk()
+            ->assertSee('data-initial-event="brewers-padres"', false)
+            ->assertSee('data-source-url=""', false)->assertSee('sports-hub.js');
+        $this->assertSame(1, substr_count($page->getContent(), 'id="sports-player"'));
+        Http::assertSentCount(1);
+        $this->getJson('/sports?watch[]=invalid')->assertUnprocessable();
+        $this->getJson('/sports?watch=..%2Fprivate')->assertUnprocessable();
+    }
+
+    public function test_hub_source_api_only_exposes_playback_for_supported_sources(): void
+    {
+        config(['mlbwebcast.enabled' => false]);
+        $supported = $this->stream();
+        $other = array_replace($supported, ['embedUrl' => 'https://embed.st/embed/admin/main/2', 'streamNo' => 2]);
+        Http::fake([
+            '*/matches/all' => Http::response([$this->game()]),
+            '*/stream/admin/main' => Http::response([$supported, $other]),
+        ]);
+        $this->mock(\App\Services\GksTransport::class, fn ($mock) => $mock->shouldNotReceive('handshake'));
+        $data = $this->getJson('/sports/events/brewers-padres')->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('match.id', 'brewers-padres')
+            ->assertJsonPath('streams.0.playback.adapter', 'gks')
+            ->assertJsonPath('streams.1.playback', null)->json();
+        $this->assertMatchesRegularExpression('~^/sports/player/[a-f0-9]{64}/hls/playlist$~', $data['streams'][0]['playback']['url']);
+        Http::assertSentCount(2);
+        $this->getJson('/sports/events/missing')->assertNotFound();
+        Http::assertSentCount(2);
+    }
+
     public function test_default_schedule_starts_at_taipei_midnight_and_counts_only_that_range(): void
     {
         Http::fake(['*/matches/all' => Http::response([
@@ -234,7 +268,7 @@ class SportsTest extends TestCase
 
     public function test_unverified_streams_keep_original_links_without_in_site_player_links(): void
     {
-        config(['sports_player.verified_embed_urls' => []]);
+        config(['sports_player.verified_embed_urls' => [], 'gks.enabled' => false]);
         $stream = $this->stream();
         Http::fake([
             '*/matches/all' => Http::response([$this->game()]),
@@ -251,6 +285,7 @@ class SportsTest extends TestCase
 
     public function test_only_verified_stream_gets_a_player_link_in_a_mixed_source_list(): void
     {
+        config(['gks.enabled' => false]); // Exercise the independent iframe compatibility registry.
         $supported = $this->stream();
         $unknown = array_replace($supported, ['embedUrl' => 'https://embed.st/embed/admin/main/2', 'streamNo' => 2]);
         config(['sports_player.verified_embed_urls' => [$supported['embedUrl']]]);

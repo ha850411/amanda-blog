@@ -1,5 +1,6 @@
 // Keep a readable team abbreviation when a remote badge is missing or broken.
-document.querySelectorAll('.team-badge').forEach((image) => {
+const initializeSportsBadges = () => document.querySelectorAll('.team-badge:not([data-initialized])').forEach((image) => {
+    image.dataset.initialized = 'true';
     const showBadge = () => { if (image.naturalWidth > 0) image.classList.add('loaded'); };
     image.addEventListener('load', showBadge);
     const fallback = () => {
@@ -14,3 +15,5 @@ document.querySelectorAll('.team-badge').forEach((image) => {
     image.addEventListener('error', fallback);
     if (image.complete) image.naturalWidth > 0 ? showBadge() : fallback();
 });
+initializeSportsBadges();
+document.addEventListener('sports:schedule-updated', initializeSportsBadges);

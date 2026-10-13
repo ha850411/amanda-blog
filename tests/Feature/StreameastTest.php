@@ -35,6 +35,10 @@ class StreameastTest extends TestCase
         $this->assertSame('https://gooz.aapmains.net/new-stream-embed/57543?3newa=22', $result['data'][0]['url']);
         $this->assertSame('https://gooz.aapmains.net/new-stream-embed/57552?3newa=22', $result['data'][1]['url']);
         $this->assertNull($result['data'][0]['hd']);
+        $this->assertSame('streameast', $result['data'][0]['resolver']);
+        $this->assertSame('brewers-padres', $result['data'][0]['event_id']);
+        $this->assertSame(CarbonImmutable::parse($this->match()['start_at'])->addHours(6)->toIso8601String(), $result['data'][0]['event_expires_at']);
+        $this->assertNotNull(app(\App\Services\SportsPlayerService::class)->register($this->match(), $result['data'][0]));
         $this->assertSame('https://streameast.cool'.self::EVENT, $result['source_url']);
         app(StreameastService::class)->streams($this->match());
         Http::assertSentCount(2);
@@ -140,7 +144,7 @@ class StreameastTest extends TestCase
     private function match(): array
     {
         return [
-            'title' => 'Milwaukee Brewers vs San Diego Padres', 'category' => 'baseball', 'league' => 'MLB',
+            'id' => 'brewers-padres', 'title' => 'Milwaukee Brewers vs San Diego Padres', 'category' => 'baseball', 'league' => 'MLB',
             'start_at' => '2026-10-04T00:30:00Z',
             'teams' => [['name' => 'Milwaukee Brewers'], ['name' => 'San Diego Padres']],
         ];

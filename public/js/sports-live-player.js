@@ -2,11 +2,14 @@
     'use strict';
     const root = document.getElementById('sports-player');
     if (!root || root.dataset.mode !== 'hls') return;
+    let gks = root.dataset.mediaAdapter === 'gks';
+    let gksHeight = 1080;
     const el = id => document.getElementById(id);
     const container = el('sports-artplayer'), overlay = el('player-overlay');
     const message = el('player-message'), state = el('player-state'), metrics = el('player-metrics');
     const feedback = el('player-feedback'), stop = el('player-stop'), start = el('player-start');
-    let art, hls, assets, retryTimer, generation = 0, active = false, wanted = false, suspended = false;
+    let art, hls, assets, retryTimer, stallTimer, generation = 0, active = false, wanted = false, suspended = false;
+    let hasPlayed = false;
     let mode = 'balanced', selectedQuality = -1, recoveries = 0, lastMetric = 0, qualitySignature = '';
     const modes = [
         { html: '均衡 · 優先穩定', value: 'balanced' },
@@ -24,16 +27,19 @@
         if (!assets) assets = Promise.all([
             window.Artplayer ? null : script(root.dataset.uiLibrary),
             window.artplayerI18nZhTw ? null : script(root.dataset.uiLanguage),
-            window.Hls ? null : script(root.dataset.hlsLibrary)
+            window.Hls ? null : script(root.dataset.hlsLibrary),
+            window.GksMedia ? null : script(root.dataset.adapterLibrary)
         ]).catch(error => { assets = null; throw error; });
         return assets;
     };
     const setState = (text, playing = false) => {
         state.textContent = text;
         root.classList.toggle('is-playing', playing);
+        root.dispatchEvent(new CustomEvent('sports:playback', { detail: { text, playing, active } }));
     };
     const disconnect = (label = '已停止') => {
-        active = wanted = false;
+        active = wanted = hasPlayed = false;
+        clearTimeout(stallTimer);
         suspended = false;
         generation++;
         clearTimeout(retryTimer);
@@ -48,29 +54,30 @@
         setState(label);
     };
     const fail = text => { disconnect('無法播放'); message.textContent = text; };
+    const playbackConfig = () => ({
+        lowLatencyMode: !gks,
+        liveSyncDurationCount: mode === 'live' ? 2 : 3,
+        liveMaxLatencyDurationCount: mode === 'live' ? 5 : 6,
+        // Accelerating a 60 fps feed drops frames on a 60 Hz display and drains
+        // the buffer faster. GKS favours uninterrupted normal-speed playback.
+        maxLiveSyncPlaybackRate: gks ? 1 : 1.05,
+        maxBufferLength: 12,
+        maxMaxBufferLength: 24,
+        maxBufferSize: 24 * 1024 * 1024
+    });
     const play = () => {
         if (!active || !art) return;
         wanted = true;
         const attempt = generation;
         const instance = art;
-        instance.play().catch(async error => {
-            if (!active || generation !== attempt) return;
-            if (error.name === 'NotAllowedError' && !instance.video.muted) {
-                instance.muted = true;
-                try {
-                    await instance.play();
-                    if (active && generation === attempt) {
-                        instance.layers['unmute-prompt'].hidden = false;
-                        instance.notice.show = '已自動靜音播放，點選「開啟聲音」';
-                    }
-                    return;
-                } catch { /* This browser requires a gesture even for muted playback. */ }
-            }
+        instance.play().catch(error => {
             if (!active || generation !== attempt) return;
             wanted = false;
             if (hls) { hls.stopLoad(); suspended = true; }
-            setState('點選播放以繼續');
-            art.notice.show = '請點選播放器上的播放按鈕';
+            instance.loading.show = false;
+            instance.layers['play-prompt'].hidden = false;
+            setState(error.name === 'NotAllowedError' ? '點選播放以開啟聲音' : '點選播放以繼續');
+            instance.notice.show = '點選「播放直播」以開啟聲音';
         });
     };
     const goLive = () => {
@@ -87,12 +94,17 @@
     };
     const applyMode = () => {
         if (!hls) return;
-        hls.config.liveSyncDurationCount = mode === 'live' ? 2 : 3;
-        hls.config.liveMaxLatencyDurationCount = mode === 'live' ? 5 : 6;
+        Object.assign(hls.config, playbackConfig());
         const limit = mode === 'save' ? 720 : 1080;
         const eligible = hls.levels.map((level, index) => ({level, index})).filter(({level}) => level.height > 0 && level.height <= limit);
         hls.autoLevelCapping = eligible.length ? eligible.at(-1).index : -1;
-        if (mode === 'save') { selectedQuality = -1; hls.nextLevel = -1; }
+        if (gks) {
+            const choices = hls.levels.map((level, index) => ({ level, index })).filter(({ level }) => level.height <= Math.min(gksHeight, limit));
+            selectedQuality = choices.length ? choices.at(-1).index : 0;
+            hls.autoLevelCapping = selectedQuality;
+            hls.config.minAutoBitrate = hls.levels[selectedQuality]?.maxBitrate || hls.levels[selectedQuality]?.bitrate || 0;
+            hls.loadLevel = selectedQuality;
+        } else if (mode === 'save') { selectedQuality = -1; hls.nextLevel = -1; }
         updateQuality();
     };
     const updateQuality = () => {
@@ -106,7 +118,7 @@
             name: 'stream-quality', html: '畫質', width: 260,
             tooltip: single ? (art.video.videoHeight ? art.video.videoHeight + 'p · 唯一畫質' : '來源原始畫質') : selectedQuality < 0 ? '自動' : (levels[selectedQuality]?.height || '') + 'p',
             selector: [
-                { html: single ? '自動 · 使用来源原始畫質' : '自動 · 依網路調整', value: -1, default: selectedQuality < 0 },
+                ...(!gks || single ? [{ html: single ? '自動 · 使用来源原始畫質' : '自動 · 依網路調整', value: -1, default: selectedQuality < 0 }] : []),
                 ...(!single ? levels.map((item, index) => ({
                     html: label((item.height ? item.height + 'p' : '來源 ' + (index + 1)) + (item.bitrate ? ' · ' + (item.bitrate / 1e6).toFixed(1) + ' Mbps' : '')),
                     value: index, default: selectedQuality === index
@@ -114,6 +126,7 @@
             ],
             onSelect(item) {
                 selectedQuality = Number(item.value);
+                if (gks) { gksHeight = levels[selectedQuality]?.height || 1080; connect(); return gksHeight + 'p'; }
                 hls.nextLevel = selectedQuality;
                 return selectedQuality < 0 ? '自動' : (levels[selectedQuality].height || '來源') + 'p';
             }
@@ -160,19 +173,33 @@
         video.setAttribute('aria-label', container.getAttribute('aria-label'));
         if (window.Hls.isSupported()) {
             hls = new window.Hls({
-                enableWorker: true, lowLatencyMode: true,
-                liveSyncDurationCount: mode === 'live' ? 2 : 3,
-                liveMaxLatencyDurationCount: mode === 'live' ? 5 : 6,
-                maxLiveSyncPlaybackRate: 1.05,
-                maxBufferLength: 12, maxMaxBufferLength: 24, backBufferLength: 6,
-                maxBufferSize: 24 * 1024 * 1024,
-                capLevelToPlayerSize: true, capLevelOnFPSDrop: true, maxDevicePixelRatio: 1.5
+                enableWorker: true, backBufferLength: 6,
+                ...playbackConfig(),
+                capLevelToPlayerSize: !gks, capLevelOnFPSDrop: !gks, maxDevicePixelRatio: 1.5,
+                ...(gks ? {
+                    fLoader: window.GksMedia.loader(window.Hls),
+                    preserveManualLevelOnError: true,
+                    liveSyncOnStallIncrease: 0,
+                    fragLoadPolicy: { default: {
+                        maxTimeToFirstByteMs: 5000, maxLoadTimeMs: 12000,
+                        timeoutRetry: { maxNumRetry: 2, retryDelayMs: 500, maxRetryDelayMs: 1000 },
+                        errorRetry: { maxNumRetry: 3, retryDelayMs: 500, maxRetryDelayMs: 2000 }
+                    }}
+                } : {})
             });
             const current = hls, Hls = window.Hls;
             current.on(Hls.Events.MANIFEST_PARSED, () => {
                 if (!valid()) return;
                 applyMode();
                 if (wanted) play();
+            });
+            current.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
+                if (!valid() || !gks || !current.levels[data.level]) return;
+                if (data.level !== selectedQuality) {
+                    fail('所選畫質暫時無法播放，請重新載入。');
+                    return;
+                }
+                updateQuality();
             });
             current.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, data) => {
                 if (!valid() || data.audioTracks.length < 2) return;
@@ -192,12 +219,15 @@
                     retryTimer = setTimeout(() => {
                         if (!valid() || !wanted) return;
                         if (data.type === Hls.ErrorTypes.MEDIA_ERROR) current.recoverMediaError();
+                        else if ([Hls.ErrorDetails.MANIFEST_LOAD_ERROR, Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT].includes(data.details)) current.loadSource(url);
                         else current.startLoad(-1);
                     }, recoveries * 1500);
-                } else fail('來源暫時無法播放。請重新載入，或返回賽事切換來源。');
+                } else fail('來源暫時無法播放。請重新載入，或切換其他來源。');
             });
             current.attachMedia(video);
             current.loadSource(url);
+        } else if (gks) {
+            fail('此來源需要支援 HLS.js 的瀏覽器，請改用其他來源或原連結。');
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             instance.setting.remove('stream-mode');
             instance.setting.update({ name: 'stream-quality', html: '畫質', tooltip: '系統自動', onClick: () => '由瀏覽器調整' });
@@ -207,6 +237,7 @@
         } else fail('此瀏覽器不支援直播格式，請改用原連結。');
     };
     const connect = async () => {
+        if (!root.dataset.sourceUrl) return;
         disconnect('載入播放器');
         active = wanted = true;
         recoveries = 0;
@@ -240,7 +271,7 @@
                     'Web Fullscreen': '劇院模式', 'Exit Web Fullscreen': '退出劇院模式',
                     'PIP Mode': '子母畫面', 'Exit PIP Mode': '退出子母畫面'
                 }},
-                volume: 0.7, pip: true, fullscreen: true, fullscreenWeb: true,
+                volume: 0.7, muted: false, pip: true, fullscreen: true, fullscreenWeb: true,
                 setting: true, aspectRatio: true, hotkey: true,
                 lock: true, gesture: true, fastForward: false,
                 moreVideoAttr: { playsInline: true, preload: 'none' },
@@ -248,7 +279,7 @@
                     { name: 'stream-quality', html: '畫質', tooltip: '自動', width: 260 },
                     { name: 'stream-mode', html: '播放模式', tooltip: modes.find(item => item.value === mode).html.split(' · ')[0], width: 260,
                         selector: modes.map(item => ({...item, default: item.value === mode})),
-                        onSelect(item) { mode = item.value; applyMode(); if (mode === 'live') goLive(); return item.html.split(' · ')[0]; }
+                        onSelect(item) { mode = item.value; if (gks) connect(); else { applyMode(); if (mode === 'live') goLive(); } return item.html.split(' · ')[0]; }
                     }
                 ],
                 controls: [{
@@ -257,14 +288,14 @@
                     click: goLive
                 }],
                 layers: [{
-                    name: 'unmute-prompt',
-                    html: '<button type="button" class="player-unmute">開啟聲音</button>',
+                    name: 'play-prompt',
+                    html: '<button type="button" class="player-unmute">播放直播（含聲音）</button>',
                     mounted(node) { node.hidden = true; },
                     style: { top: '16px', left: '16px' },
                     click(component, event) {
                         event.stopPropagation();
                         instance.muted = false;
-                        instance.layers['unmute-prompt'].hidden = true;
+                        play();
                     }
                 }],
                 cssVar: { '--art-control-height': '44px', '--art-bottom-height': '60px',
@@ -273,15 +304,31 @@
             art = instance;
             overlay.hidden = true;
             setState('正在連接來源');
-            instance.on('video:playing', () => { if (active) { setState('播放中', true); updateMetrics(); } });
-            instance.on('video:waiting', () => { if (active && wanted) setState('緩衝中'); });
-            instance.on('video:timeupdate', updateMetrics);
-            instance.on('video:volumechange', () => {
-                if (!instance.video.muted) instance.layers['unmute-prompt'].hidden = true;
+            instance.on('video:playing', () => {
+                if (active && art === instance) {
+                    hasPlayed = true;
+                    if (feedback.textContent === '目前來源下載停滯，正在重試；保留所選畫質。') feedback.textContent = '';
+                    clearTimeout(stallTimer);
+                    instance.layers['play-prompt'].hidden = true;
+                    setState('播放中', true);
+                    updateMetrics();
+                }
             });
+            instance.on('video:waiting', () => {
+                if (!active || !wanted || art !== instance) return;
+                setState('緩衝中');
+                if (!gks || !hasPlayed || instance.video.seeking) return;
+                clearTimeout(stallTimer);
+                stallTimer = setTimeout(() => {
+                    if (!active || !wanted || art !== instance || instance.video.paused || instance.video.readyState >= 3) return;
+                    feedback.textContent = '目前來源下載停滯，正在重試；保留所選畫質。';
+                }, 8000);
+            });
+            instance.on('video:timeupdate', updateMetrics);
             instance.on('video:pause', () => {
                 if (!active || art !== instance) return;
                 wanted = false;
+                clearTimeout(stallTimer);
                 clearTimeout(retryTimer);
                 if (hls) { hls.stopLoad(); suspended = true; setState('已暫停'); }
                 else { disconnect('已暫停'); message.textContent = '已停止下載，點選播放直播重新連接。'; }
@@ -302,13 +349,26 @@
     start.addEventListener('click', connect);
     el('player-retry').addEventListener('click', connect);
     stop.addEventListener('click', () => { disconnect(); start.focus(); });
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden || !active || !art) return;
-        if (document.pictureInPictureElement === art.video || art.video.webkitPresentationMode === 'picture-in-picture') return;
-        if (art.video.readyState) art.pause();
-        else disconnect('已暫停');
-    });
     window.addEventListener('pagehide', () => { disconnect(); menuObserver.disconnect(); });
-    // Entering the page starts playback; a gesture is only requested if the browser requires it.
-    connect();
+    window.SportsLivePlayer = {
+        load(source, title) {
+            const url = new URL(source.url, location.origin);
+            if (url.origin !== location.origin || !/^\/sports\/player\/[a-f0-9]{64}\/hls\/playlist$/.test(url.pathname)) throw new Error('Unsupported source');
+            root.dataset.sourceUrl = url.pathname;
+            root.dataset.mediaAdapter = source.adapter || '';
+            gks = source.adapter === 'gks';
+            gksHeight = 1080;
+            container.setAttribute('aria-label', title + ' 直播影片');
+            start.disabled = el('player-retry').disabled = false;
+            connect();
+        },
+        clear(text = '請選擇播放來源') {
+            disconnect('等待選擇來源');
+            root.dataset.sourceUrl = '';
+            start.disabled = el('player-retry').disabled = true;
+            message.textContent = text;
+        }
+    };
+    // A standalone page starts immediately; the hub waits for a selected source.
+    if (root.dataset.sourceUrl) connect();
 })();

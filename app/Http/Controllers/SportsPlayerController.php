@@ -38,7 +38,11 @@ class SportsPlayerController extends Controller
     {
         $player = $players->find($token);
         abort_unless($player && $player['mode'] === 'hls', 410);
-        $source = $hls->source($player);
+        try {
+            $source = $hls->source($player, true);
+        } catch (Throwable) {
+            abort(503, '來源暫時無法載入，請稍後重試。');
+        }
         abort_unless($source, 410);
 
         return $source;
