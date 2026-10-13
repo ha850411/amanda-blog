@@ -17,6 +17,9 @@
     <header class="site-header">
         <div class="shell header-inner">
             <a class="brand" href="{{ route('sports.index') }}"><span class="brand-mark" aria-hidden="true">E</span> Easonn <strong>SPORTS</strong></a>
+            <div class="header-nav">
+                <a class="back-blog" href="/">← 回部落格</a>
+            </div>
         </div>
     </header>
     <main id="main" class="shell">@yield('content')</main>
