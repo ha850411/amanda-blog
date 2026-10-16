@@ -41,38 +41,38 @@ class ImageTheme
     /** @var array<string, array{accent: string, badge_bg: string, badge_text: string, card_border: string, label: string}> */
     public const GAME_THEMES = [
         'mlb' => [
-            'accent' => '#0284c7',
-            'badge_bg' => '#08223c',
+            'accent' => '#0ea5e9',
+            'badge_bg' => '#082f49',
             'badge_text' => '#7dd3fc',
-            'card_border' => '#142942',
+            'card_border' => '#163050',
             'label' => 'MLB',
         ],
         'cs' => [
             'accent' => '#f59e0b',
-            'badge_bg' => '#281404',
+            'badge_bg' => '#361a05',
             'badge_text' => '#fde68a',
-            'card_border' => '#32200e',
+            'card_border' => '#3b2510',
             'label' => 'CS2',
         ],
         'valorant' => [
             'accent' => '#ff4655',
-            'badge_bg' => '#2b0b14',
+            'badge_bg' => '#380d18',
             'badge_text' => '#fecdd3',
-            'card_border' => '#35141d',
+            'card_border' => '#3f1621',
             'label' => 'VAL',
         ],
         'lol' => [
-            'accent' => '#c89b3c',
-            'badge_bg' => '#1c1608',
+            'accent' => '#d4a74a',
+            'badge_bg' => '#281f0b',
             'badge_text' => '#fef08a',
-            'card_border' => '#2d2616',
+            'card_border' => '#362c16',
             'label' => 'LoL',
         ],
         'default' => [
             'accent' => '#3b82f6',
             'badge_bg' => '#172554',
             'badge_text' => '#bfdbfe',
-            'card_border' => '#1b2a44',
+            'card_border' => '#1e3252',
             'label' => 'MATCH',
         ],
     ];
@@ -118,6 +118,31 @@ class ImageTheme
             'D' => ['bg' => '#3c3016', 'border' => '#8c6b20', 'text' => '#fde68a', 'label' => '和'],
             default => ['bg' => '#182338', 'border' => '#334155', 'text' => '#94a3b8', 'label' => '—'],
         };
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $form
+     * @return array{bg: string, border: string, text: string}
+     */
+    public static function formSummaryTheme(?array $form): array
+    {
+        $sample = (int) ($form['sample_size'] ?? 0);
+        if ($sample <= 0) {
+            return ['bg' => '#131d30', 'border' => '#26354d', 'text' => '#64748b'];
+        }
+
+        $wins = (int) ($form['wins'] ?? 0);
+        $losses = (int) ($form['losses'] ?? 0);
+
+        if ($wins > $losses) {
+            return ['bg' => '#06362d', 'border' => '#0d9488', 'text' => '#5eead4'];
+        }
+
+        if ($losses > $wins) {
+            return ['bg' => '#3b121d', 'border' => '#be123c', 'text' => '#fda4af'];
+        }
+
+        return ['bg' => '#1e293b', 'border' => '#475569', 'text' => '#cbd5e1'];
     }
 
     public static function seriesWinSlots(mixed $format): int

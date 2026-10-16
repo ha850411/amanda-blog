@@ -462,4 +462,17 @@ class LineScheduleImageServiceTest extends TestCase
         $dailyUrl = $service->create($dailyData, 'https://stake.com');
         $this->assertNotEmpty($dailyUrl);
     }
+
+    public function test_it_provides_semantic_form_summary_themes(): void
+    {
+        $winning = \App\Services\LineSchedule\Support\ImageTheme::formSummaryTheme(['sample_size' => 5, 'wins' => 4, 'losses' => 1]);
+        $losing = \App\Services\LineSchedule\Support\ImageTheme::formSummaryTheme(['sample_size' => 5, 'wins' => 1, 'losses' => 4]);
+        $even = \App\Services\LineSchedule\Support\ImageTheme::formSummaryTheme(['sample_size' => 2, 'wins' => 1, 'losses' => 1]);
+        $empty = \App\Services\LineSchedule\Support\ImageTheme::formSummaryTheme(null);
+
+        $this->assertSame('#5eead4', $winning['text']);
+        $this->assertSame('#fda4af', $losing['text']);
+        $this->assertSame('#cbd5e1', $even['text']);
+        $this->assertSame('#64748b', $empty['text']);
+    }
 }

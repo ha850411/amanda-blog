@@ -203,6 +203,8 @@ class LineScheduleBot
         }
         $warning = $sourceErrors === [] ? '' : implode('、', $sourceErrors).' 暫時無法取得';
 
+        $quickReplies = $this->scheduleQuickReplies($command, $now);
+
         if ($allMatches === []) {
             $noMatchLabel = $isMultiGame ? '綜合賽程' : $label;
             $status = $sourceErrors === [] ? '查無賽程。' : '暫時無法取得完整賽程，請稍後再試。';
@@ -210,6 +212,8 @@ class LineScheduleBot
             return new LineBotReply(
                 "{$noMatchLabel} {$dateLabel} {$status}\n{$scheduleLinks}".($warning === '' ? '' : "\n{$warning}"),
                 $filteredUrl,
+                null,
+                $quickReplies,
             );
         }
 
@@ -333,34 +337,37 @@ class LineScheduleBot
 
         $lines[] = "\n{$scheduleLinks}";
 
+        $imageData = ($command['text_only'] ?? false) ? null : [
+            'title' => $imageTitle,
+            'subtitle' => '台灣時間｜'.count($visibleMatches).' 場賽程'.($warning === '' ? '' : '｜'.$warning),
+            'game' => $isMultiGame ? 'all' : $command['games'][0],
+            'matches' => array_map(
+                fn (array $match): array => [
+                    'game' => $match['game'] ?? ($command['games'][0] ?? null),
+                    'start_time' => ($match['time_tbd'] ?? false) ? '時間待定' : ($command['is_range']
+                        ? $match['start_at']->format('m/d H:i')
+                        : $match['start_at']->format('H:i')),
+                    'format' => $match['format'],
+                    'is_live' => $match['is_live'] ?? false,
+                    'series_score' => $match['series_score'] ?? null,
+                    'score' => $match['score'] ?? null,
+                    'team1' => $match['team1'],
+                    'team2' => $match['team2'],
+                    'tournament' => $match['tournament'],
+                    'odds' => $match['odds'],
+                    'h2h' => $match['h2h'] ?? null,
+                    'recent_form' => $match['recent_form'] ?? null,
+                    'status_label' => $match['status_label'] ?? null,
+                ],
+                $visibleMatches,
+            ),
+        ];
+
         return new LineBotReply(
             implode("\n", $lines),
             $filteredUrl,
-            [
-                'title' => $imageTitle,
-                'subtitle' => '台灣時間｜'.count($visibleMatches).' 場賽程'.($warning === '' ? '' : '｜'.$warning),
-                'game' => $isMultiGame ? 'all' : $command['games'][0],
-                'matches' => array_map(
-                    fn (array $match): array => [
-                        'game' => $match['game'] ?? ($command['games'][0] ?? null),
-                        'start_time' => ($match['time_tbd'] ?? false) ? '時間待定' : ($command['is_range']
-                            ? $match['start_at']->format('m/d H:i')
-                            : $match['start_at']->format('H:i')),
-                        'format' => $match['format'],
-                        'is_live' => $match['is_live'] ?? false,
-                        'series_score' => $match['series_score'] ?? null,
-                        'score' => $match['score'] ?? null,
-                        'team1' => $match['team1'],
-                        'team2' => $match['team2'],
-                        'tournament' => $match['tournament'],
-                        'odds' => $match['odds'],
-                        'h2h' => $match['h2h'] ?? null,
-                        'recent_form' => $match['recent_form'] ?? null,
-                        'status_label' => $match['status_label'] ?? null,
-                    ],
-                    $visibleMatches,
-                ),
-            ],
+            $imageData,
+            $quickReplies,
         );
     }
 
@@ -373,7 +380,8 @@ class LineScheduleBot
      *     date: CarbonImmutable,
      *     tiers: array<int, string>,
      *     limit: int,
-     *     team: ?string
+     *     team: ?string,
+     *     text_only: bool
      * }|string|null
      */
     private function parseCommand(string $message): array|string|null
@@ -433,6 +441,7 @@ class LineScheduleBot
             'tiers' => $options['tiers'],
             'limit' => $options['limit'],
             'team' => $options['team'],
+            'text_only' => $options['text_only'],
         ];
     }
 
@@ -562,17 +571,25 @@ class LineScheduleBot
     }
 
     /**
-     * @return array{games?: array<int, string>, tiers: array<int, string>, limit: int, team: ?string}|null
+     * @return array{games?: array<int, string>, tiers: array<int, string>, limit: int, team: ?string, text_only: bool}|null
      */
     private function parseOptions(string $input): ?array
     {
         // A typical combined S-tier day can exceed ten matches. Keep the
         // default large enough for the full image while retaining an explicit
         // limit option for callers that want a shorter response.
-        $options = ['tiers' => ['s'], 'limit' => 19, 'team' => null];
+        $options = ['tiers' => ['s'], 'limit' => 19, 'team' => null, 'text_only' => false];
 
         if (trim($input) === '') {
             return $options;
+        }
+
+        if (preg_match('/(?:^|\s)text(?=\s|$)/iu', $input) === 1) {
+            $options['text_only'] = true;
+            $input = trim((string) preg_replace('/(?:^|\s)text(?=\s|$)/iu', ' ', $input));
+            if ($input === '') {
+                return $options;
+            }
         }
 
         preg_match_all('/(game|tier|limit|team)=(?:"([^"]+)"|(\S+))/iu', $input, $optionMatches, PREG_SET_ORDER);
@@ -645,6 +662,63 @@ class LineScheduleBot
         }
 
         return $options;
+    }
+
+    /**
+     * @param  array{
+     *     games: array<int, string>,
+     *     start_date: CarbonImmutable,
+     *     end_date: CarbonImmutable,
+     *     is_range: bool,
+     *     tiers: array<int, string>
+     * }  $command
+     * @return array<int, array{label: string, text: string}>
+     */
+    public function scheduleQuickReplies(array $command, CarbonImmutable $now): array
+    {
+        $isMultiGame = count($command['games']) > 1;
+        $singleGame = $isMultiGame ? null : ($command['games'][0] ?? null);
+        $baseCmd = match ($singleGame) {
+            'lol' => '!lol',
+            'valorant' => '!val',
+            'cs' => '!cs',
+            'mlb' => '!mlb',
+            default => '!match',
+        };
+
+        $isToday = ! $command['is_range'] && $command['start_date']->isSameDay($now);
+
+        $items = [];
+        if ($isToday) {
+            $items[] = ['label' => '🔄 刷新賽程', 'text' => $baseCmd];
+            $items[] = ['label' => '⏭️ 明天賽程', 'text' => $baseCmd.' 明天'];
+        } else {
+            $items[] = ['label' => '📅 今天賽程', 'text' => $baseCmd];
+            $items[] = ['label' => '⏭️ 明天賽程', 'text' => $baseCmd.' 明天'];
+        }
+
+        $gameButtons = [
+            'all' => ['label' => '🎮 綜合賽程', 'text' => '!match'],
+            'lol' => ['label' => '⚔️ LoL 賽程', 'text' => '!lol'],
+            'valorant' => ['label' => '🔫 VAL 賽程', 'text' => '!val'],
+            'cs' => ['label' => '💣 CS2 賽程', 'text' => '!cs'],
+            'mlb' => ['label' => '⚾ MLB 賽程', 'text' => '!mlb'],
+        ];
+
+        $currentKey = $isMultiGame ? 'all' : (string) $singleGame;
+        foreach ($gameButtons as $key => $btn) {
+            if ($key !== $currentKey) {
+                $items[] = $btn;
+            }
+        }
+
+        if ($singleGame !== 'mlb' && $command['tiers'] === ['s']) {
+            $items[] = ['label' => '🏆 S+A 級賽事', 'text' => $baseCmd.' tier=s,a'];
+        }
+
+        $items[] = ['label' => '🎯 進行中注單', 'text' => '!bet'];
+
+        return $items;
     }
 
     private function multiGameFilteredUrl(CarbonImmutable $date, array $tiers): string

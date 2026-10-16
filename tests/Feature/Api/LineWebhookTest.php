@@ -92,11 +92,10 @@ class LineWebhookTest extends TestCase
             return $request->hasHeader('Authorization', 'Bearer test-token')
                 && $request['replyToken'] === 'reply-token'
                 && count($messages) === 1
-                && $messages[0] === [
-                    'type' => 'image',
-                    'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1440',
-                    'previewImageUrl' => 'https://cdn.example.com/line-schedules/test/700',
-                ];
+                && ($messages[0]['type'] ?? null) === 'image'
+                && ($messages[0]['originalContentUrl'] ?? null) === 'https://cdn.example.com/line-schedules/test/1440'
+                && ($messages[0]['previewImageUrl'] ?? null) === 'https://cdn.example.com/line-schedules/test/700'
+                && ! empty($messages[0]['quickReply']['items']);
         });
     }
 
@@ -293,11 +292,10 @@ class LineWebhookTest extends TestCase
 
             return $request['to'] === 'U123'
                 && count($request['messages']) === 1
-                && $request['messages'][0] === [
-                    'type' => 'image',
-                    'originalContentUrl' => 'https://cdn.example.com/line-schedules/test/1440',
-                    'previewImageUrl' => 'https://cdn.example.com/line-schedules/test/700',
-                ];
+                && ($request['messages'][0]['type'] ?? null) === 'image'
+                && ($request['messages'][0]['originalContentUrl'] ?? null) === 'https://cdn.example.com/line-schedules/test/1440'
+                && ($request['messages'][0]['previewImageUrl'] ?? null) === 'https://cdn.example.com/line-schedules/test/700'
+                && ! empty($request['messages'][0]['quickReply']['items']);
         });
     }
 
@@ -1208,5 +1206,30 @@ class LineWebhookTest extends TestCase
         $this->assertStringContainsString('LoL｜08/12 ~ 08/13｜S Tier', $reply->text);
         $this->assertStringContainsString('第 1 場｜08/12 07:00｜BO3', $reply->text);
         $this->assertStringContainsString('第 2 場｜08/13 07:00｜BO3', $reply->text);
+    }
+
+    public function test_schedule_command_attaches_quick_replies_and_supports_text_only_mode(): void
+    {
+        Http::fake([
+            'https://bo3.gg/lol/matches/current*' => Http::response($this->bo3Html(), 200),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []], 200),
+        ]);
+
+        $imageReply = app(LineScheduleBot::class)->reply('!lol');
+        $this->assertNotNull($imageReply);
+        $this->assertTrue($imageReply->prefersImage());
+        $this->assertNotEmpty($imageReply->quickReplies);
+        $quickTexts = array_column($imageReply->quickReplies, 'text');
+        $this->assertContains('!lol', $quickTexts);
+        $this->assertContains('!lol 明天', $quickTexts);
+        $this->assertContains('!match', $quickTexts);
+        $this->assertContains('!bet', $quickTexts);
+
+        $textReply = app(LineScheduleBot::class)->reply('!lol 明天 text');
+        $this->assertNotNull($textReply);
+        $this->assertFalse($textReply->prefersImage());
+        $this->assertNull($textReply->imageData);
+        $this->assertStringContainsString('LoL｜08/12｜S Tier', $textReply->text);
+        $this->assertNotEmpty($textReply->quickReplies);
     }
 }
