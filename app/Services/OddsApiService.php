@@ -18,7 +18,7 @@ class OddsApiService
     {
         $apiKey = (string) config('services.odds.api_key');
 
-        if ($matches === [] || $apiKey === '' || ! array_filter($matches, fn (array $match): bool => ($match['game'] ?? '') !== 'mlb')) {
+        if ($matches === [] || $apiKey === '' || ! array_filter($matches, fn (array $match): bool => ! in_array($match['game'] ?? '', ['mlb', 'nba'], true))) {
             return $this->withoutOdds($matches);
         }
 

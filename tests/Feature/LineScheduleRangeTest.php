@@ -20,6 +20,7 @@ class LineScheduleRangeTest extends TestCase
             'services.bo3.timezone' => 'Asia/Taipei',
             'services.odds.api_key' => null,
             'mlb.team_ids' => [],
+            'nba.team_ids' => [],
         ]);
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-13 12:00:00', 'Asia/Taipei'));
         Http::preventStrayRequests();

@@ -15,6 +15,7 @@ class LineScheduleBot
         'valorant' => 'VALORANT',
         'lol' => 'LoL',
         'mlb' => 'MLB',
+        'nba' => 'NBA',
     ];
 
     public function __construct(
@@ -24,6 +25,7 @@ class LineScheduleBot
         private readonly Bo3HeadToHeadService $headToHead,
         private readonly LolLiveScoreService $liveScores,
         private readonly MlbScheduleService $mlb,
+        private readonly NbaScheduleService $nba,
         private readonly ?StakeBetService $stake = null,
     ) {}
 
@@ -81,8 +83,9 @@ class LineScheduleBot
 
         $allMatches = [];
         $sourceErrors = [];
-        $esports = array_values(array_diff($command['games'], ['mlb']));
+        $esports = array_values(array_diff($command['games'], ['mlb', 'nba']));
         $hasMlb = in_array('mlb', $command['games'], true);
+        $hasNba = in_array('nba', $command['games'], true);
         if ($esports !== []) {
             try {
                 $schedule = $this->schedules->forRange(
@@ -111,6 +114,14 @@ class LineScheduleBot
             } catch (Throwable $exception) {
                 report($exception);
                 $sourceErrors[] = 'MLB';
+            }
+        }
+        if ($hasNba) {
+            try {
+                $allMatches = array_merge($allMatches, $this->nba->forRange($command['start_date'], $command['end_date']));
+            } catch (Throwable $exception) {
+                report($exception);
+                $sourceErrors[] = 'NBA';
             }
         }
         foreach ($allMatches as $index => $match) {
@@ -147,7 +158,7 @@ class LineScheduleBot
             $allMatches = array_values(array_filter(
                 $allMatches,
                 fn (array $match): bool => ! $match['start_at']->isSameDay($now)
-                    || (($match['game'] ?? '') === 'mlb'
+                    || (in_array($match['game'] ?? '', ['mlb', 'nba'], true)
                         ? ! ($match['is_finished'] || $match['is_cancelled'])
                         : (($match['is_live'] ?? false) || $match['start_at']->greaterThan($now))),
             ));
@@ -185,21 +196,26 @@ class LineScheduleBot
             ));
             $label = "綜合賽程（{$gameNames}）";
             $imageTitle = "綜合賽程｜{$dateLabel}{$tierSuffix}";
-            $filteredUrl = $this->multiGameFilteredUrl($urlDate, $command['tiers']);
+            $filteredUrl = $esports === []
+                ? ($hasMlb ? $this->mlb->filteredUrl($urlDate) : $this->nba->filteredUrl($urlDate))
+                : $this->multiGameFilteredUrl($urlDate, $command['tiers']);
         } else {
             $singleGame = $command['games'][0];
             $label = self::GAME_LABELS[$singleGame];
             $imageTitle = "{$label}｜{$dateLabel}{$tierSuffix}";
-            $filteredUrl = $singleGame === 'mlb' ? $this->mlb->filteredUrl($urlDate) : $this->schedules->filteredUrl(
-                $singleGame,
-                $urlDate,
-                $command['tiers'],
-            );
+            $filteredUrl = match ($singleGame) {
+                'mlb' => $this->mlb->filteredUrl($urlDate),
+                'nba' => $this->nba->filteredUrl($urlDate),
+                default => $this->schedules->filteredUrl($singleGame, $urlDate, $command['tiers']),
+            };
         }
 
         $scheduleLinks = "完整賽程｜{$filteredUrl}";
-        if ($hasMlb && $isMultiGame) {
+        if ($hasMlb && $isMultiGame && $filteredUrl !== $this->mlb->filteredUrl($urlDate)) {
             $scheduleLinks .= "\nMLB 賽程｜".$this->mlb->filteredUrl($urlDate);
+        }
+        if ($hasNba && $isMultiGame && $filteredUrl !== $this->nba->filteredUrl($urlDate)) {
+            $scheduleLinks .= "\nNBA 賽程｜".$this->nba->filteredUrl($urlDate);
         }
         $warning = $sourceErrors === [] ? '' : implode('、', $sourceErrors).' 暫時無法取得';
 
@@ -221,6 +237,7 @@ class LineScheduleBot
         $visibleMatches = $this->schedules->enrichLiveDetailsAndMissingFormats($visibleMatches);
         $visibleMatches = $this->headToHead->enrich($visibleMatches);
         $visibleMatches = $this->mlb->enrichRecentForm($visibleMatches);
+        $visibleMatches = $this->nba->enrichRecentForm($visibleMatches);
         $visibleMatches = $this->odds->enrich(
             $visibleMatches,
             $command['start_date'],
@@ -258,7 +275,7 @@ class LineScheduleBot
                 $match['tournament'],
             );
 
-            if (($match['game'] ?? null) === 'mlb') {
+            if (in_array($match['game'] ?? null, ['mlb', 'nba'], true)) {
                 $lines[] = '客隊 vs 主隊｜'.($match['status_label'] ?? '');
             }
             $lines[] = '各隊近 5 場（新→舊）｜比分為本隊：對手';
@@ -386,7 +403,7 @@ class LineScheduleBot
      */
     private function parseCommand(string $message): array|string|null
     {
-        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs2|cs|mlb)(?:\s+(.*))?$/iu', $message, $matches)) {
+        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs2|cs|mlb|nba)(?:\s+(.*))?$/iu', $message, $matches)) {
             return null;
         }
 
@@ -426,9 +443,9 @@ class LineScheduleBot
         }
 
         if (in_array($commandKey, ['賽程', 'schedule', 'match', 'matches'], true)) {
-            $games = $options['games'] ?? ['lol', 'valorant', 'cs', 'mlb'];
+            $games = $options['games'] ?? ['lol', 'valorant', 'cs', 'mlb', 'nba'];
         } else {
-            $defaultGame = ['lol' => 'lol', 'val' => 'valorant', 'cs' => 'cs', 'cs2' => 'cs', 'mlb' => 'mlb'][$commandKey];
+            $defaultGame = ['lol' => 'lol', 'val' => 'valorant', 'cs' => 'cs', 'cs2' => 'cs', 'mlb' => 'mlb', 'nba' => 'nba'][$commandKey];
             $games = $options['games'] ?? [$defaultGame];
         }
 
@@ -612,6 +629,7 @@ class LineScheduleBot
                     'cs' => 'cs',
                     'cs2' => 'cs',
                     'mlb' => 'mlb',
+                    'nba' => 'nba',
                 ];
 
                 $games = [];
@@ -683,6 +701,7 @@ class LineScheduleBot
             'valorant' => '!val',
             'cs' => '!cs',
             'mlb' => '!mlb',
+            'nba' => '!nba',
             default => '!match',
         };
 
@@ -703,6 +722,7 @@ class LineScheduleBot
             'valorant' => ['label' => '🔫 VAL 賽程', 'text' => '!val'],
             'cs' => ['label' => '💣 CS2 賽程', 'text' => '!cs'],
             'mlb' => ['label' => '⚾ MLB 賽程', 'text' => '!mlb'],
+            'nba' => ['label' => '🏀 NBA 賽程', 'text' => '!nba'],
         ];
 
         $currentKey = $isMultiGame ? 'all' : (string) $singleGame;
@@ -712,7 +732,7 @@ class LineScheduleBot
             }
         }
 
-        if ($singleGame !== 'mlb' && $command['tiers'] === ['s']) {
+        if (array_diff($command['games'], ['mlb', 'nba']) !== [] && $command['tiers'] === ['s']) {
             $items[] = ['label' => '🏆 S+A 級賽事', 'text' => $baseCmd.' tier=s,a'];
         }
 
@@ -743,6 +763,6 @@ class LineScheduleBot
 
     private function help(): string
     {
-        return "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb｜tier=s,a｜tier=all｜limit=5｜team=G2";
+        return "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }

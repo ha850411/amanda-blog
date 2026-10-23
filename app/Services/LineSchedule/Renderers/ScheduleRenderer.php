@@ -300,8 +300,9 @@ class ScheduleRenderer extends AbstractImageRenderer
         $lead2 = ($series1 !== null && $series2 !== null && (int) $series2 > (int) $series1)
             || ($series1 === null && $score1 !== null && $score2 !== null && (int) $score2 > (int) $score1);
 
-        $abbr1 = $game === 'mlb' ? '客隊' : TeamAbbreviation::get((string) $match['team1']);
-        $abbr2 = $game === 'mlb' ? '主隊' : TeamAbbreviation::get((string) $match['team2']);
+        $hasHomeAway = in_array($game, ['mlb', 'nba'], true);
+        $abbr1 = $hasHomeAway ? '客隊' : TeamAbbreviation::get((string) $match['team1']);
+        $abbr2 = $hasHomeAway ? '主隊' : TeamAbbreviation::get((string) $match['team2']);
 
         $this->drawTeamScoreRow(
             $image,
@@ -311,7 +312,7 @@ class ScheduleRenderer extends AbstractImageRenderer
             $w,
             (string) $match['team1'],
             $abbr1,
-            $game === 'mlb' ? '客隊 ' : '',
+            $hasHomeAway ? '客隊 ' : '',
             $price1,
             $hasAnyOdds,
             $isFavored1,
@@ -329,7 +330,7 @@ class ScheduleRenderer extends AbstractImageRenderer
             $w,
             (string) $match['team2'],
             $abbr2,
-            $game === 'mlb' ? '主隊 ' : '',
+            $hasHomeAway ? '主隊 ' : '',
             $price2,
             $hasAnyOdds,
             $isFavored2,
@@ -354,7 +355,8 @@ class ScheduleRenderer extends AbstractImageRenderer
         $this->scheduleRawText($draw, $x + 27, $h2hY + 19, 'H2H', 11, $h2hBadgeText, 800, Imagick::ALIGN_CENTER);
 
         if (! $hasH2h) {
-            $this->scheduleRawText($draw, $x + 56, $h2hY + 19, '雙方近兩年無正式交手紀錄', 13, '#64748b', 500);
+            $emptyLabel = $hasHomeAway ? '暫無交手資料' : '雙方近兩年無正式交手紀錄';
+            $this->scheduleRawText($draw, $x + 56, $h2hY + 19, $emptyLabel, 13, '#64748b', 500);
         } else {
             $w1 = (int) ($h2h['team1_wins'] ?? 0);
             $w2 = (int) ($h2h['team2_wins'] ?? 0);
@@ -537,6 +539,7 @@ class ScheduleRenderer extends AbstractImageRenderer
                 if ($i === count($matches)) {
                     $this->scheduleRawText($draw, $x + 88, $rowY + 16, '尚無更多近期對局紀錄', 12, '#475569', 500);
                 }
+
                 continue;
             }
 

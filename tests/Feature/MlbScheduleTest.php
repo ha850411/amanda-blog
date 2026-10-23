@@ -20,6 +20,7 @@ class MlbScheduleTest extends TestCase
             'services.bo3.timezone' => 'Asia/Taipei',
             'services.odds.api_key' => null,
             'mlb.api_url' => 'https://statsapi.mlb.com/api/v1',
+            'nba.team_ids' => [],
         ]);
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-21 12:00:00', 'Asia/Taipei'));
         Http::preventStrayRequests();

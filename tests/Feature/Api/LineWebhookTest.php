@@ -32,6 +32,7 @@ class LineWebhookTest extends TestCase
             'services.odds.base_url' => 'https://api.odds-api.io/v3',
             'services.odds.bookmakers' => 'Pinnacle,Bet365',
             'mlb.team_ids' => [], // MLB integration has its own fixtures.
+            'nba.team_ids' => [], // NBA integration has its own fixtures.
         ]);
 
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-11 09:00:00', 'Asia/Taipei'));
@@ -399,7 +400,7 @@ class LineWebhookTest extends TestCase
 
             return $request['messages'][0] === [
                 'type' => 'text',
-                'text' => "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb｜tier=s,a｜tier=all｜limit=5｜team=G2",
+                'text' => "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2",
             ];
         });
     }
@@ -826,7 +827,7 @@ class LineWebhookTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!match 今天');
 
         $this->assertNotNull($reply);
-        $this->assertStringContainsString('綜合賽程（LoL/VALORANT/CS2/MLB）｜08/11｜S Tier', $reply->text);
+        $this->assertStringContainsString('綜合賽程（LoL/VALORANT/CS2/MLB/NBA）｜08/11｜S Tier', $reply->text);
         $this->assertSame('綜合賽程｜08/11｜S Tier', $reply->imageData['title']);
     }
 

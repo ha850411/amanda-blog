@@ -40,6 +40,13 @@ class ImageTheme
 
     /** @var array<string, array{accent: string, badge_bg: string, badge_text: string, card_border: string, label: string}> */
     public const GAME_THEMES = [
+        'nba' => [
+            'accent' => '#f97316',
+            'badge_bg' => '#431407',
+            'badge_text' => '#fed7aa',
+            'card_border' => '#4a2715',
+            'label' => 'NBA',
+        ],
         'mlb' => [
             'accent' => '#0ea5e9',
             'badge_bg' => '#082f49',
