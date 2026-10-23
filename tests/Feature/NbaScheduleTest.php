@@ -19,6 +19,9 @@ class NbaScheduleTest extends TestCase
         config([
             'services.bo3.timezone' => 'Asia/Taipei',
             'services.odds.api_key' => null,
+            'services.odds.base_url' => 'https://api.odds-api.io/v3',
+            'services.odds.bookmakers' => 'Stake,Bet365',
+            'services.odds.bookmaker_priority' => 'Stake,Bet365',
             'nba.api_url' => 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba',
             'mlb.team_ids' => [],
         ]);
@@ -128,7 +131,6 @@ class NbaScheduleTest extends TestCase
             $this->game(2, '2026-11-16T03:00:00Z', 20, 11),
             $this->game(3, '2026-11-17T02:00:00Z', 9, 13),
         ]);
-        config(['services.odds.api_key' => 'test-key']);
         foreach (['!nba 明天', '!match 明天 game=nba', '!NBA 1116~1117 team=勇士 limit=1'] as $command) {
             $reply = app(LineScheduleBot::class)->reply($command);
             $this->assertNotNull($reply->imageData);
@@ -173,6 +175,7 @@ class NbaScheduleTest extends TestCase
     {
         $this->fakeSchedule([$this->game(1, '2026-11-16T01:00:00Z', 9, 13)]);
         config(['services.odds.api_key' => 'test-key']);
+        Http::fake(['https://api.odds-api.io/v3/events*' => Http::response([])]);
         $this->mock(Bo3ScheduleService::class, function ($mock): void {
             $mock->shouldNotReceive('forRange');
             $mock->shouldReceive('enrichLiveDetailsAndMissingFormats')->once()->andReturnUsing(fn (array $matches): array => $matches);
@@ -183,7 +186,54 @@ class NbaScheduleTest extends TestCase
         $this->assertStringContainsString('NBA 賽程｜https://www.espn.com/nba/scoreboard/_/date/20261115', $reply->text);
         $this->assertStringNotContainsString('Tier', $reply->text);
         $this->assertNotContains('!match tier=s,a', array_column($reply->quickReplies, 'text'));
-        Http::assertNotSent(fn (Request $r): bool => ! str_starts_with($r->url(), config('nba.api_url')));
+        Http::assertSent(fn (Request $r): bool => ($r['sport'] ?? null) === 'basketball' && $r['league'] === 'usa-nba');
+        Http::assertNotSent(fn (Request $r): bool => ($r['sport'] ?? null) === 'esports');
+    }
+
+    public function test_nba_stake_moneyline_is_included_in_image_and_text_after_team_and_limit_filters(): void
+    {
+        $this->fakeSchedule([
+            $this->game(1, '2026-11-16T01:00:00Z', 9, 13),
+            $this->game(2, '2026-11-16T02:00:00Z', 20, 11),
+        ]);
+        config(['services.odds.api_key' => 'test-key']);
+        Http::fake([
+            'https://api.odds-api.io/v3/events*' => Http::response([
+                ['id' => 101, 'home' => 'Los Angeles Lakers', 'away' => 'Golden State Warriors', 'date' => '2026-11-16T01:00:00Z',
+                    'sport' => ['slug' => 'basketball'], 'league' => ['slug' => 'usa-nba']],
+                ['id' => 102, 'home' => 'Indiana Pacers', 'away' => 'Philadelphia 76ers', 'date' => '2026-11-16T02:00:00Z',
+                    'sport' => ['slug' => 'basketball'], 'league' => ['slug' => 'usa-nba']],
+            ]),
+            'https://api.odds-api.io/v3/odds/multi*' => Http::response([[
+                'id' => 101, 'bookmakers' => [
+                    'Stake' => [['name' => 'ML', 'odds' => [['home' => '1.70', 'away' => '2.11']]]],
+                    'Bet365' => [['name' => 'ML', 'odds' => [['home' => '1.80', 'away' => '2.20']]]],
+                ],
+            ]]),
+        ]);
+        foreach (['!nba 明天 team=勇士 limit=1', '!match 明天 game=mlb/nba team=勇士 limit=1'] as $command) {
+            $reply = app(LineScheduleBot::class)->reply($command);
+            $this->assertCount(1, $reply->imageData['matches']);
+            $this->assertSame(['price' => 2.11, 'bookmaker' => 'Stake'], $reply->imageData['matches'][0]['odds']['team1']);
+            $this->assertSame(['price' => 1.70, 'bookmaker' => 'Stake'], $reply->imageData['matches'][0]['odds']['team2']);
+            $this->assertStringContainsString('金州勇士　2.11（Stake）', $reply->text);
+            $this->assertStringContainsString('洛杉磯湖人　1.70（Stake）', $reply->text);
+        }
+        $text = app(LineScheduleBot::class)->reply('!nba 明天 team=勇士 text');
+        $this->assertNull($text->imageData);
+        $this->assertStringContainsString('金州勇士　2.11（Stake）', $text->text);
+        Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), '/odds/multi') && $r['eventIds'] !== '101');
+    }
+
+    public function test_nba_schedule_remains_available_when_the_odds_provider_fails(): void
+    {
+        $this->fakeSchedule([$this->game(1, '2026-11-16T01:00:00Z', 9, 13)]);
+        config(['services.odds.api_key' => 'test-key']);
+        Http::fake(['https://api.odds-api.io/v3/events*' => Http::response([], 503)]);
+        $reply = app(LineScheduleBot::class)->reply('!nba 明天');
+        $this->assertCount(1, $reply->imageData['matches']);
+        $this->assertNull($reply->imageData['matches'][0]['odds']);
+        $this->assertStringContainsString('獨贏賠率｜暫無盤口', $reply->text);
     }
 
     public function test_historical_final_scores_are_shown_in_away_home_order(): void
@@ -310,6 +360,8 @@ class NbaScheduleTest extends TestCase
 
     private function game(int $id, string $date, int $away, int $home, string $status = 'STATUS_SCHEDULED', int $awayScore = 0, int $homeScore = 0): array
     {
+        $names = [9 => 'Golden State Warriors', 13 => 'Los Angeles Lakers', 20 => 'Philadelphia 76ers', 11 => 'Indiana Pacers'];
+
         return [
             'id' => (string) $id, 'date' => $date, 'name' => $away === 9 ? 'Golden State Warriors at Los Angeles Lakers' : 'Away at Home',
             'status' => ['type' => [
@@ -319,8 +371,8 @@ class NbaScheduleTest extends TestCase
             'competitions' => [[
                 'timeValid' => true, 'venue' => ['fullName' => 'Test Arena'],
                 'competitors' => [
-                    ['homeAway' => 'home', 'team' => ['id' => (string) $home, 'displayName' => 'Home Team'], 'score' => (string) $homeScore],
-                    ['homeAway' => 'away', 'team' => ['id' => (string) $away, 'displayName' => 'Away Team'], 'score' => (string) $awayScore],
+                    ['homeAway' => 'home', 'team' => ['id' => (string) $home, 'displayName' => $names[$home] ?? 'Home Team'], 'score' => (string) $homeScore],
+                    ['homeAway' => 'away', 'team' => ['id' => (string) $away, 'displayName' => $names[$away] ?? 'Away Team'], 'score' => (string) $awayScore],
                 ],
             ]],
         ];

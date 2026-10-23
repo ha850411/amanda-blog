@@ -208,6 +208,9 @@ class NbaScheduleService
             'name' => $team1.' vs '.$team2.' '.($event['name'] ?? '').' '.($event['shortName'] ?? ''),
             'team1' => $team1,
             'team2' => $team2,
+            // Keep provider names for odds matching while displaying Chinese labels.
+            'team1_name' => $away['team']['displayName'] ?? $away['team']['name'] ?? '',
+            'team2_name' => $home['team']['displayName'] ?? $home['team']['name'] ?? '',
             'team1_id' => (int) $away['team']['id'],
             'team2_id' => (int) $home['team']['id'],
             'tournament' => 'NBA・'.($competition['venue']['fullName'] ?? '美國職籃'),

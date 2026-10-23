@@ -340,21 +340,26 @@ class ScheduleRenderer extends AbstractImageRenderer
             $score2,
         );
 
-        // Line 4: H2H footer (Aligned at y + 126, height 29 -> ends at card y + 164)
+        // Line 4: NBA bookmaker or H2H footer.
         $h2hY = $y + 126;
         $this->scheduleBox($draw, $x, $h2hY, $w, 29, '#09101d', '#17253b', 6);
 
         $h2h = $match['h2h'] ?? null;
         $hasH2h = is_array($h2h) && ! empty($h2h['series']);
+        $bookmaker = (string) ($match['odds']['team1']['bookmaker'] ?? '');
+        $hasSummary = $game === 'nba' ? $bookmaker !== '' : $hasH2h;
 
         // Geometric H2H Badge (replaces broken ⚔️ emoji glyph)
-        $h2hBadgeBg = $hasH2h ? '#1e1b4b' : '#111a2b';
-        $h2hBadgeBorder = $hasH2h ? '#4f46e5' : '#1e293b';
-        $h2hBadgeText = $hasH2h ? '#a5b4fc' : '#64748b';
+        $h2hBadgeBg = $hasSummary ? '#1e1b4b' : '#111a2b';
+        $h2hBadgeBorder = $hasSummary ? '#4f46e5' : '#1e293b';
+        $h2hBadgeText = $hasSummary ? '#a5b4fc' : '#64748b';
         $this->scheduleBox($draw, $x + 6, $h2hY + 4, 42, 21, $h2hBadgeBg, $h2hBadgeBorder, 4);
-        $this->scheduleRawText($draw, $x + 27, $h2hY + 19, 'H2H', 11, $h2hBadgeText, 800, Imagick::ALIGN_CENTER);
+        $this->scheduleRawText($draw, $x + 27, $h2hY + 19, $game === 'nba' ? 'ML' : 'H2H', 11, $h2hBadgeText, 800, Imagick::ALIGN_CENTER);
 
-        if (! $hasH2h) {
+        if ($game === 'nba') {
+            $label = $bookmaker === '' ? '獨贏賠率 · 暫無盤口' : '獨贏來源 · '.$bookmaker;
+            $this->scheduleText($image, $draw, $x + 56, $h2hY + 19, $label, 13, $hasSummary ? '#e2e8f0' : '#64748b', 500, $w - 64);
+        } elseif (! $hasH2h) {
             $emptyLabel = $hasHomeAway ? '暫無交手資料' : '雙方近兩年無正式交手紀錄';
             $this->scheduleRawText($draw, $x + 56, $h2hY + 19, $emptyLabel, 13, '#64748b', 500);
         } else {

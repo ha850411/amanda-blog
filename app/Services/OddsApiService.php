@@ -4,6 +4,8 @@ namespace App\Services;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -17,14 +19,33 @@ class OddsApiService
     public function enrich(array $matches, CarbonImmutable $date, ?CarbonImmutable $endDate = null): array
     {
         $apiKey = (string) config('services.odds.api_key');
+        $matches = $this->withoutOdds($matches);
 
-        if ($matches === [] || $apiKey === '' || ! array_filter($matches, fn (array $match): bool => ! in_array($match['game'] ?? '', ['mlb', 'nba'], true))) {
-            return $this->withoutOdds($matches);
+        if ($matches === [] || $apiKey === '') {
+            return $matches;
+        }
+
+        $groups = [];
+        foreach ($matches as $index => $match) {
+            if (($match['game'] ?? '') === 'mlb') {
+                continue;
+            }
+            $isNba = ($match['game'] ?? '') === 'nba';
+            if ($isNba && (($match['is_finished'] ?? false) || ($match['is_cancelled'] ?? false) || ($match['time_tbd'] ?? false))) {
+                continue;
+            }
+            $groups[$isNba ? 'basketball' : 'esports'][$index] = $match;
+        }
+        if ($groups === []) {
+            return $matches;
         }
 
         try {
-            $events = $this->eventsForDate($date, $endDate ?? $date, $apiKey);
-            $matchedEvents = $this->matchEvents($matches, $events);
+            $events = $this->eventsForDate(array_keys($groups), $date, $endDate ?? $date, $apiKey);
+            $matchedEvents = [];
+            foreach ($groups as $sport => $group) {
+                $matchedEvents += $this->matchEvents($group, $events[$sport] ?? []);
+            }
             $odds = $this->fetchOdds($matchedEvents, $apiKey);
 
             foreach ($matches as $index => $match) {
@@ -45,34 +66,43 @@ class OddsApiService
     }
 
     /**
-     * @return array<int, array<string, mixed>>
+     * @return array<string, array<int, array<string, mixed>>>
      */
-    private function eventsForDate(CarbonImmutable $startDate, CarbonImmutable $endDate, string $apiKey): array
+    private function eventsForDate(array $sports, CarbonImmutable $startDate, CarbonImmutable $endDate, string $apiKey): array
     {
-        $response = Http::acceptJson()
-            ->withUserAgent('AmandaBlogLineBot/1.0')
-            ->withHeaders([
-                'Cache-Control' => 'no-cache, no-store',
-                'Pragma' => 'no-cache',
-            ])
-            ->timeout((int) config('services.odds.timeout_seconds', 10))
-            ->get(rtrim((string) config('services.odds.base_url'), '/').'/events', [
-                'apiKey' => $apiKey,
-                'sport' => 'esports',
-                'status' => 'pending,live',
-                'from' => $startDate->startOfDay()->utc()->toIso8601String(),
-                'to' => $endDate->endOfDay()->utc()->toIso8601String(),
-            ]);
+        $responses = Http::pool(function (Pool $pool) use ($sports, $startDate, $endDate, $apiKey): void {
+            foreach ($sports as $sport) {
+                $query = [
+                    'apiKey' => $apiKey,
+                    'sport' => $sport,
+                    'status' => 'pending,live',
+                    'from' => $startDate->startOfDay()->utc()->toIso8601String(),
+                    'to' => $endDate->endOfDay()->utc()->toIso8601String(),
+                ];
+                if ($sport === 'basketball') {
+                    $query['league'] = 'usa-nba';
+                    $query['limit'] = 1000; // Covers every NBA game in the seven-day command window.
+                }
+                $pool->as($sport)->acceptJson()->withUserAgent('AmandaBlogLineBot/1.0')
+                    ->withHeaders(['Cache-Control' => 'no-cache, no-store', 'Pragma' => 'no-cache'])
+                    ->connectTimeout(3)->timeout((int) config('services.odds.timeout_seconds', 10))
+                    ->get(rtrim((string) config('services.odds.base_url'), '/').'/events', $query);
+            }
+        }, concurrency: 5);
 
-        if (! $response->successful()) {
-            Log::warning('Odds API events request failed.', ['status' => $response->status()]);
+        $events = [];
+        foreach ($sports as $sport) {
+            $response = $responses[$sport] ?? null;
+            if (! $response instanceof Response || ! $response->successful()) {
+                Log::warning('Odds API events request failed.', ['sport' => $sport, 'status' => $response instanceof Response ? $response->status() : null]);
 
-            return [];
+                continue;
+            }
+            $payload = $response->json();
+            $events[$sport] = is_array($payload) ? array_values(array_filter($payload, 'is_array')) : [];
         }
 
-        $events = $response->json();
-
-        return is_array($events) ? array_values(array_filter($events, 'is_array')) : [];
+        return $events;
     }
 
     /**
@@ -87,24 +117,47 @@ class OddsApiService
         foreach ($matches as $index => $match) {
             $best = null;
             $bestScore = 0.0;
+            $isNba = ($match['game'] ?? '') === 'nba';
 
             foreach ($events as $event) {
-                if (! isset($event['id'], $event['home'], $event['away'], $event['date'])) {
+                if (! isset($event['id']) || ! is_string($event['home'] ?? null)
+                    || ! is_string($event['away'] ?? null) || ! is_string($event['date'] ?? null) || $event['date'] === '') {
                     continue;
                 }
-
-                $eventTime = CarbonImmutable::parse($event['date']);
+                try {
+                    $eventTime = CarbonImmutable::parse($event['date']);
+                } catch (Throwable) {
+                    continue;
+                }
 
                 if (abs($match['start_at']->utc()->diffInMinutes($eventTime, false)) > 360) {
                     continue;
                 }
 
-                $direct = ($this->similarity($match['team1'], $event['home']) + $this->similarity($match['team2'], $event['away'])) / 2;
-                $reverse = ($this->similarity($match['team1'], $event['away']) + $this->similarity($match['team2'], $event['home'])) / 2;
+                if ($isNba) {
+                    if (($event['sport']['slug'] ?? '') !== 'basketball' || ($event['league']['slug'] ?? '') !== 'usa-nba') {
+                        continue;
+                    }
+                    $team1 = $this->normalizeNbaName((string) ($match['team1_name'] ?? ''));
+                    $team2 = $this->normalizeNbaName((string) ($match['team2_name'] ?? ''));
+                    $home = $this->normalizeNbaName($event['home']);
+                    $away = $this->normalizeNbaName($event['away']);
+                    if ($team1 === '' || $team2 === '' || $team1 === $team2) {
+                        continue;
+                    }
+                    // Exact team pairs avoid confusing Lakers with Clippers,
+                    // NBA with esports, or a known team with another opponent.
+                    $direct = (int) ($team1 === $home && $team2 === $away);
+                    $reverse = (int) ($team1 === $away && $team2 === $home);
+                } else {
+                    $direct = ($this->similarity($match['team1'], $event['home']) + $this->similarity($match['team2'], $event['away'])) / 2;
+                    $reverse = ($this->similarity($match['team1'], $event['away']) + $this->similarity($match['team2'], $event['home'])) / 2;
+                }
                 $score = max($direct, $reverse);
 
                 if ($score >= 0.72 && $score > $bestScore) {
                     $best = $event;
+                    $best['_team1_is_home'] = $direct >= $reverse;
                     $bestScore = $score;
                 }
             }
@@ -139,25 +192,34 @@ class OddsApiService
             return [];
         }
 
-        $response = Http::acceptJson()
-            ->withUserAgent('AmandaBlogLineBot/1.0')
-            ->timeout((int) config('services.odds.timeout_seconds', 10))
-            ->get(rtrim((string) config('services.odds.base_url'), '/').'/odds/multi', [
-                'apiKey' => $apiKey,
-                'eventIds' => implode(',', array_slice($ids, 0, 10)),
-                'bookmakers' => $bookmakers,
-            ]);
+        $responses = Http::pool(function (Pool $pool) use ($ids, $apiKey, $bookmakers): void {
+            foreach (array_chunk($ids, 10) as $index => $batch) {
+                $pool->as((string) $index)->acceptJson()->withUserAgent('AmandaBlogLineBot/1.0')
+                    ->withHeaders(['Cache-Control' => 'no-cache, no-store', 'Pragma' => 'no-cache'])
+                    ->connectTimeout(3)->timeout((int) config('services.odds.timeout_seconds', 10))
+                    ->get(rtrim((string) config('services.odds.base_url'), '/').'/odds/multi', [
+                        'apiKey' => $apiKey,
+                        'eventIds' => implode(',', $batch),
+                        'bookmakers' => $bookmakers,
+                    ]);
+            }
+        }, concurrency: 5);
 
-        if (! $response->successful()) {
-            Log::warning('Odds API odds request failed.', ['status' => $response->status()]);
+        $odds = [];
+        foreach ($responses as $response) {
+            if (! $response instanceof Response || ! $response->successful()) {
+                Log::warning('Odds API odds request failed.', ['status' => $response instanceof Response ? $response->status() : null]);
 
-            return [];
+                continue;
+            }
+            foreach (is_array($response->json()) ? $response->json() : [] as $item) {
+                if (is_array($item) && isset($item['id'])) {
+                    $odds[(string) $item['id']] = $item;
+                }
+            }
         }
 
-        return collect($response->json())
-            ->filter(fn (mixed $item): bool => is_array($item) && isset($item['id']))
-            ->keyBy(fn (array $item): string => (string) $item['id'])
-            ->all();
+        return $odds;
     }
 
     private function selectedBookmakers(string $apiKey): string
@@ -202,7 +264,7 @@ class OddsApiService
 
                 $line = $market['odds'][0] ?? null;
 
-                if (! is_array($line)) {
+                if (! is_array($line) || (($match['game'] ?? '') === 'nba' && isset($line['draw']))) {
                     continue;
                 }
 
@@ -237,7 +299,7 @@ class OddsApiService
             return null;
         }
 
-        $team1IsHome = $this->similarity($match['team1'], $event['home']) >= $this->similarity($match['team1'], $event['away']);
+        $team1IsHome = $event['_team1_is_home'];
         $home = ['price' => $selected['home'], 'bookmaker' => $selected['bookmaker']];
         $away = ['price' => $selected['away'], 'bookmaker' => $selected['bookmaker']];
 
@@ -267,6 +329,17 @@ class OddsApiService
     private function normalizeName(string $name): string
     {
         return preg_replace('/[^a-z0-9]+/u', '', mb_strtolower($name)) ?? '';
+    }
+
+    private function normalizeNbaName(string $name): string
+    {
+        $name = $this->normalizeName($name);
+
+        return match ($name) {
+            'losangeleslakers' => 'lalakers',
+            'losangelesclippers' => 'laclippers',
+            default => $name,
+        };
     }
 
     /**
