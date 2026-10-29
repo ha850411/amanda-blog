@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -146,10 +146,15 @@ class MlbScheduleService
         // Scores and team names are already in the schedule response; avoid
         // full linescores, player rosters and an API request for every game.
         $query['fields'] = 'dates,games,gamePk,gameDate,gameNumber,status,abstractGameState,detailedState,startTimeTBD,teams,away,home,team,id,name,score,isWinner,venue,resumeDate';
-        $payload = Http::acceptJson()->withUserAgent('AmandaBlogLineBot/1.0')
-            ->timeout((int) config('mlb.timeout_seconds', 10))
-            ->get(rtrim((string) config('mlb.api_url'), '/').'/schedule', $query)
-            ->throw()->json();
+        $response = ScheduleHttp::pool(function (Pool $pool) use ($query): void {
+            $pool->as('schedule')->acceptJson()->withUserAgent('AmandaBlogLineBot/1.0')
+                ->connectTimeout(3)->timeout((int) config('mlb.timeout_seconds', 10))
+                ->get(rtrim((string) config('mlb.api_url'), '/').'/schedule', $query);
+        })['schedule'];
+        if ($response instanceof Throwable) {
+            throw $response;
+        }
+        $payload = $response->throw()->json();
         if (! is_array($payload) || ! is_array($payload['dates'] ?? null)) {
             throw new RuntimeException('MLB schedule response is invalid.');
         }

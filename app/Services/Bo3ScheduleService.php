@@ -8,7 +8,6 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -68,7 +67,7 @@ class Bo3ScheduleService
             }
         }
 
-        $responses = Http::pool(function (Pool $pool) use ($requests, $tiers): void {
+        $responses = ScheduleHttp::pool(function (Pool $pool) use ($requests, $tiers): void {
             foreach ($requests as $key => $request) {
                 $query = ['date' => $request['date']];
 
@@ -103,7 +102,7 @@ class Bo3ScheduleService
         // The site exposes the same public API on its own origin. Use it only
         // when the primary API failed, without repeating successful requests or
         // switching endpoints after an access denial or rate-limit response.
-        $fallbackResponses = $fallbackRequests === [] ? [] : Http::pool(function (Pool $pool) use ($fallbackRequests, $fallbackUrl, $tiers): void {
+        $fallbackResponses = $fallbackRequests === [] ? [] : ScheduleHttp::pool(function (Pool $pool) use ($fallbackRequests, $fallbackUrl, $tiers): void {
             foreach ($fallbackRequests as $key => $request) {
                 $this->scheduleRequest($pool, $key, attempts: 1)->acceptJson()
                     ->get($fallbackUrl.'/matches', $this->dailyApiQuery($request['game'], $request['date'], $tiers));
@@ -496,7 +495,7 @@ class Bo3ScheduleService
         }
 
         $uniqueSlugs = array_values(array_unique($slugs));
-        $responses = Http::pool(function (Pool $pool) use ($uniqueSlugs): void {
+        $responses = ScheduleHttp::pool(function (Pool $pool) use ($uniqueSlugs): void {
             foreach ($uniqueSlugs as $slug) {
                 $pool->as($slug)
                     ->acceptJson()

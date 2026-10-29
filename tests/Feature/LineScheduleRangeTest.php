@@ -6,6 +6,7 @@ use App\Services\LineScheduleBot;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class LineScheduleRangeTest extends TestCase
@@ -31,6 +32,71 @@ class LineScheduleRangeTest extends TestCase
         CarbonImmutable::setTestNow();
 
         parent::tearDown();
+    }
+
+    public function test_two_days_includes_today_and_tomorrow_in_taiwan_time(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-10-27T16:30:00Z'));
+        $this->fakeRange();
+
+        $reply = app(LineScheduleBot::class)->reply('!match 2d');
+
+        $this->assertNotNull($reply);
+        $this->assertSame('綜合賽程｜10/28 ~ 10/29｜S Tier', $reply->imageData['title']);
+        $this->assertCount(12, $reply->imageData['matches']);
+        $this->assertSame(['10/28', '10/29'], array_values(array_unique(array_map(
+            fn (array $match): string => substr($match['start_time'], 0, 5),
+            $reply->imageData['matches'],
+        ))));
+        $this->assertEquals($reply, app(LineScheduleBot::class)->reply('!match 1028~1029'));
+    }
+
+    #[DataProvider('relativeDayCommands')]
+    public function test_relative_days_support_aliases_options_and_calendar_boundaries(string $command, string $today, string $label): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse($today, 'Asia/Taipei'));
+        Http::fake(['*' => Http::response(['results' => []])]);
+
+        $reply = app(LineScheduleBot::class)->reply($command);
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString($label.' 查無賽程。', $reply->text);
+        Http::assertNotSent(fn (Request $request): bool => str_starts_with($request->url(), 'https://api.bo3.gg/api/v1/matches/'));
+    }
+
+    public static function relativeDayCommands(): array
+    {
+        return [
+            'one day' => ['!match 1d', '2026-10-28', '10/28'],
+            'seven days across months' => ['!lol 7d', '2026-10-28', '10/28 ~ 11/03'],
+            'across years with options' => ['!match 2D game=cs tier=all limit=1 team=G2 text', '2026-12-31', '12/31 ~ 01/01'],
+            'valorant' => ['!val 2d', '2026-10-28', '10/28 ~ 10/29'],
+            'cs2' => ['!cs2 2d', '2026-10-28', '10/28 ~ 10/29'],
+            'mlb' => ['!mlb 2d', '2026-10-28', '10/28 ~ 10/29'],
+            'nba' => ['!nba 2d', '2026-10-28', '10/28 ~ 10/29'],
+        ];
+    }
+
+    public function test_invalid_day_counts_return_guidance_without_fetching_schedules(): void
+    {
+        foreach (['0d', '8d', '999999999999999999999d'] as $days) {
+            $reply = app(LineScheduleBot::class)->reply('!match '.$days);
+            $this->assertSame('查詢天數請輸入 1～7 天，例如 !match 2d（包含今天）。', $reply->text);
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_today_only_fetches_missing_formats_for_visible_upcoming_matches(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-10-28 00:30:00', 'Asia/Taipei'));
+        $this->fakeRange();
+
+        $reply = app(LineScheduleBot::class)->reply('!match 2d limit=1');
+
+        $this->assertCount(1, $reply->imageData['matches']);
+        $this->assertSame('lol-2026-10-28-0', $reply->imageData['matches'][0]['team1']);
+        $this->assertSame('BO3', $reply->imageData['matches'][0]['format']);
+        $this->assertCount(1, Http::recorded(fn (Request $request): bool => str_starts_with($request->url(), 'https://api.bo3.gg/api/v1/matches/')));
     }
 
     public function test_five_day_match_command_keeps_order_and_limit_and_only_enriches_visible_matches(): void

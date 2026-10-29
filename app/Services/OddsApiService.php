@@ -6,7 +6,6 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -70,7 +69,7 @@ class OddsApiService
      */
     private function eventsForDate(array $sports, CarbonImmutable $startDate, CarbonImmutable $endDate, string $apiKey): array
     {
-        $responses = Http::pool(function (Pool $pool) use ($sports, $startDate, $endDate, $apiKey): void {
+        $responses = ScheduleHttp::pool(function (Pool $pool) use ($sports, $startDate, $endDate, $apiKey): void {
             foreach ($sports as $sport) {
                 $query = [
                     'apiKey' => $apiKey,
@@ -192,7 +191,7 @@ class OddsApiService
             return [];
         }
 
-        $responses = Http::pool(function (Pool $pool) use ($ids, $apiKey, $bookmakers): void {
+        $responses = ScheduleHttp::pool(function (Pool $pool) use ($ids, $apiKey, $bookmakers): void {
             foreach (array_chunk($ids, 10) as $index => $batch) {
                 $pool->as((string) $index)->acceptJson()->withUserAgent('AmandaBlogLineBot/1.0')
                     ->withHeaders(['Cache-Control' => 'no-cache, no-store', 'Pragma' => 'no-cache'])
@@ -224,12 +223,16 @@ class OddsApiService
 
     private function selectedBookmakers(string $apiKey): string
     {
-        $response = Http::acceptJson()
-            ->withUserAgent('AmandaBlogLineBot/1.0')
-            ->timeout((int) config('services.odds.timeout_seconds', 10))
-            ->get(rtrim((string) config('services.odds.base_url'), '/').'/bookmakers/selected', [
-                'apiKey' => $apiKey,
-            ]);
+        $response = ScheduleHttp::pool(function (Pool $pool) use ($apiKey): void {
+            $pool->as('bookmakers')->acceptJson()->withUserAgent('AmandaBlogLineBot/1.0')
+                ->connectTimeout(3)->timeout((int) config('services.odds.timeout_seconds', 10))
+                ->get(rtrim((string) config('services.odds.base_url'), '/').'/bookmakers/selected', [
+                    'apiKey' => $apiKey,
+                ]);
+        })['bookmakers'];
+        if ($response instanceof Throwable) {
+            throw $response;
+        }
 
         if (! $response->successful()) {
             Log::warning('Odds API selected bookmakers request failed.', ['status' => $response->status()]);

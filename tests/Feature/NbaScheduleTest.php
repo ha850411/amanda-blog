@@ -93,9 +93,10 @@ class NbaScheduleTest extends TestCase
         ], $matches[0]['recent_form']['team1']['matches'][0]);
         $this->assertSame(100, $matches[0]['recent_form']['team1']['matches'][1]['team_score']);
         $this->assertSame(110, $matches[0]['recent_form']['team1']['matches'][1]['opponent_score']);
-        Http::assertSentCount(6);
+        Http::assertSentCount(4);
+        Http::assertNotSent(fn (Request $request): bool => $request['seasontype'] === 1);
         $service->enrichRecentForm([$match]);
-        Http::assertSentCount(12);
+        Http::assertSentCount(8);
     }
 
     public function test_history_includes_preseason_and_playoffs_and_extends_a_short_sample(): void
@@ -178,7 +179,7 @@ class NbaScheduleTest extends TestCase
         Http::fake(['https://api.odds-api.io/v3/events*' => Http::response([])]);
         $this->mock(Bo3ScheduleService::class, function ($mock): void {
             $mock->shouldNotReceive('forRange');
-            $mock->shouldReceive('enrichLiveDetailsAndMissingFormats')->once()->andReturnUsing(fn (array $matches): array => $matches);
+            $mock->shouldNotReceive('enrichLiveDetailsAndMissingFormats');
         });
         $reply = app(LineScheduleBot::class)->reply('!match 明天 game=mlb/nba');
         $this->assertSame('綜合賽程｜11/16', $reply->imageData['title']);
@@ -255,7 +256,7 @@ class NbaScheduleTest extends TestCase
         $this->assertSame(5, $reply->imageData['matches'][0]['recent_form']['team1']['sample_size']);
         $this->assertNull($reply->imageData['matches'][0]['recent_form']['team2']);
         Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), '/teams/20/') || str_contains($r->url(), '/teams/11/'));
-        Http::assertSentCount(8);
+        Http::assertSentCount(6);
     }
 
     public function test_default_match_merges_nba_with_esports_without_treating_nba_as_an_esport(): void

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
 use Normalizer;
 use Throwable;
 
@@ -81,49 +82,48 @@ class LineScheduleBot
             return null;
         }
 
+        $timings = [];
+        $stageStartedAt = hrtime(true);
+        $markTiming = static function (string $stage) use (&$timings, &$stageStartedAt): void {
+            $now = hrtime(true);
+            $timings[$stage] = (int) round(($now - $stageStartedAt) / 1_000_000);
+            $stageStartedAt = $now;
+        };
         $allMatches = [];
         $sourceErrors = [];
         $esports = array_values(array_diff($command['games'], ['mlb', 'nba']));
         $hasMlb = in_array('mlb', $command['games'], true);
         $hasNba = in_array('nba', $command['games'], true);
+        $sources = [];
         if ($esports !== []) {
-            try {
-                $schedule = $this->schedules->forRange(
-                    $esports,
-                    $command['start_date'],
-                    $command['end_date'],
-                    $command['tiers'],
-                );
-                $allMatches = $schedule['matches'];
-                if ($schedule['failed_requests'] !== []) {
-                    $failed = array_map(
-                        fn (array $request): string => (self::GAME_LABELS[$request['game']] ?? $request['game'])
-                            .' '.CarbonImmutable::parse($request['date'])->format('m/d'),
-                        $schedule['failed_requests'],
-                    );
-                    $sourceErrors[] = 'bo3.gg（'.implode('、', $failed).'）';
-                }
-            } catch (Throwable $exception) {
-                report($exception);
-                $sourceErrors[] = 'bo3.gg';
-            }
+            $sources['bo3.gg'] = fn (): array => $this->schedules->forRange(
+                $esports, $command['start_date'], $command['end_date'], $command['tiers'],
+            );
         }
         if ($hasMlb) {
-            try {
-                $allMatches = array_merge($allMatches, $this->mlb->forRange($command['start_date'], $command['end_date']));
-            } catch (Throwable $exception) {
-                report($exception);
-                $sourceErrors[] = 'MLB';
-            }
+            $sources['MLB'] = fn (): array => ['matches' => $this->mlb->forRange($command['start_date'], $command['end_date'])];
         }
         if ($hasNba) {
-            try {
-                $allMatches = array_merge($allMatches, $this->nba->forRange($command['start_date'], $command['end_date']));
-            } catch (Throwable $exception) {
-                report($exception);
-                $sourceErrors[] = 'NBA';
+            $sources['NBA'] = fn (): array => ['matches' => $this->nba->forRange($command['start_date'], $command['end_date'])];
+        }
+        foreach (ScheduleHttp::run($sources) as $source => $schedule) {
+            if ($schedule instanceof Throwable) {
+                report($schedule);
+                $sourceErrors[] = $source;
+
+                continue;
+            }
+            $allMatches = array_merge($allMatches, $schedule['matches']);
+            if (($schedule['failed_requests'] ?? []) !== []) {
+                $failed = array_map(
+                    fn (array $request): string => (self::GAME_LABELS[$request['game']] ?? $request['game'])
+                        .' '.CarbonImmutable::parse($request['date'])->format('m/d'),
+                    $schedule['failed_requests'],
+                );
+                $sourceErrors[] = $source.'（'.implode('、', $failed).'）';
             }
         }
+        $markTiming('schedule_sources_ms');
         foreach ($allMatches as $index => $match) {
             $allMatches[$index]['game_label'] = self::GAME_LABELS[$match['game']] ?? mb_strtoupper($match['game']);
         }
@@ -149,10 +149,12 @@ class LineScheduleBot
         }
 
         if ($includesToday) {
-            // Only today's rows need live refresh before deciding visibility.
-            // Details for other days can wait until the display limit is known.
+            // Upcoming matches cannot be excluded as finished yet. Defer their
+            // missing formats until the display limit is known, even today.
             $todayMatches = array_filter($allMatches, fn (array $match): bool => $match['start_at']->isSameDay($now));
-            $todayMatches = $this->schedules->enrichLiveDetailsAndMissingFormats($todayMatches);
+            $refreshMatches = array_filter($todayMatches, fn (array $match): bool => ($match['is_live'] ?? false)
+                || $match['start_at']->lessThanOrEqualTo($now));
+            $todayMatches = array_replace($todayMatches, $this->schedules->enrichLiveDetailsAndMissingFormats($refreshMatches));
             $allMatches = array_replace($allMatches, $this->liveScores->enrich($todayMatches));
 
             $allMatches = array_values(array_filter(
@@ -164,6 +166,7 @@ class LineScheduleBot
             ));
         }
 
+        $markTiming('filter_and_live_scores_ms');
         $gamePriority = array_flip($command['games']);
         usort($allMatches, function (array $a, array $b) use ($gamePriority): int {
             $cmp = $a['start_at'] <=> $b['start_at'];
@@ -222,6 +225,7 @@ class LineScheduleBot
         $quickReplies = $this->scheduleQuickReplies($command, $now);
 
         if ($allMatches === []) {
+            $this->logScheduleTimings($command, $timings, 0);
             $noMatchLabel = $isMultiGame ? '綜合賽程' : $label;
             $status = $sourceErrors === [] ? '查無賽程。' : '暫時無法取得完整賽程，請稍後再試。';
 
@@ -234,16 +238,46 @@ class LineScheduleBot
         }
 
         $visibleMatches = array_slice($allMatches, 0, $command['limit']);
-        $visibleMatches = $this->schedules->enrichLiveDetailsAndMissingFormats($visibleMatches);
-        $visibleMatches = $this->headToHead->enrich($visibleMatches);
-        $visibleMatches = $this->mlb->enrichRecentForm($visibleMatches);
-        $visibleMatches = $this->nba->enrichRecentForm($visibleMatches);
-        $visibleMatches = $this->odds->enrich(
-            $visibleMatches,
-            $command['start_date'],
-            $command['end_date'],
+        $markTiming('selection_ms');
+        $enrichments = [];
+        $esportsMatches = array_filter($visibleMatches, fn (array $match): bool => ! in_array($match['game'], ['mlb', 'nba'], true));
+        if ($esportsMatches !== []) {
+            $enrichments['esports'] = fn (): array => $this->headToHead->enrich(
+                $this->schedules->enrichLiveDetailsAndMissingFormats($esportsMatches),
+            );
+        }
+        $mlbMatches = array_filter($visibleMatches, fn (array $match): bool => $match['game'] === 'mlb');
+        if ($mlbMatches !== []) {
+            $enrichments['mlb'] = fn (): array => $this->mlb->enrichRecentForm($mlbMatches);
+        }
+        $nbaMatches = array_filter($visibleMatches, fn (array $match): bool => $match['game'] === 'nba');
+        if ($nbaMatches !== []) {
+            $enrichments['nba'] = fn (): array => $this->nba->enrichRecentForm($nbaMatches);
+        }
+        $enrichments['odds'] = fn (): array => $this->odds->enrich(
+            $visibleMatches, $command['start_date'], $command['end_date'],
         );
+        $enriched = ScheduleHttp::run($enrichments);
+        foreach ($enriched as $kind => $matches) {
+            if ($matches instanceof Throwable) {
+                report($matches);
+
+                continue;
+            }
+            if ($kind !== 'odds') {
+                $visibleMatches = array_replace($visibleMatches, $matches);
+            }
+        }
+        // Odds use the original selection, so merge only their own field to
+        // preserve details and history supplied by the independent tasks.
+        foreach ($visibleMatches as $index => $match) {
+            $visibleMatches[$index]['odds'] = is_array($enriched['odds'])
+                ? ($enriched['odds'][$index]['odds'] ?? null) : null;
+        }
+        $markTiming('parallel_enrichment_ms');
         $visibleMatches = $this->bo3Odds->enrichMissing($visibleMatches);
+        $markTiming('fallback_odds_ms');
+        $this->logScheduleTimings($command, $timings, count($visibleMatches));
         $lines = [
             "{$label}｜{$dateLabel}{$tierSuffix}",
             '時間基準｜台灣時間',
@@ -413,11 +447,12 @@ class LineScheduleBot
         $dateAtom = '(?:今天|明天|後天|\d{4}[-\/\.]\d{1,2}[-\/\.]\d{1,2}|\d{1,2}[-\/\.]\d{1,2}|\d{4})';
         $rangePattern = '/^('.$dateAtom.'\s*(?:~|～)\s*'.$dateAtom.')(?:\s+(.*))?$/iu';
         $singlePattern = '/^('.$dateAtom.')(?:\s+(.*))?$/iu';
+        $daysPattern = '/^(\d+d)(?:\s+(.*))?$/iu';
 
         if (preg_match($rangePattern, $rawArguments, $m)) {
             $datePart = $m[1];
             $optionsPart = $m[2] ?? '';
-        } elseif (preg_match($singlePattern, $rawArguments, $m)) {
+        } elseif (preg_match($singlePattern, $rawArguments, $m) || preg_match($daysPattern, $rawArguments, $m)) {
             $datePart = $m[1];
             $optionsPart = $m[2] ?? '';
         } else {
@@ -462,6 +497,22 @@ class LineScheduleBot
         ];
     }
 
+    private function logScheduleTimings(array $command, array $timings, int $visibleCount): void
+    {
+        try {
+            Log::channel('webhook')->log('info', 'LINE schedule query completed.', [
+                'games' => $command['games'],
+                'start_date' => $command['start_date']->format('Y-m-d'),
+                'end_date' => $command['end_date']->format('Y-m-d'),
+                'visible_matches' => $visibleCount,
+                'duration_ms' => array_sum($timings),
+                'stages' => $timings,
+            ]);
+        } catch (Throwable) {
+            // Diagnostic logging must never prevent a schedule reply.
+        }
+    }
+
     private function normalizeCommand(string $message): string
     {
         // LINE clients and input methods may insert invisible formatting marks,
@@ -493,6 +544,19 @@ class LineScheduleBot
                 'start_date' => $today,
                 'end_date' => $today,
                 'is_range' => false,
+            ];
+        }
+
+        if (preg_match('/^(\d+)d$/i', $token, $matches)) {
+            $days = (int) $matches[1];
+            if ($days < 1 || $days > self::MAX_SCHEDULE_DAYS) {
+                return sprintf('查詢天數請輸入 1～%d 天，例如 !match 2d（包含今天）。', self::MAX_SCHEDULE_DAYS);
+            }
+
+            return [
+                'start_date' => $today,
+                'end_date' => $today->addDays($days - 1),
+                'is_range' => $days > 1,
             ];
         }
 
@@ -763,6 +827,6 @@ class LineScheduleBot
 
     private function help(): string
     {
-        return "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2";
+        return "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n!match 2d（含今天起 2 天，支援 1d～7d）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }

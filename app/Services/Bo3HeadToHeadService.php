@@ -5,7 +5,6 @@ namespace App\Services;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -129,7 +128,7 @@ class Bo3HeadToHeadService
             return [];
         }
         try {
-            return Http::pool(function (Pool $pool) use ($requests): void {
+            return ScheduleHttp::pool(function (Pool $pool) use ($requests): void {
                 foreach ($requests as $key => $request) {
                     $pool->as((string) $key)->acceptJson()->withUserAgent('AmandaBlogLineBot/1.0')
                         ->timeout((int) config('services.bo3.timeout_seconds', 10))

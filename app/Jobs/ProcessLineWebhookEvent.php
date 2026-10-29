@@ -78,7 +78,9 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
         ]);
 
         try {
+            $queryStartedAt = hrtime(true);
             $reply = $bot->reply($message);
+            $queryDurationMs = $this->durationMs($queryStartedAt);
 
             if ($reply === null) {
                 $this->writeLog($webhookLog, 'info', 'LINE webhook message ignored.', [
@@ -94,6 +96,7 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
             $replyToken = (string) ($this->event['replyToken'] ?? '');
 
             $imageUrl = null;
+            $imageStartedAt = hrtime(true);
 
             if ($reply->prefersImage()) {
                 try {
@@ -109,6 +112,8 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
                 }
             }
 
+            $imageDurationMs = $this->durationMs($imageStartedAt);
+            $deliveryStartedAt = hrtime(true);
             $deliveryMethod = 'reply';
             $deliveryResult = null;
             $replyTokenAgeMs = $this->replyTokenAgeMs();
@@ -162,6 +167,9 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
                 'line_status' => $deliveryResult['status'] ?? null,
                 'line_request_id' => $deliveryResult['request_id'] ?? null,
                 'queue_latency_ms' => $queueLatencyMs,
+                'query_duration_ms' => $queryDurationMs,
+                'image_duration_ms' => $imageDurationMs,
+                'delivery_duration_ms' => $this->durationMs($deliveryStartedAt),
                 'reply_token_age_ms' => $this->replyTokenAgeMs(),
                 'duration_ms' => $this->durationMs($startedAt),
             ]);

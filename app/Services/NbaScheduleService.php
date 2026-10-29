@@ -5,7 +5,6 @@ namespace App\Services;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -103,9 +102,9 @@ class NbaScheduleService
         foreach ($targets as $target) {
             $key = $target['id'].':'.$target['season'];
             $keys[$key] = true;
-            // Fetch all three phases together so playoff or preseason games
-            // cannot be silently skipped when calculating the latest five.
-            foreach ([1, 2, 3] as $type) {
+            // Regular season and playoffs are later than preseason. Fetch
+            // those together and only load preseason for short samples.
+            foreach ([2, 3] as $type) {
                 $requests[$key.':'.$type] = [
                     'path' => '/teams/'.$target['id'].'/schedule',
                     'query' => ['season' => $target['season'], 'seasontype' => $type],
@@ -116,13 +115,27 @@ class NbaScheduleService
         $history = [];
         foreach (array_keys($keys) as $key) {
             $history[$key] = [];
-            foreach ([1, 2, 3] as $type) {
+            foreach ([2, 3] as $type) {
                 if (($responses[$key.':'.$type] ?? null) === null) {
                     $history[$key] = null;
                     break;
                 }
                 $history[$key] = array_merge($history[$key], $responses[$key.':'.$type]);
             }
+        }
+
+        $preseasonRequests = [];
+        foreach ($targets as $target) {
+            $key = $target['id'].':'.$target['season'];
+            if ($history[$key] !== null && count($this->recentMatches($history[$key], $target)) < 5) {
+                $preseasonRequests[$key] = [
+                    'path' => '/teams/'.$target['id'].'/schedule',
+                    'query' => ['season' => $target['season'], 'seasontype' => 1],
+                ];
+            }
+        }
+        foreach ($this->fetch($preseasonRequests) as $key => $games) {
+            $history[$key] = $games === null ? null : array_merge($history[$key], $games);
         }
 
         return $history;
@@ -135,7 +148,7 @@ class NbaScheduleService
             return [];
         }
         try {
-            $responses = Http::pool(function (Pool $pool) use ($requests): void {
+            $responses = ScheduleHttp::pool(function (Pool $pool) use ($requests): void {
                 foreach ($requests as $key => $request) {
                     $pool->as((string) $key)->acceptJson()->withUserAgent('Mozilla/5.0')
                         ->connectTimeout(3)->timeout((int) config('nba.timeout_seconds', 10))
