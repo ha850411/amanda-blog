@@ -892,11 +892,18 @@ class LineWebhookTest extends TestCase
 
     public function test_line_webhook_can_query_stake_bets(): void
     {
-        config(['services.stake.access_token' => 'test-token']);
+        config([
+            'services.stake.access_token' => 'test-token',
+            'services.stake.sources_file' => 'config/stake_sources.json',
+            'services.stake.cache_seconds' => 0,
+        ]);
 
         Http::fake([
-            'https://stake.com/_api/graphql' => Http::sequence()
-                ->push(['data' => ['user' => ['activeSportBetCount' => 0]]], 200),
+            'https://stake.ac/_api/v1/graphql' => Http::response(['data' => ['user' => [
+                'activeSportBetCount' => 0,
+                'activeSportBets' => [],
+                'balances' => [],
+            ]]], 200),
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
         ]);
 

@@ -1,0 +1,42 @@
+{
+    "timeout_seconds": 5,
+    "connect_timeout_seconds": 3,
+    "failure_cooldown_seconds": 60,
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+    "sources": [
+        {
+            "name": "stake-ac-direct",
+            "url": "https://stake.ac/_api/v1/graphql",
+            "proxy": null
+        },
+        {
+            "name": "stake-mba-direct",
+            "url": "https://stake.mba/_api/v1/graphql",
+            "proxy": null
+        },
+        {
+            "name": "staketr-direct",
+            "url": "https://staketr.com/_api/v1/graphql",
+            "proxy": null
+        },
+        {
+            "name": "stkmirror-direct",
+            "url": "https://stkmirror.com/_api/v1/graphql",
+            "proxy": null
+        },
+        {
+            "name": "stake1017-direct",
+            "url": "https://stake1017.com/_api/v1/graphql",
+            "proxy": null
+        },
+        {
+            "name": "stake-ac-proxy-8",
+            "url": "https://stake.ac/_api/v1/graphql",
+            "proxy": {
+                "url": "http://p.webshare.io:80",
+                "credentials_from": "STAKE_PROXY",
+                "username_index": 8
+            }
+        }
+    ]
+}

@@ -7,6 +7,7 @@ use App\Services\StakeBetService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class StakeBetServiceTest extends TestCase
@@ -20,6 +21,7 @@ class StakeBetServiceTest extends TestCase
         config([
             'services.stake.access_token' => 'test-stake-token-123',
             'services.stake.api_url' => 'https://stake.com/_api/graphql',
+            'services.stake.sources_file' => null,
             'services.bo3.timezone' => 'Asia/Taipei',
         ]);
     }
@@ -178,6 +180,51 @@ class StakeBetServiceTest extends TestCase
         $this->assertNotNull($reply);
         $this->assertStringContainsString('Stake API 存取受限', $reply->text);
         Http::assertSentCount(4);
+    }
+
+    public function test_bet_command_stops_retrying_browser_challenges_and_links_to_stake(): void
+    {
+        Log::spy();
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::response(
+                '<html><title>Just a moment...</title></html>',
+                403,
+                [
+                    'Content-Type' => 'text/html; charset=UTF-8',
+                    'CF-Mitigated' => 'challenge',
+                    'CF-Ray' => 'test-ray-id',
+                ],
+            ),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('瀏覽器安全驗證', $reply->text);
+        $this->assertSame('https://stake.com/zh/my-bets/sports', $reply->linkUrl);
+        Http::assertSentCount(1);
+        Log::shouldHaveReceived('warning')->once()->with(
+            'Stake API browser verification required.',
+            ['status' => 403, 'cf_ray' => 'test-ray-id'],
+        );
+    }
+
+    public function test_balance_command_stops_retrying_browser_challenges(): void
+    {
+        Http::fake([
+            'https://stake.com/_api/graphql' => Http::response(
+                '<html><title>Just a moment...</title></html>',
+                403,
+                ['cf-mitigated' => 'challenge'],
+            ),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!bet balance');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('瀏覽器安全驗證', $reply->text);
+        $this->assertSame('https://stake.com/zh/my-bets/sports', $reply->linkUrl);
+        Http::assertSentCount(1);
     }
 
     public function test_bet_command_retries_on_403_and_succeeds_on_subsequent_attempt(): void

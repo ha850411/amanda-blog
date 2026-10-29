@@ -76,6 +76,7 @@ return [
 
     'stake' => [
         'access_token' => env('STAKE_ACCESS_TOKEN'),
+        'sources_file' => env('STAKE_SOURCES_FILE', 'config/stake_sources.json'),
         'api_url' => env('STAKE_API_URL', 'https://stake.com/_api/graphql'),
         'timeout_seconds' => (int) env('STAKE_TIMEOUT_SECONDS', 10),
         'cache_seconds' => (int) env('STAKE_CACHE_SECONDS', 0),

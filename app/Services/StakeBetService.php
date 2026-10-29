@@ -2,13 +2,16 @@
 
 namespace App\Services;
 
+use App\Exceptions\StakeApiRequestException;
 use App\Support\ChineseConverter;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Throwable;
 
 class StakeBetService
@@ -625,6 +628,28 @@ query FetchActiveSportBets($limit: Int!, $offset: Int!, $name: String) {
 }
 GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
+    public const ACTIVE_BETS_OVERVIEW_QUERY = <<<'GRAPHQL'
+query ActiveBetsOverview($limit: Int!) {
+  user {
+    id
+    activeSportBetCount
+    activeSportBets(limit: $limit, offset: 0, sort: placedTime) {
+      ...SportBetPreview_SportBet
+    }
+    balances {
+      available {
+        amount
+        currency
+      }
+      vault {
+        amount
+        currency
+      }
+    }
+  }
+}
+GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
+
     public const FETCH_SPORT_BET_LIST_QUERY = <<<'GRAPHQL'
 query FetchSportBetList($limit: Int, $offset: Int, $status: [SportBetStatusEnum!]) {
   user {
@@ -700,17 +725,30 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             );
         }
 
+        $limit = 20;
+        $forceText = false;
+        if (in_array($lowerArg, ['text', 'txt', '文字'], true)) {
+            $forceText = true;
+        } elseif (ctype_digit($trimmedArg) && (int) $trimmedArg > 0) {
+            $limit = min((int) $trimmedArg, 20);
+        }
+
         try {
-            $count = $this->getActiveBetCount();
+            $overview = filled(config('services.stake.sources_file'))
+                ? $this->getActiveBetsOverview($limit)
+                : null;
+            $count = $overview['count'] ?? $this->getActiveBetCount();
 
             if ($count === 0) {
-                $balance = null;
-                try {
-                    $balance = $this->getUsdtBalance();
-                } catch (Throwable $e) {
-                    Log::warning('Stake USDT balance fetch failed during bet reply.', [
-                        'error' => $e->getMessage(),
-                    ]);
+                $balance = $overview['balance'] ?? null;
+                if ($overview === null) {
+                    try {
+                        $balance = $this->getUsdtBalance();
+                    } catch (Throwable $e) {
+                        Log::warning('Stake USDT balance fetch failed during bet reply.', [
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
                 }
 
                 $lines = [
@@ -724,23 +762,17 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 return new LineBotReply(implode("\n", $lines), 'https://stake.com/zh/my-bets/sports');
             }
 
-            $limit = 20;
-            $forceText = false;
-            if (in_array($lowerArg, ['text', 'txt', '文字'], true)) {
-                $forceText = true;
-            } elseif (ctype_digit($trimmedArg) && (int) $trimmedArg > 0) {
-                $limit = min((int) $trimmedArg, 20);
-            }
+            $bets = $overview['bets'] ?? $this->getActiveSportBets($limit);
 
-            $bets = $this->getActiveSportBets($limit);
-
-            $balance = null;
-            try {
-                $balance = $this->getUsdtBalance();
-            } catch (Throwable $e) {
-                Log::warning('Stake USDT balance fetch failed during bet reply.', [
-                    'error' => $e->getMessage(),
-                ]);
+            $balance = $overview['balance'] ?? null;
+            if ($overview === null) {
+                try {
+                    $balance = $this->getUsdtBalance();
+                } catch (Throwable $e) {
+                    Log::warning('Stake USDT balance fetch failed during bet reply.', [
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             if ($bets === []) {
@@ -782,9 +814,22 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
     private function handleRequestException(RequestException $exception): LineBotReply
     {
         $status = $exception->response->status();
+
+        if ($this->isCloudflareChallenge($exception->response)) {
+            Log::warning('Stake API browser verification required.', [
+                'status' => $status,
+                'cf_ray' => $exception->response->header('cf-ray'),
+            ]);
+
+            return new LineBotReply(
+                'Stake 目前要求瀏覽器安全驗證，機器人暫時無法讀取即時資料。請至 Stake 官方網站查看。',
+                'https://stake.com/zh/my-bets/sports',
+            );
+        }
+
         Log::warning('Stake API request failed.', [
             'status' => $status,
-            'body' => mb_substr($exception->response->body(), 0, 500),
+            'content_type' => $exception->response->header('content-type'),
         ]);
 
         return new LineBotReply(match ($status) {
@@ -795,8 +840,19 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         });
     }
 
+    private function isCloudflareChallenge(Response $response): bool
+    {
+        return strtolower(trim((string) $response->header('cf-mitigated'))) === 'challenge';
+    }
+
     private function handleConnectionException(ConnectionException $exception): LineBotReply
     {
+        if (filled(config('services.stake.sources_file'))) {
+            Log::warning('All configured Stake API sources failed to connect.');
+
+            return new LineBotReply('目前無法連線至 Stake 查詢來源，請稍後再試。');
+        }
+
         $hasProxy = filled(config('services.stake.proxy'));
         Log::warning('Stake API connection failed.', [
             'error' => $exception->getMessage(),
@@ -808,6 +864,23 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                 ? '連線至 Stake 代理伺服器失敗或超時，請檢查 STAKE_PROXY 設定後再試。'
                 : '連線至 Stake 伺服器超時，請稍後再試。'
         );
+    }
+
+    /**
+     * @return array{count: int, bets: array, balance: array|null}
+     */
+    public function getActiveBetsOverview(int $limit = 20): array
+    {
+        $response = $this->sendGraphQLRequest('ActiveBetsOverview', self::ACTIVE_BETS_OVERVIEW_QUERY, [
+            'limit' => min(20, max(1, $limit)),
+        ]);
+        $user = $response['data']['user'];
+
+        return [
+            'count' => $user['activeSportBetCount'],
+            'bets' => array_values(array_filter($user['activeSportBets'], 'is_array')),
+            'balance' => $this->extractUsdtBalance($user['balances']),
+        ];
     }
 
     public function getActiveBetCount(): int
@@ -3231,9 +3304,76 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
      */
     private function sendGraphQLRequest(string $operationName, string $query, array $variables): array
     {
+        $sources = app(StakeApiSourceConfig::class)->load();
+        if ($sources === null) {
+            return $this->sendGraphQLRequestToSource($operationName, $query, $variables);
+        }
+
+        $lastException = null;
+        $health = app(StakeApiSourceHealth::class);
+        $cooldown = $sources['failure_cooldown_seconds'];
+        $skippedCoolingSources = false;
+        foreach ($sources['sources'] as $source) {
+            if (! $source['available']) {
+                Log::warning('Stake API source skipped: proxy credentials are not configured.', [
+                    'source' => $source['name'],
+                ]);
+
+                continue;
+            }
+
+            if ($health->isCoolingDown($source, $cooldown)) {
+                $skippedCoolingSources = true;
+
+                continue;
+            }
+
+            try {
+                return $this->sendGraphQLRequestToSource($operationName, $query, $variables, $source, $sources);
+            } catch (RequestException|ConnectionException $exception) {
+                $lastException = $exception;
+                $status = $exception instanceof RequestException ? $exception->response->status() : null;
+                Log::warning('Stake API source failed.', [
+                    'operation' => $operationName,
+                    'source' => $source['name'],
+                    'via_proxy' => $source['uses_proxy'],
+                    'status' => $status,
+                    'type' => $exception::class,
+                ]);
+
+                // Invalid credentials or a rejected query need a caller-side fix.
+                if ($status === 401 || ($status === 400 && is_array($exception->response->json()))) {
+                    throw $exception;
+                }
+
+                // Query-specific GraphQL errors must not disable unrelated queries.
+                if ($exception instanceof ConnectionException || $status !== 200
+                    || $this->isCloudflareChallenge($exception->response)
+                    || ! is_array($exception->response->json())) {
+                    $health->markFailure($source, $cooldown);
+                }
+            }
+        }
+
+        if ($lastException instanceof ConnectionException) {
+            throw new ConnectionException('All configured Stake API sources failed to connect.');
+        }
+
+        if ($lastException === null && $skippedCoolingSources) {
+            throw new ConnectionException('All configured Stake API sources are temporarily cooling down.');
+        }
+
+        throw $lastException ?? new RuntimeException('No usable Stake API sources are configured.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $variables
+     */
+    private function sendGraphQLRequestToSource(string $operationName, string $query, array $variables, ?array $source = null, ?array $sources = null): array
+    {
         $accessToken = trim((string) config('services.stake.access_token'));
-        $apiUrl = (string) config('services.stake.api_url', 'https://stake.com/_api/graphql');
-        $timeout = (int) config('services.stake.timeout_seconds', 10);
+        $apiUrl = $source['url'] ?? (string) config('services.stake.api_url', 'https://stake.com/_api/graphql');
+        $timeout = $sources['timeout_seconds'] ?? (int) config('services.stake.timeout_seconds', 10);
         $language = (string) config('services.stake.language', 'zh');
 
         $headers = [
@@ -3245,34 +3385,53 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             'x-operation-type' => 'query',
         ];
 
-        if ($cd = config('services.stake.kpsdk_cd')) {
+        if ($source === null && ($cd = config('services.stake.kpsdk_cd'))) {
             $headers['x-kpsdk-cd'] = (string) $cd;
         }
-        if ($ct = config('services.stake.kpsdk_ct')) {
+        if ($source === null && ($ct = config('services.stake.kpsdk_ct'))) {
             $headers['x-kpsdk-ct'] = (string) $ct;
         }
-        if ($h = config('services.stake.kpsdk_h')) {
+        if ($source === null && ($h = config('services.stake.kpsdk_h'))) {
             $headers['x-kpsdk-h'] = (string) $h;
         }
-        if ($v = config('services.stake.kpsdk_v')) {
+        if ($source === null && ($v = config('services.stake.kpsdk_v'))) {
             $headers['x-kpsdk-v'] = (string) $v;
         }
-        if ($cookie = config('services.stake.cookie')) {
+        if ($source === null && ($cookie = config('services.stake.cookie'))) {
             $headers['Cookie'] = (string) $cookie;
         }
 
-        $userAgent = (string) (config('services.stake.user_agent') ?: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        if ($source !== null) {
+            $origin = 'https://'.parse_url($apiUrl, PHP_URL_HOST);
+            $headers['Origin'] = $origin;
+            $headers['Referer'] = $origin.'/';
+            $headers['x-stake-client-id'] = 'stake-web';
+            $headers['x-stake-client-platform'] = 'web';
+        }
+
+        $userAgent = (string) (config('services.stake.user_agent') ?: ($sources['user_agent'] ?? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'));
 
         $request = Http::acceptJson()
             ->withHeaders($headers)
             ->withUserAgent($userAgent)
             ->timeout($timeout);
 
-        if ($proxy = config('services.stake.proxy')) {
+        if ($source !== null) {
+            $request = $request->connectTimeout($sources['connect_timeout_seconds'])
+                ->withOptions([
+                    'allow_redirects' => false,
+                    'proxy' => $source['proxy'] ?? '',
+                    'curl' => $source['uses_proxy']
+                        ? [CURLOPT_NOPROXY => '']
+                        : [CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*'],
+                ]);
+        } elseif ($proxy = config('services.stake.proxy')) {
             $request = $request->withOptions(['proxy' => $proxy]);
         }
 
-        $maxRetries = (int) (config('services.stake.max_retries') ?? config('services.stake.retry_times') ?? 3);
+        $maxRetries = $source === null
+            ? (int) (config('services.stake.max_retries') ?? config('services.stake.retry_times') ?? 3)
+            : 0;
         $retryDelayMs = (int) config('services.stake.retry_delay_ms', 100);
 
         if ($maxRetries > 0) {
@@ -3284,6 +3443,10 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                     $attempt++;
 
                     if ($exception instanceof RequestException && $exception->response) {
+                        if ($this->isCloudflareChallenge($exception->response)) {
+                            return false;
+                        }
+
                         $status = $exception->response->status();
                         if (in_array($status, [400, 401, 451], true)) {
                             return false;
@@ -3318,21 +3481,42 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         $payload = [
             'query' => $query,
             'variables' => $variables === [] ? (object) [] : $variables,
+            'operationName' => $operationName,
         ];
 
         $response = $request->post($apiUrl, $payload);
 
         if (! $response->successful()) {
-            $response->throw();
+            throw $source === null ? new RequestException($response) : new StakeApiRequestException($response);
         }
 
         $json = $response->json();
 
-        if (! is_array($json)) {
-            throw new RequestException($response);
+        if (! is_array($json) || ($source !== null
+            && ($this->isCloudflareChallenge($response) || ! $this->isUsableGraphQLResponse($operationName, $json)))) {
+            throw $source === null ? new RequestException($response) : new StakeApiRequestException($response);
         }
 
         return $json;
+    }
+
+    private function isUsableGraphQLResponse(string $operationName, array $json): bool
+    {
+        $user = $json['data']['user'] ?? null;
+        if (! empty($json['errors']) || ! is_array($user) || $user === []) {
+            return false;
+        }
+
+        return match ($operationName) {
+            'ActiveBetsOverview' => is_int($user['activeSportBetCount'] ?? null)
+                && is_array($user['activeSportBets'] ?? null)
+                && is_array($user['balances'] ?? null),
+            'ActiveBetCount_User' => is_int($user['activeSportBetCount'] ?? null),
+            'UserBalances' => is_array($user['balances'] ?? null),
+            'FetchActiveSportBets' => is_array($user['activeSportBets'] ?? null),
+            'FetchSportBetList' => is_array($user['sportBetList'] ?? null),
+            default => true,
+        };
     }
 
     /**
