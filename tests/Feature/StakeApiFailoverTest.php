@@ -15,14 +15,19 @@ use Tests\TestCase;
 
 class StakeApiFailoverTest extends TestCase
 {
+    private string $proxyPassword;
+
     protected function setUp(): void
     {
         parent::setUp();
 
+        // Ephemeral fake credentials retain URL-encoding coverage without stored secrets.
+        $this->proxyPassword = bin2hex(random_bytes(16)).'@test';
+
         config([
             'services.stake.sources_file' => 'config/stake_sources.json',
             'services.stake.access_token' => 'test-token',
-            'services.stake.proxy' => 'http://pool-user-2:p%40ss@p.webshare.io:80',
+            'services.stake.proxy' => $this->proxyUrl(2),
             'services.stake.cache_seconds' => 0,
             'services.stake.max_retries' => 3,
             'services.stake.user_agent' => null,
@@ -177,12 +182,12 @@ class StakeApiFailoverTest extends TestCase
             if (count($seen) <= 5) {
                 $this->assertSame('', $options['proxy']);
             } else {
-                $this->assertSame('http://pool-user-8:p%40ss@p.webshare.io:80', $options['proxy']);
+                $this->assertSame($this->proxyUrl(8), $options['proxy']);
                 $this->assertSame('', $options['curl'][CURLOPT_NOPROXY]);
             }
 
             return match (count($seen)) {
-                1 => throw new ConnectionException('Connection failed at http://pool-user-2:p%40ss@p.webshare.io:80'),
+                1 => throw new ConnectionException('Connection failed at '.$this->proxyUrl(2)),
                 2 => Http::response('challenge', 403, ['cf-mitigated' => 'challenge']),
                 3 => Http::response('<html>verification</html>', 200, ['content-type' => 'text/html']),
                 4 => Http::response([], 451),
@@ -201,7 +206,10 @@ class StakeApiFailoverTest extends TestCase
             'https://stake.ac/_api/v1/graphql',
         ], array_column($seen, 'url'));
         Log::shouldHaveReceived('warning')->withArgs(function ($message, $context = []): bool {
-            return ! str_contains(json_encode([$message, $context]), 'p%40ss');
+            $log = json_encode([$message, $context]);
+
+            return ! str_contains($log, $this->proxyPassword)
+                && ! str_contains($log, rawurlencode($this->proxyPassword));
         })->times(5);
     }
 
@@ -343,6 +351,16 @@ class StakeApiFailoverTest extends TestCase
         }
 
         Http::assertNothingSent();
+    }
+
+    private function proxyUrl(int $index): string
+    {
+        return sprintf('http://%s:%s@%s:%d',
+            'test-proxy-'.$index,
+            rawurlencode($this->proxyPassword),
+            'p.webshare.io',
+            80,
+        );
     }
 
     private function countResponse(int $count): array
