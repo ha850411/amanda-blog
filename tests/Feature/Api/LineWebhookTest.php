@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Tests\TestCase;
@@ -400,7 +401,7 @@ class LineWebhookTest extends TestCase
 
             return $request['messages'][0] === [
                 'type' => 'text',
-                'text' => "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n!match 2d（含今天起 2 天，支援 1d～7d）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2",
+                'text' => "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n!match 2d（含今天起 2 天，支援 1d～7d）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nNBA、MLB 查今天另納入所有球隊的滾球；未開賽仍依追蹤清單，team= 可再篩選。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2",
             ];
         });
     }
@@ -848,13 +849,20 @@ class LineWebhookTest extends TestCase
         }
     }
 
-    public function test_today_schedule_keeps_live_matches_and_excludes_finished_matches(): void
+    #[DataProvider('esportsLiveCommands')]
+    public function test_today_schedule_keeps_live_matches_and_excludes_finished_matches(string $command, string $prefix): void
     {
+        Http::preventStrayRequests();
         Http::fake([
-            'https://bo3.gg/matches/current*' => Http::response($this->todayHtmlWithStartedAndUpcomingMatches(), 200),
+            'https://bo3.gg'.$prefix.'/matches/current*' => Http::response(
+                str_replace('/matches/', $prefix.'/matches/', $this->todayHtmlWithStartedAndUpcomingMatches()),
+            ),
+            'https://api.bo3.gg/api/v1/matches*' => Http::response(['results' => []]),
+            config('services.riot_esports.schedule_url') => Http::response(''),
+            config('services.vlr.matches_url') => Http::response('<html></html>'),
         ]);
 
-        $reply = app(LineScheduleBot::class)->reply('!cs 08/11');
+        $reply = app(LineScheduleBot::class)->reply($command);
 
         $this->assertNotNull($reply);
         $this->assertStringNotContainsString('Past Team', $reply->text);
@@ -871,6 +879,15 @@ class LineWebhookTest extends TestCase
         $this->assertFalse($reply->imageData['matches'][1]['is_live']);
         $this->assertNull($reply->imageData['matches'][1]['series_score']);
         $this->assertNull($reply->imageData['matches'][1]['score']);
+    }
+
+    public static function esportsLiveCommands(): array
+    {
+        return [
+            'LoL' => ['!lol 08/11', '/lol'],
+            'VALORANT' => ['!val 08/11', '/valorant'],
+            'CS2' => ['!cs 08/11', ''],
+        ];
     }
 
     public function test_live_reply_keeps_series_and_current_game_scores_when_the_numbers_match(): void

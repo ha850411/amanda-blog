@@ -1,7 +1,8 @@
 <?php
 
 return [
-    // !mlb 與 !match 只抓任一方在此清單中的比賽；空陣列表示停用 MLB。
+    // !mlb 與 !match 的追蹤球隊；查今天另納入所有球隊的滾球賽事。
+    // 未開賽與其他日期仍限此清單，空陣列表示停用 MLB。
     // 修改後若有使用 Laravel config:cache，請重新產生設定快取並重啟 queue worker。
     'team_ids' => [
         119, // 洛杉磯道奇 LAD

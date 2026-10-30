@@ -23,15 +23,15 @@ class MlbScheduleService
 
         // MLB dates are US calendar dates. Fetch a padded range, then use the
         // actual start instant to select the requested Taiwan calendar days.
-        $games = $this->fetch($teamIds, $startDate->subDay(), $endDate->addDay());
+        $today = CarbonImmutable::now($startDate->timezone)->startOfDay();
+        $includesToday = $today->betweenIncluded($startDate->startOfDay(), $endDate->endOfDay());
+        // A provider-side team filter would hide live games before we could
+        // inspect their status. Keep history and other dates scoped to teams.
+        $games = $this->fetch($includesToday ? [] : $teamIds, $startDate->subDay(), $endDate->addDay());
         $matches = [];
         foreach ($games as $game) {
             $away = $game['teams']['away'] ?? [];
             $home = $game['teams']['home'] ?? [];
-            if (! in_array($away['team']['id'] ?? null, $teamIds, true)
-                && ! in_array($home['team']['id'] ?? null, $teamIds, true)) {
-                continue;
-            }
             if (empty($game['gameDate']) || empty($game['gamePk'])) {
                 continue;
             }
@@ -43,6 +43,11 @@ class MlbScheduleService
             $status = $game['status'] ?? [];
             $state = $status['abstractGameState'] ?? '';
             $detail = $status['detailedState'] ?? '';
+            $isLiveToday = $state === 'Live' && $start->isSameDay($today);
+            if (! $isLiveToday && ! in_array($away['team']['id'] ?? null, $teamIds, true)
+                && ! in_array($home['team']['id'] ?? null, $teamIds, true)) {
+                continue;
+            }
             $team1 = $this->teamName($away['team'] ?? []);
             $team2 = $this->teamName($home['team'] ?? []);
             $score = in_array($state, ['Live', 'Final'], true) && isset($away['score'], $home['score'])
@@ -139,10 +144,12 @@ class MlbScheduleService
     {
         $query = [
             'sportId' => 1,
-            'teamId' => implode(',', $teamIds),
             'startDate' => $start->format('Y-m-d'),
             'endDate' => $end->format('Y-m-d'),
         ];
+        if ($teamIds !== []) {
+            $query['teamId'] = implode(',', $teamIds);
+        }
         // Scores and team names are already in the schedule response; avoid
         // full linescores, player rosters and an API request for every game.
         $query['fields'] = 'dates,games,gamePk,gameDate,gameNumber,status,abstractGameState,detailedState,startTimeTBD,teams,away,home,team,id,name,score,isWinner,venue,resumeDate';

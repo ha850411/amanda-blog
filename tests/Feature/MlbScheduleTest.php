@@ -9,6 +9,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class MlbScheduleTest extends TestCase
@@ -51,7 +52,7 @@ class MlbScheduleTest extends TestCase
         $this->assertSame([2, 3, 4, 5], array_column($matches, 'game_pk'));
         $this->assertSame('00:00', $matches[0]['start_at']->format('H:i'));
         $this->assertSame('洛杉磯道奇', $matches[0]['team1']);
-        Http::assertSent(fn (Request $r): bool => $r['teamId'] === '119,158' && $r['sportId'] === 1
+        Http::assertSent(fn (Request $r): bool => ! isset($r['teamId']) && $r['sportId'] === 1
             && $r['startDate'] === '2026-09-20' && $r['endDate'] === '2026-09-22');
         Http::assertSentCount(1);
     }
@@ -66,7 +67,7 @@ class MlbScheduleTest extends TestCase
         $day = CarbonImmutable::parse('2026-09-21', 'Asia/Taipei');
         $service = app(MlbScheduleService::class);
         $this->assertSame([1], array_column($service->forRange($day, $day), 'game_pk'));
-        Http::assertSent(fn (Request $r): bool => $r['teamId'] === '147');
+        Http::assertSent(fn (Request $r): bool => ! isset($r['teamId']));
         config(['mlb.team_ids' => []]);
         $this->assertSame([], $service->forRange($day, $day));
         Http::assertSentCount(1);
@@ -158,6 +159,97 @@ class MlbScheduleTest extends TestCase
         $this->assertSame(['10:00', '10:30', '16:00'], array_column($reply->imageData['matches'], 'start_time'));
         $this->assertStringContainsString('目前比分｜3：2', $reply->text);
         $this->assertStringContainsString('延遲', $reply->text);
+    }
+
+    #[DataProvider('liveCommands')]
+    public function test_today_fetches_and_displays_untracked_live_teams_but_not_other_untracked_games(string $command): void
+    {
+        $live = $this->game(1, '2026-09-21T01:00:00Z', 147, 121, 'Live', 3, 2);
+        $games = [
+            $live, $live,
+            $this->game(2, '2026-09-21T05:00:00Z', 119, 158),
+            $this->game(3, '2026-09-21T05:00:00Z', 110, 111),
+            $this->game(4, '2026-09-21T00:00:00Z', 147, 121, 'Final', 5, 4),
+            $this->game(5, '2026-09-20T15:59:59Z', 147, 121, 'Live'),
+        ];
+        Http::fake(['https://statsapi.mlb.com/*' => function (Request $r) use ($games) {
+            if ($r['startDate'] !== '2026-09-20') {
+                return Http::response($this->payload($this->history()));
+            }
+            // Respect the API's team filter so missing live teams cannot be
+            // masked by a fixture returning every game regardless of the query.
+            $ids = explode(',', (string) ($r['teamId'] ?? ''));
+            $selected = array_values(array_filter($games, fn (array $game): bool => ! isset($r['teamId'])
+                || in_array((string) $game['teams']['away']['team']['id'], $ids, true)
+                || in_array((string) $game['teams']['home']['team']['id'], $ids, true)));
+
+            return Http::response($this->payload($selected));
+        }]);
+
+        $reply = app(LineScheduleBot::class)->reply($command);
+
+        $this->assertStringContainsString('紐約洋基', $reply->text);
+        $this->assertStringContainsString('洛杉磯道奇', $reply->text);
+        $this->assertStringNotContainsString('巴爾的摩金鶯', $reply->text);
+        $this->assertSame(1, substr_count($reply->text, '【滾球】'));
+        $this->assertStringContainsString('目前比分｜3：2', $reply->text);
+        if (str_contains($command, 'text')) {
+            $this->assertNull($reply->imageData);
+        } else {
+            $this->assertCount(2, $reply->imageData['matches']);
+            $this->assertSame([true, false], array_column($reply->imageData['matches'], 'is_live'));
+        }
+        Http::assertSent(fn (Request $r): bool => $r['startDate'] === '2026-09-20' && ! isset($r['teamId']));
+        Http::assertSent(fn (Request $r): bool => $r['startDate'] !== '2026-09-20' && $r['teamId'] === '147,121,119,158');
+    }
+
+    public static function liveCommands(): array
+    {
+        return [
+            'mlb' => ['!mlb'],
+            'combined' => ['!match game=mlb/nba'],
+            'range' => ['!mlb 2d'],
+            'text' => ['!mlb text'],
+        ];
+    }
+
+    public function test_explicit_team_filter_and_limit_apply_to_untracked_live_games(): void
+    {
+        Http::fake(['https://statsapi.mlb.com/*' => fn (Request $r) => Http::response($this->payload(
+            $r['startDate'] === '2026-09-20' ? [
+                $this->game(1, '2026-09-21T01:00:00Z', 147, 121, 'Live', 3, 2),
+                $this->game(2, '2026-09-21T02:00:00Z', 110, 111, 'Live', 1, 0),
+            ] : [],
+        ))]);
+
+        $reply = app(LineScheduleBot::class)->reply('!mlb team=洋基 limit=1');
+
+        $this->assertNotNull($reply->imageData);
+        $this->assertCount(1, $reply->imageData['matches']);
+        $this->assertSame('紐約洋基', $reply->imageData['matches'][0]['team1']);
+        $this->assertTrue($reply->imageData['matches'][0]['is_live']);
+        $this->assertStringNotContainsString('巴爾的摩金鶯', $reply->text);
+        Http::assertNotSent(fn (Request $r): bool => isset($r['teamId']) && $r['teamId'] !== '147,121');
+    }
+
+    #[DataProvider('nonTodayOffsets')]
+    public function test_non_today_queries_keep_the_team_watchlist_even_with_stale_live_status(int $offset): void
+    {
+        $day = CarbonImmutable::now('Asia/Taipei')->startOfDay()->addDays($offset);
+        Http::fake(['https://statsapi.mlb.com/*' => Http::response($this->payload([
+            $this->game(1, $day->addHours(9)->toIso8601String(), 147, 121, 'Live'),
+            $this->game(2, $day->addHours(10)->toIso8601String(), 119, 158),
+        ]))]);
+
+        $matches = app(MlbScheduleService::class)->forRange($day, $day);
+
+        $this->assertSame([2], array_column($matches, 'game_pk'));
+        Http::assertNotSent(fn (Request $r): bool => $r['teamId'] !== '119,158');
+    }
+
+    public static function nonTodayOffsets(): array
+    {
+        return ['past' => [-1], 'future' => [1]];
     }
 
     public function test_team_filter_and_limit_are_applied_before_fetching_visible_opponents_history(): void
