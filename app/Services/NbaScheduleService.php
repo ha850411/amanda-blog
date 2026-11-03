@@ -30,7 +30,6 @@ class NbaScheduleService
             $requests[$day->format('Ymd')] = ['path' => '/scoreboard', 'query' => ['dates' => $day->format('Ymd'), 'limit' => 100]];
         }
 
-        $today = CarbonImmutable::now($startDate->timezone)->startOfDay();
         $matches = [];
         foreach ($this->fetch($requests) as $games) {
             if ($games === null) {
@@ -38,10 +37,8 @@ class NbaScheduleService
             }
             foreach ($games as $game) {
                 $game['start_at'] = $game['start_at']->setTimezone($startDate->timezone);
-                // Today's live games are useful even when neither team is on
-                // the watchlist. Other dates and statuses keep that filter.
-                $isLiveToday = $game['is_live'] && $game['start_at']->isSameDay($today);
-                if (! $isLiveToday && ! in_array($game['team1_id'], $teamIds, true) && ! in_array($game['team2_id'], $teamIds, true)) {
+                // Every game, including live and halftime games, must involve a tracked team.
+                if (! in_array($game['team1_id'], $teamIds, true) && ! in_array($game['team2_id'], $teamIds, true)) {
                     continue;
                 }
                 if ($game['start_at']->betweenIncluded($startDate->startOfDay(), $endDate->endOfDay())) {

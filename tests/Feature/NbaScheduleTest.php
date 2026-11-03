@@ -174,13 +174,16 @@ class NbaScheduleTest extends TestCase
     }
 
     #[DataProvider('liveCommands')]
-    public function test_today_includes_untracked_live_teams_but_keeps_other_games_on_the_watchlist(string $command): void
+    public function test_today_only_includes_watchlist_games_including_live_and_halftime(string $command): void
     {
         $halftime = $this->game(2, '2026-11-15T02:00:00Z', 23, 3, 'STATUS_HALFTIME', 55, 50);
         $halftime['status']['type']['state'] = 'in';
-        $live = $this->game(1, '2026-11-15T01:00:00Z', 5, 1, 'STATUS_IN_PROGRESS', 80, 75);
+        $live = $this->game(8, '2026-11-15T01:30:00Z', 20, 2, 'STATUS_IN_PROGRESS', 80, 75);
+        $trackedHalftime = $this->game(9, '2026-11-15T02:30:00Z', 4, 11, 'STATUS_HALFTIME', 55, 50);
+        $trackedHalftime['status']['type']['state'] = 'in';
         $this->fakeSchedule([
-            $live, $live, $halftime,
+            $live, $live, $halftime, $trackedHalftime,
+            $this->game(1, '2026-11-15T01:00:00Z', 5, 1, 'STATUS_IN_PROGRESS', 80, 75),
             $this->game(3, '2026-11-15T05:00:00Z', 9, 13),
             $this->game(4, '2026-11-15T05:00:00Z', 29, 22),
             $this->game(5, '2026-11-15T00:00:00Z', 5, 1, 'STATUS_FINAL', 110, 100),
@@ -190,8 +193,10 @@ class NbaScheduleTest extends TestCase
 
         $reply = app(LineScheduleBot::class)->reply($command);
 
-        $this->assertStringContainsString('克里夫蘭騎士', $reply->text);
-        $this->assertStringContainsString('沙加緬度國王', $reply->text);
+        $this->assertStringNotContainsString('克里夫蘭騎士', $reply->text);
+        $this->assertStringNotContainsString('沙加緬度國王', $reply->text);
+        $this->assertStringContainsString('費城76人', $reply->text);
+        $this->assertStringContainsString('印第安納溜馬', $reply->text);
         $this->assertStringContainsString('金州勇士', $reply->text);
         $this->assertStringNotContainsString('曼菲斯灰熊', $reply->text);
         $this->assertSame(2, substr_count($reply->text, '【滾球】'));
@@ -204,52 +209,74 @@ class NbaScheduleTest extends TestCase
             $this->assertSame([true, true, false], array_column($reply->imageData['matches'], 'is_live'));
             $this->assertSame(['進行中', '中場休息', '未開打'], array_column($reply->imageData['matches'], 'status_label'));
         }
+        Http::assertNotSent(fn (Request $r): bool => (bool) preg_match('~/teams/(1|3|5|22|23|29)/~', $r->url()));
     }
 
     public static function liveCommands(): array
     {
         return [
             'nba' => ['!nba'],
+            'today' => ['!nba 今天'],
+            'combined nba' => ['!match game=nba'],
             'combined' => ['!match game=nba/mlb'],
             'range' => ['!nba 2d'],
+            'explicit range' => ['!nba 1115~1116'],
             'text' => ['!nba text'],
         ];
     }
 
-    public function test_explicit_team_filter_and_limit_apply_to_untracked_live_games(): void
+    public function test_explicit_team_filter_and_limit_apply_after_the_watchlist_for_live_games(): void
     {
         $this->fakeSchedule([
             $this->game(1, '2026-11-15T01:00:00Z', 5, 1, 'STATUS_IN_PROGRESS', 80, 75),
             $this->game(2, '2026-11-15T02:00:00Z', 23, 3, 'STATUS_IN_PROGRESS', 55, 50),
+            $this->game(3, '2026-11-15T02:30:00Z', 20, 1, 'STATUS_IN_PROGRESS', 90, 85),
+            $this->game(4, '2026-11-15T03:00:00Z', 9, 1, 'STATUS_IN_PROGRESS', 50, 45),
         ]);
 
         $reply = app(LineScheduleBot::class)->reply('!nba team=老鷹 limit=1');
 
         $this->assertNotNull($reply->imageData);
         $this->assertCount(1, $reply->imageData['matches']);
+        $this->assertSame('費城76人', $reply->imageData['matches'][0]['team1']);
         $this->assertSame('亞特蘭大老鷹', $reply->imageData['matches'][0]['team2']);
         $this->assertTrue($reply->imageData['matches'][0]['is_live']);
+        $this->assertStringContainsString('另有 1 場', $reply->text);
         $this->assertStringNotContainsString('沙加緬度國王', $reply->text);
-        Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), '/teams/23/') || str_contains($r->url(), '/teams/3/'));
+        Http::assertNotSent(fn (Request $r): bool => (bool) preg_match('~/teams/(3|5|9|23)/~', $r->url()));
     }
 
-    #[DataProvider('nonTodayOffsets')]
-    public function test_non_today_queries_keep_the_team_watchlist_even_with_stale_live_status(int $offset): void
+    public function test_today_with_only_untracked_live_games_has_no_schedule(): void
+    {
+        $this->fakeSchedule([
+            $this->game(1, '2026-11-15T01:00:00Z', 5, 1, 'STATUS_IN_PROGRESS', 80, 75),
+        ]);
+
+        $reply = app(LineScheduleBot::class)->reply('!nba');
+
+        $this->assertNull($reply->imageData);
+        $this->assertStringContainsString('NBA 11/15 查無賽程', $reply->text);
+        Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), '/teams/'));
+    }
+
+    #[DataProvider('watchlistDateOffsets')]
+    public function test_all_dates_keep_the_team_watchlist_regardless_of_live_status(int $offset): void
     {
         $day = CarbonImmutable::now('Asia/Taipei')->startOfDay()->addDays($offset);
         $this->fakeSchedule([
             $this->game(1, $day->addHours(9)->toIso8601String(), 5, 1, 'STATUS_IN_PROGRESS'),
             $this->game(2, $day->addHours(10)->toIso8601String(), 9, 13),
+            $this->game(3, $day->addHours(11)->toIso8601String(), 13, 20, 'STATUS_IN_PROGRESS'),
         ]);
 
         $matches = app(NbaScheduleService::class)->forRange($day, $day);
 
-        $this->assertSame(['2'], array_column($matches, 'event_id'));
+        $this->assertSame(['2', '3'], array_column($matches, 'event_id'));
     }
 
-    public static function nonTodayOffsets(): array
+    public static function watchlistDateOffsets(): array
     {
-        return ['past' => [-1], 'future' => [1]];
+        return ['past' => [-1], 'today' => [0], 'future' => [1]];
     }
 
     public function test_combined_mlb_nba_command_has_sports_links_and_no_esports_tier_or_requests(): void
