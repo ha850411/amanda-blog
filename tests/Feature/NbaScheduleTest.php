@@ -350,6 +350,7 @@ class NbaScheduleTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!nba 1114');
         $this->assertStringContainsString('終場比分｜110：100', $reply->text);
         $this->assertSame('已結束', $reply->imageData['matches'][0]['status_label']);
+        $this->assertTrue($reply->imageData['matches'][0]['is_finished']);
     }
 
     public function test_only_visible_teams_get_history_and_one_teams_failure_does_not_hide_the_schedule(): void

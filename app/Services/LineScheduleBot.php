@@ -400,6 +400,7 @@ class LineScheduleBot
                         : $match['start_at']->format('H:i')),
                     'format' => $match['format'],
                     'is_live' => $match['is_live'] ?? false,
+                    'is_finished' => $match['is_finished'] ?? false,
                     'series_score' => $match['series_score'] ?? null,
                     'score' => $match['score'] ?? null,
                     'team1' => $match['team1'],

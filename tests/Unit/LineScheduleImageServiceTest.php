@@ -2,13 +2,71 @@
 
 namespace Tests\Unit;
 
+use App\Services\LineSchedule\Renderers\ScheduleRenderer;
 use App\Services\LineScheduleImageService;
 use Illuminate\Support\Facades\Storage;
 use Imagick;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class LineScheduleImageServiceTest extends TestCase
 {
+    #[DataProvider('matchScoreStates')]
+    public function test_score_display_depends_on_match_status(array $state, ?string $seriesScore, ?string $score, bool $showScore): void
+    {
+        if (! extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick is required to verify schedule image layout.');
+        }
+
+        $match = [
+            ...$state,
+            'start_time' => '06:00',
+            'format' => 'BO5',
+            'team1' => 'Gen.G Esports',
+            'team2' => 'LYON',
+            'tournament' => 'Worlds 2026',
+            'odds' => [
+                'team1' => ['price' => 1.05],
+                'team2' => ['price' => 10.00],
+            ],
+        ];
+        $data = [
+            'title' => 'LoL｜11/05｜S Tier',
+            'subtitle' => '台灣時間｜1 場賽程',
+            'game' => 'lol',
+            'matches' => [$match],
+        ];
+        $renderer = new ScheduleRenderer;
+        $withoutScore = $renderer->render($data);
+        $data['matches'][0]['series_score'] = $seriesScore;
+        $data['matches'][0]['score'] = $score;
+        $withScore = $renderer->render($data);
+
+        if ($showScore) {
+            $this->assertNotSame($withoutScore->getImageSignature(), $withScore->getImageSignature());
+        } else {
+            $this->assertSame($withoutScore->getImageSignature(), $withScore->getImageSignature());
+        }
+
+        $withoutScore->clear();
+        $withScore->clear();
+    }
+
+    public static function matchScoreStates(): array
+    {
+        return [
+            'upcoming series placeholder' => [['is_live' => false], '0：0', null, false],
+            'upcoming series and game placeholders' => [['is_live' => false], '0：0', '0：0', false],
+            'upcoming stale scores' => [['is_live' => false], '1：0', '7：4', false],
+            'unknown status' => [[], '0：0', null, false],
+            'live scoreless series' => [['is_live' => true], '0：0', null, true],
+            'live scoreless game' => [['is_live' => true], '0：0', '0：0', true],
+            'live scores' => [['is_live' => true], '1：0', '7：4', true],
+            'finished series' => [['is_live' => false, 'is_finished' => true], '3：0', null, true],
+            'finished game' => [['is_live' => false, 'is_finished' => true], null, '110：100', true],
+        ];
+    }
+
     public function test_it_renders_four_columns_per_match_and_grows_the_image_height(): void
     {
         if (! extension_loaded('imagick')) {

@@ -286,8 +286,9 @@ class ScheduleRenderer extends AbstractImageRenderer
         $this->scheduleRawText($draw, $x + $w, $y + 18, $tourText, (int) $draw->getFontSize(), '#94a3b8', 600, Imagick::ALIGN_RIGHT);
 
         // Scoreboard (Line 2: Team 1, Line 3: Team 2)
-        [$series1, $series2] = $this->parseScores($match['series_score'] ?? null);
-        [$score1, $score2] = $this->parseScores($match['score'] ?? null);
+        $showScore = $isLive || ($match['is_finished'] ?? false);
+        [$series1, $series2] = $this->parseScores($showScore ? ($match['series_score'] ?? null) : null);
+        [$score1, $score2] = $this->parseScores($showScore ? ($match['score'] ?? null) : null);
 
         $price1 = $match['odds']['team1']['price'] ?? null;
         $price2 = $match['odds']['team2']['price'] ?? null;
