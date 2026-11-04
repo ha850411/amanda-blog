@@ -13,8 +13,6 @@ class ScheduleRenderer extends AbstractImageRenderer
 {
     private const CARD_HEIGHT = 176;
 
-    private const SCORE_HEADER_HEIGHT = 40;
-
     private const CARD_GAP = 12;
 
     private const CARDS_TOP = 160;
@@ -48,7 +46,7 @@ class ScheduleRenderer extends AbstractImageRenderer
 
         foreach ($matches as $match) {
             $this->drawScheduleCard($image, $draw, $x, $y, $match, $data['game'] ?? null, $iconsToDraw);
-            $y += $this->cardHeight($match) + self::CARD_GAP;
+            $y += self::CARD_HEIGHT + self::CARD_GAP;
         }
 
         $image->drawImage($draw);
@@ -172,7 +170,7 @@ class ScheduleRenderer extends AbstractImageRenderer
         $isLive = (bool) ($match['is_live'] ?? false);
         $cardBorder = $isLive ? '#dc2626' : ($theme['card_border'] ?? '#1e293b');
         $cardWidth = 1352;
-        $cardHeight = $this->cardHeight($match);
+        $cardHeight = self::CARD_HEIGHT;
 
         // 1. Card Container & Game Theme Left Accent
         $this->scheduleBox($draw, $x, $y, $cardWidth, $cardHeight, '#111827', $cardBorder, 14, $isLive ? 1.6 : 1.2);
@@ -194,9 +192,8 @@ class ScheduleRenderer extends AbstractImageRenderer
         $form1X = $x + 16 + $s1W + 20;
         $form2X = $form1X + $formW + 14;
 
-        $formY = $y + 8 + (int) (($cardHeight - self::CARD_HEIGHT) / 2);
-        $this->drawRecentFormSection($image, $draw, $form1X, $formY, $formW, (string) $match['team1'], $match['recent_form']['team1'] ?? null);
-        $this->drawRecentFormSection($image, $draw, $form2X, $formY, $formW, (string) $match['team2'], $match['recent_form']['team2'] ?? null);
+        $this->drawRecentFormSection($image, $draw, $form1X, $y + 8, $formW, (string) $match['team1'], $match['recent_form']['team1'] ?? null);
+        $this->drawRecentFormSection($image, $draw, $form2X, $y + 8, $formW, (string) $match['team2'], $match['recent_form']['team2'] ?? null);
     }
 
     /**
@@ -302,17 +299,24 @@ class ScheduleRenderer extends AbstractImageRenderer
         $hasHomeAway = in_array($game, ['mlb', 'nba'], true);
         $abbr1 = $hasHomeAway ? '客隊' : TeamAbbreviation::get((string) $match['team1']);
         $abbr2 = $hasHomeAway ? '主隊' : TeamAbbreviation::get((string) $match['team2']);
-        $scoreHeaderHeight = $showScore ? self::SCORE_HEADER_HEIGHT : 0;
-
-        if ($showScore) {
-            $this->drawScoreHeaders($draw, $x, $y + 32, $w, $game, $hasHomeAway, $isLive);
-        }
+        $scoreState = [
+            'has_series' => ! $hasHomeAway,
+            'win_slots' => preg_match('/^BO[1-9]\d*$/i', (string) ($match['format'] ?? '')) === 1
+                ? ImageTheme::seriesWinSlots($match['format']) : null,
+            'has_score' => $hasHomeAway || ($score1 !== null && $score2 !== null),
+            'score_label' => match ($game) {
+                'lol' => '擊殺',
+                'cs', 'cs2', 'val', 'valorant' => '回合',
+                'mlb', 'nba' => $isLive ? '得分' : '終場',
+                default => '小場',
+            },
+        ];
 
         $this->drawTeamScoreRow(
             $image,
             $draw,
             $x,
-            $y + 32 + $scoreHeaderHeight,
+            $y + 32,
             $w,
             (string) $match['team1'],
             $abbr1,
@@ -321,12 +325,10 @@ class ScheduleRenderer extends AbstractImageRenderer
             $hasAnyOdds,
             $isFavored1,
             $showScore ? [
-                'has_series' => ! $hasHomeAway,
+                ...$scoreState,
                 'series' => $series1,
                 'score' => $score1,
-                'series_leading' => $series1 !== null && $series2 !== null && (int) $series1 > (int) $series2,
                 'score_leading' => $score1 !== null && $score2 !== null && (int) $score1 > (int) $score2,
-                'is_live' => $isLive,
             ] : null,
         );
 
@@ -334,7 +336,7 @@ class ScheduleRenderer extends AbstractImageRenderer
             $image,
             $draw,
             $x,
-            $y + 78 + $scoreHeaderHeight,
+            $y + 78,
             $w,
             (string) $match['team2'],
             $abbr2,
@@ -343,17 +345,15 @@ class ScheduleRenderer extends AbstractImageRenderer
             $hasAnyOdds,
             $isFavored2,
             $showScore ? [
-                'has_series' => ! $hasHomeAway,
+                ...$scoreState,
                 'series' => $series2,
                 'score' => $score2,
-                'series_leading' => $series1 !== null && $series2 !== null && (int) $series2 > (int) $series1,
                 'score_leading' => $score1 !== null && $score2 !== null && (int) $score2 > (int) $score1,
-                'is_live' => $isLive,
             ] : null,
         );
 
         // Line 4: NBA bookmaker or H2H footer.
-        $h2hY = $y + 126 + $scoreHeaderHeight;
+        $h2hY = $y + 126;
         $this->scheduleBox($draw, $x, $h2hY, $w, 29, '#09101d', '#17253b', 6);
 
         $h2h = $match['h2h'] ?? null;
@@ -410,32 +410,8 @@ class ScheduleRenderer extends AbstractImageRenderer
         }
     }
 
-    private function drawScoreHeaders(ImagickDraw $draw, int $x, int $y, int $w, ?string $game, bool $hasHomeAway, bool $isLive): void
-    {
-        $this->scheduleRawText($draw, $x + 10, $y + 25, '隊伍', 13, '#94a3b8', 600);
-        $oddsX = $x + $w - ($hasHomeAway ? 130 : 198);
-        $this->scheduleRawText($draw, $oddsX, $y + 25, '獨贏', 13, '#94a3b8', 600, Imagick::ALIGN_CENTER);
-
-        if (! $hasHomeAway) {
-            $seriesX = $x + $w - 126;
-            $this->scheduleRawText($draw, $seriesX, $y + 16, '大場', 16, '#c4b5fd', 800, Imagick::ALIGN_CENTER);
-            $this->scheduleRawText($draw, $seriesX, $y + 32, '系列勝局', 11, '#a78bfa', 500, Imagick::ALIGN_CENTER);
-        }
-
-        $scoreX = $x + $w - 41;
-        $scoreLabel = $hasHomeAway ? ($isLive ? '比分' : '終場') : '小場';
-        $unit = match ($game) {
-            'lol' => $isLive ? '當局擊殺' : '末局擊殺',
-            'cs', 'cs2', 'val', 'valorant' => $isLive ? '當圖回合' : '末圖回合',
-            'mlb', 'nba' => '得分',
-            default => $isLive ? '當局比分' : '末局比分',
-        };
-        $this->scheduleRawText($draw, $scoreX, $y + 16, $scoreLabel, 16, '#67e8f9', 800, Imagick::ALIGN_CENTER);
-        $this->scheduleRawText($draw, $scoreX, $y + 32, $unit, 11, '#22d3ee', 500, Imagick::ALIGN_CENTER);
-    }
-
     /**
-     * @param  array{has_series: bool, series: ?string, score: ?string, series_leading: bool, score_leading: bool, is_live: bool}|null  $scoreState
+     * @param  array{has_series: bool, win_slots: ?int, has_score: bool, score_label: string, series: ?string, score: ?string, score_leading: bool}|null  $scoreState
      */
     private function drawTeamScoreRow(
         Imagick $image,
@@ -458,20 +434,32 @@ class ScheduleRenderer extends AbstractImageRenderer
         $this->scheduleBox($draw, $x, $rowY, $w, $rowH, $rowBg, $rowBorder, 7, $isFavored ? 1.2 : 1.0);
 
         if ($scoreState !== null) {
-            $oddsX = $x + $w - ($scoreState['has_series'] ? 198 : 130);
+            $rightEdge = $x + $w - 8;
+            if ($scoreState['has_score']) {
+                $this->drawScoreCell($image, $draw, $rightEdge - 86, $rowY, $scoreState['score'], $scoreState['score_label'], $scoreState['score_leading']);
+                $rightEdge -= 98;
+            }
+            if ($scoreState['has_series']) {
+                $rightEdge -= $this->drawSeriesWins($draw, $rightEdge, $rowY, $scoreState['series'], $scoreState['win_slots']) + 14;
+            }
+
+            // Odds are secondary; leave room for the team name when no price is available.
+            if ($price !== null) {
+                $odds = sprintf('@%.2f', $price);
+                $draw->setFontSize(13);
+                $draw->setFontWeight(600);
+                $oddsWidth = (int) ceil($image->queryFontMetrics($draw, $odds)['textWidth']);
+                $this->scheduleRawText($draw, $rightEdge, $rowY + 26, $odds, 13, $isFavored ? '#38bdf8' : '#94a3b8', 600, Imagick::ALIGN_RIGHT);
+                $rightEdge -= $oddsWidth + 12;
+            }
+
             $nameX = $x + 10;
             if ($rolePrefix !== '') {
                 $this->scheduleBox($draw, $x + 8, $rowY + 8, 42, 26, '#1e293b', '#334155', 5);
                 $this->scheduleRawText($draw, $x + 29, $rowY + 26, $abbr, 12, '#cbd5e1', 700, Imagick::ALIGN_CENTER);
                 $nameX = $x + 58;
             }
-            $this->scheduleText($image, $draw, $nameX, $rowY + 28, $teamName, 19, '#f8fafc', 700, $oddsX - $nameX - 38);
-            $this->scheduleRawText($draw, $oddsX, $rowY + 27, $price === null ? '—' : sprintf('%.2f', $price), 14, $isFavored ? '#38bdf8' : '#94a3b8', 600, Imagick::ALIGN_CENTER);
-
-            if ($scoreState['has_series']) {
-                $this->drawScoreCell($image, $draw, $x + $w - 162, $rowY, 72, $scoreState['series'], true, $scoreState['series_leading'], $scoreState['is_live']);
-            }
-            $this->drawScoreCell($image, $draw, $x + $w - 80, $rowY, 78, $scoreState['score'], false, $scoreState['score_leading'], $scoreState['is_live']);
+            $this->scheduleText($image, $draw, $nameX, $rowY + 28, $teamName, 19, '#f8fafc', 700, $rightEdge - $nameX - 8);
 
             return;
         }
@@ -507,23 +495,36 @@ class ScheduleRenderer extends AbstractImageRenderer
         $this->scheduleText($image, $draw, $x + 58, $rowY + 28, $teamName, 18, '#f8fafc', 700, $maxNameW);
     }
 
-    private function drawScoreCell(Imagick $image, ImagickDraw $draw, int $x, int $y, int $w, ?string $score, bool $isSeries, bool $isLeading, bool $isLive): void
+    /** Draw one vertical bar per win needed to take the series; unknown scores stay explicit. */
+    private function drawSeriesWins(ImagickDraw $draw, int $rightEdge, int $y, ?string $score, ?int $slots): int
     {
-        $fill = $isSeries ? ($isLeading ? '#31245b' : '#1c1933') : ($isLeading ? '#083b46' : '#102632');
-        $border = $isSeries ? ($isLeading ? '#a78bfa' : '#453769') : ($isLeading ? '#22d3ee' : '#224653');
-        $text = $isSeries ? '#ede9fe' : '#cffafe';
-        $this->scheduleBox($draw, $x, $y + 2, $w, 38, $fill, $border, 6, $isLeading ? 1.5 : 1.0);
+        $useBars = $slots !== null && $slots <= 5;
+        $width = $useBars ? 30 + $slots * 14 - 5 : 60;
+        $x = $rightEdge - $width;
+        $this->scheduleRawText($draw, $x, $y + 26, '大場', 11, '#a5b4fc', 600);
 
-        if ($score === null) {
-            $this->scheduleRawText($draw, $x + (int) ($w / 2), $y + 26, $isLive ? '待更新' : '—', 12, '#94a3b8', 500, Imagick::ALIGN_CENTER);
+        if ($score === null || ! $useBars || (int) $score > $slots) {
+            $this->scheduleRawText($draw, $rightEdge, $y + 28, $score ?? '—', 20, '#c4b5fd', 700, Imagick::ALIGN_RIGHT);
 
-            return;
+            return $width;
         }
 
-        $draw->setFontSize($isSeries ? 28 : 24);
+        for ($slot = 0; $slot < $slots; $slot++) {
+            $color = $slot < (int) $score ? '#a78bfa' : '#334155';
+            $this->scheduleBox($draw, $x + 30 + $slot * 14, $y + 9, 9, 24, $color, 'none', 2, 0);
+        }
+
+        return $width;
+    }
+
+    private function drawScoreCell(Imagick $image, ImagickDraw $draw, int $x, int $y, ?string $score, string $label, bool $isLeading): void
+    {
+        $this->scheduleBox($draw, $x, $y + 6, 86, 30, '#102632', $isLeading ? '#22d3ee' : '#224653', 5);
+        $this->scheduleRawText($draw, $x + 8, $y + 26, $label, 11, '#67e8f9', 500);
+        $draw->setFontSize(22);
         $draw->setFontWeight(800);
-        $label = $this->fitText($image, $draw, $score, $w - 12, 16);
-        $this->scheduleRawText($draw, $x + (int) ($w / 2), $y + 30, $label, (int) $draw->getFontSize(), $text, 800, Imagick::ALIGN_CENTER);
+        $value = $this->fitText($image, $draw, $score ?? '—', 42, 16);
+        $this->scheduleRawText($draw, $x + 77, $y + 29, $value, (int) $draw->getFontSize(), '#cffafe', 800, Imagick::ALIGN_RIGHT);
     }
 
     /**
@@ -640,13 +641,8 @@ class ScheduleRenderer extends AbstractImageRenderer
     private function canvasHeight(array $matches): int
     {
         return self::CARDS_TOP
-            + array_sum(array_map(fn (array $match): int => $this->cardHeight($match), $matches))
+            + (count($matches) * self::CARD_HEIGHT)
             + (max(0, count($matches) - 1) * self::CARD_GAP)
             + self::CANVAS_BOTTOM_PADDING;
-    }
-
-    private function cardHeight(array $match): int
-    {
-        return self::CARD_HEIGHT + (($match['is_live'] ?? false) || ($match['is_finished'] ?? false) ? self::SCORE_HEADER_HEIGHT : 0);
     }
 }

@@ -139,9 +139,9 @@ class LineScheduleImageServiceTest extends TestCase
         $preview->readImageBlob(Storage::disk('schedule-images')->get($previewPath));
 
         $this->assertSame(1440, $original->getImageWidth());
-        $this->assertSame(782, $original->getImageHeight());
+        $this->assertSame(742, $original->getImageHeight());
         $this->assertSame(700, $preview->getImageWidth());
-        $this->assertSame(380, $preview->getImageHeight());
+        $this->assertSame(361, $preview->getImageHeight());
         $this->assertSame(
             ['r' => 17, 'g' => 24, 'b' => 39, 'a' => 1],
             $original->getImagePixelColor(520, 165)->getColor(),
@@ -149,8 +149,8 @@ class LineScheduleImageServiceTest extends TestCase
         // Recent form pills: winner is green and loser red
         $win = ['r' => 7, 'g' => 56, 'b' => 47, 'a' => 1];
         $loss = ['r' => 61, 'g' => 23, 'b' => 36, 'a' => 1];
-        $this->assertSame($win, $original->getImagePixelColor(570, 215)->getColor());
-        $this->assertSame($loss, $original->getImagePixelColor(570, 242)->getColor());
+        $this->assertSame($win, $original->getImagePixelColor(570, 195)->getColor());
+        $this->assertSame($loss, $original->getImagePixelColor(570, 222)->getColor());
 
         $original->clear();
         $preview->clear();
