@@ -10,6 +10,7 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -34,7 +35,9 @@ class LineWebhookTest extends TestCase
             'services.odds.bookmakers' => 'Pinnacle,Bet365',
             'mlb.team_ids' => [], // MLB integration has its own fixtures.
             'nba.team_ids' => [], // NBA integration has its own fixtures.
+            'services.line.schedule_image_disk' => 'line-webhook-test',
         ]);
+        Storage::fake('line-webhook-test');
 
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-11 09:00:00', 'Asia/Taipei'));
     }
@@ -375,6 +378,7 @@ class LineWebhookTest extends TestCase
 
     public function test_help_command_returns_usage_instructions(): void
     {
+        $this->fakeScheduleImage();
         Http::fake([
             'https://api.line.me/*' => Http::response(['sentMessages' => []], 200),
         ]);
@@ -399,11 +403,27 @@ class LineWebhookTest extends TestCase
                 return false;
             }
 
-            return $request['messages'][0]['type'] === 'text'
-                && str_contains($request['messages'][0]['text'], '!match｜!lol｜!val｜!cs｜!mlb｜!nba')
-                && str_contains($request['messages'][0]['text'], '!odds BLG 11/06')
-                && str_contains($request['messages'][0]['text'], '!odds teams');
+            return $request['messages'][0]['type'] === 'image'
+                && $request['messages'][0]['originalContentUrl'] === 'https://cdn.example.com/line-schedules/test/1440'
+                && $request['messages'][0]['previewImageUrl'] === 'https://cdn.example.com/line-schedules/test/700'
+                && ! empty($request['messages'][0]['quickReply']['items']);
         });
+    }
+
+    public function test_help_image_failure_returns_complete_page_text_and_navigation(): void
+    {
+        $this->mock(LineScheduleImageService::class, function ($mock): void {
+            $mock->shouldReceive('create')->once()->withArgs(fn (array $data, $url): bool => $data['type'] === 'help' && $url === null)
+                ->andThrow(new RuntimeException('Image storage unavailable.'));
+        });
+        Http::fake(['https://api.line.me/*' => Http::response([])]);
+        $job = new ProcessLineWebhookEvent(['type' => 'message', 'replyToken' => 'help-token',
+            'message' => ['id' => 'help-fallback', 'type' => 'text', 'text' => '!h markets']]);
+        $this->app->call([$job, 'handle']);
+        Http::assertSent(fn ($request): bool => $request['messages'][0]['type'] === 'text'
+            && str_contains($request['messages'][0]['text'], '!odds T1 1107 text')
+            && str_contains($request['messages'][0]['text'], 'page=2')
+            && ! empty($request['messages'][0]['quickReply']['items']));
     }
 
     public function test_non_command_message_is_ignored(): void

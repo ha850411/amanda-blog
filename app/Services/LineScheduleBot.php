@@ -11,6 +11,8 @@ class LineScheduleBot
 {
     public const MAX_SCHEDULE_DAYS = 7;
 
+    public const MAX_SCHEDULE_MATCHES = 19;
+
     private const GAME_LABELS = [
         'cs' => 'CS2',
         'valorant' => 'VALORANT',
@@ -38,42 +40,27 @@ class LineScheduleBot
     public function reply(string $message): ?LineBotReply
     {
         $message = $this->normalizeCommand($message);
-
-        if (mb_strtolower($message) === '!help') {
-            return new LineBotReply($this->help());
+        $request = LineCommandRegistry::parse($message);
+        if ($request === null) {
+            return null;
         }
-
-        if (preg_match('/^!(?:odds|賠率)(?:\s+(.*))?$/iu', $message, $matches)) {
-            return app(StakeOddsService::class)->reply(trim($matches[1] ?? ''));
+        if ($request['group'] === 'help') {
+            return app(LineHelpService::class)->reply($request['argument']);
         }
-
-        if (preg_match('/^!(?:bet|bets|stake|投注)(?:\s+(.*))?$/iu', $message, $matches)) {
-            $argument = trim($matches[1] ?? '');
-            if (mb_strtolower($argument) === 'help') {
-                return new LineBotReply("指令格式：\n!bet\n查詢 Stake 進行中的體育投注、即時賽況與兌現。\n\n!r 或 !record [日期或區間]\n查詢指定日期或區間之投注紀錄與損益統計圖（支援 09-06、09-01~09-06、近7天、本週等）。\n\n!balance 或 !bal [天數]\n查詢資金水位長條圖（預設 3 天，最多 30 天，依每單結盤時間點繪製）。\n\n!bet balance\n查詢 Stake 帳號 USDT 即時資金水位。");
-            }
-
-            return ($this->stake ?? app(StakeBetService::class))->reply($argument);
+        if (preg_match('/^(?:h|help)(?:\s+text)?$/iu', $request['argument'])) {
+            return app(LineHelpService::class)->reply($request['help_page'].(str_ends_with(mb_strtolower($request['argument']), ' text') ? ' text' : ''));
         }
-
-        if (preg_match('/^!(?:record|records|history|pnl|損益|紀錄|記錄|r)(?:\s+(.*))?$/iu', $message, $matches)) {
-            $argument = trim($matches[1] ?? '');
-            if (mb_strtolower($argument) === 'help') {
-                return new LineBotReply("指令格式：\n!r 或 !record [日期或區間]\n查詢 Stake 投注紀錄與損益統計圖。\n\n支援範例：\n・!r（預設今天）\n・!r 昨天 或 !r 09-06 或 !r 9/6\n・!r 09-01~09-06（區間統計，最多 30 天）\n・!r 近7天 或 !r 7d（最多 30 天）\n・!r 本週、上週、本月\n・加 text 查看純文字（例如 !r 7d text）\n\n備註：\n・查詢區間最多 30 天\n・注單明細最多顯示 10 筆");
-            }
-
-            $fullArg = $argument === '' ? 'record' : 'record '.$argument;
-
-            return ($this->stake ?? app(StakeBetService::class))->reply($fullArg);
+        if ($request['group'] === 'odds') {
+            return app(StakeOddsService::class)->reply($request['argument']);
         }
-
-        if (preg_match('/^!(?:balance|bal|equity|water|chart|水位|資金水位|資金)(?:\s+(.*))?$/iu', $message, $matches)) {
-            $argument = trim($matches[1] ?? '');
-            if (mb_strtolower($argument) === 'help') {
-                return new LineBotReply("指令格式：\n!balance 或 !bal 或 !水位 [天數]\n查詢 Stake 資金水位的長條圖（根據每一單結盤時間點繪製）。\n\n預設回傳近 3 天，最多可查詢 30 天。\n\n支援範例：\n・!balance（預設 3 天）\n・!bal 7d 或 !bal 7天\n・!水位 30d\n・加 text 查看純文字（例如 !balance 3d text）");
-            }
-
-            return ($this->stake ?? app(StakeBetService::class))->handleBalanceChartReply($argument);
+        if ($request['group'] === 'bets') {
+            return ($this->stake ?? app(StakeBetService::class))->reply($request['argument']);
+        }
+        if ($request['group'] === 'records') {
+            return ($this->stake ?? app(StakeBetService::class))->reply(trim('record '.$request['argument']));
+        }
+        if ($request['group'] === 'balance') {
+            return ($this->stake ?? app(StakeBetService::class))->handleBalanceChartReply($request['argument']);
         }
 
         $command = $this->parseCommand($message);
@@ -448,12 +435,13 @@ class LineScheduleBot
      */
     private function parseCommand(string $message): array|string|null
     {
-        if (! preg_match('/^!(賽程|schedule|match|matches|lol|val|cs2|cs|mlb|nba)(?:\s+(.*))?$/iu', $message, $matches)) {
+        $request = LineCommandRegistry::parse($message);
+        if ($request === null || $request['group'] !== 'schedule') {
             return null;
         }
 
-        $commandKey = mb_strtolower($matches[1]);
-        $rawArguments = trim($matches[2] ?? '');
+        $commandKey = $request['command'];
+        $rawArguments = $request['argument'];
 
         $dateAtom = '(?:今天|明天|後天|\d{4}[-\/\.]\d{1,2}[-\/\.]\d{1,2}|\d{1,2}[-\/\.]\d{1,2}|\d{4})';
         $rangePattern = '/^('.$dateAtom.'\s*(?:~|～)\s*'.$dateAtom.')(?:\s+(.*))?$/iu';
@@ -670,7 +658,7 @@ class LineScheduleBot
         // A typical combined S-tier day can exceed ten matches. Keep the
         // default large enough for the full image while retaining an explicit
         // limit option for callers that want a shorter response.
-        $options = ['tiers' => ['s'], 'limit' => 19, 'team' => null, 'text_only' => false];
+        $options = ['tiers' => ['s'], 'limit' => self::MAX_SCHEDULE_MATCHES, 'team' => null, 'text_only' => false];
 
         if (trim($input) === '') {
             return $options;
@@ -742,7 +730,7 @@ class LineScheduleBot
 
                 $options['tiers'] = $tiers;
             } elseif ($key === 'limit') {
-                if (! ctype_digit($value) || (int) $value < 1 || (int) $value > 19) {
+                if (! ctype_digit($value) || (int) $value < 1 || (int) $value > self::MAX_SCHEDULE_MATCHES) {
                     return null;
                 }
 
@@ -834,10 +822,5 @@ class LineScheduleBot
         }
 
         return $url.implode('&', $query);
-    }
-
-    private function help(): string
-    {
-        return "指令格式：\n!odds 隊名 [日期] [game=項目]（Stake 獨贏／讓分／大小分）\n項目擇一：lol、cs、val、mlb、nba\n!odds BLG 11/06｜!odds G2 game=cs｜!odds 勇士 game=nba\n!odds 道奇 明天 game=mlb｜!odds 加上 Stake 比賽網址\n!odds teams｜!odds teams game=nba｜!odds teams game=mlb\n省略 game= 時跨項目搜尋，同名或同日多場會列出選項。\n\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n!match 2d（含今天起 2 天，支援 1d～7d）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nNBA 所有賽事（含滾球）皆依追蹤清單；MLB 查今天另納入所有球隊的滾球，未開賽仍依追蹤清單。team= 可再篩選。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }

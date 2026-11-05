@@ -102,8 +102,8 @@ class ProcessLineWebhookEvent implements ShouldBeUnique, ShouldQueue
                 try {
                     $imageUrl = $images->create($reply->imageData, $reply->linkUrl);
                 } catch (Throwable $imageException) {
-                    // Image storage is optional. The text response still contains
-                    // the filtered overview URL and is the supported fallback.
+                    // Help and data replies both retain their full text and
+                    // navigation when rendering or image storage is unavailable.
                     $this->writeLog($webhookLog, 'warning', 'LINE schedule image unavailable; falling back to text.', [
                         'message_id' => $messageId,
                         'type' => $imageException::class,

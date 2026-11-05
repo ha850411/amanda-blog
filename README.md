@@ -134,15 +134,23 @@ Jenkins 使用 Credentials Binding 將 Secret text credential 綁定為 `GHCR_TO
 
 # LINE 賽程 Bot
 
-`!odds` 查詢 LoL、CS2、Valorant、MLB 與 NBA 的 Stake 盤口，預設產圖；加 `text` 可回傳文字，點選場次、更新或翻頁時也會保留文字模式。電競提供整場獨贏、地圖讓分及總局數大小分；MLB／NBA 提供整場獨贏、讓分及總分大小分，保留來源的延長局／延長賽標示。沿用 `!bet`、`!r` 的 `config/stake_sources.json` 網域順序、proxy、驗證與失敗冷卻設定，每次重新取得賽事與盤口，不使用其他莊家補盤。
+`!h` 與 `!help` 以圖片回傳完整指令手冊，分成九頁：指令總覽、賽程查詢、賽程篩選、賠率查詢、盤口與選場、投注與即時餘額、投注紀錄與損益、紀錄日期格式、資金水位走勢。下方按鈕可切換分類與翻頁，也可輸入 `!h 2`、`!help odds` 或 `!h markets` 直接開啟指定頁。`!h odds text` 回傳同一頁的完整文字，文字模式會隨導覽保留；圖片產生或上傳失敗時也會改用文字。各指令及別名後加 `help`／`h` 可開啟所屬說明，例如 `!nba help`、`!odds help text`、`!bet help`、`!r help`、`!balance help`。
+
+指令別名由 `LineCommandRegistry` 統一用於路由與手冊，內容及範例由 `LineHelpService` 維護，預設值、天數與筆數上限共用服務常數，追蹤隊伍讀取目前設定。日後新增、移除或修改指令、參數與回覆行為時，必須在同一個變更中同步更新 `!h`／`!help`、README 與相關測試；規則記錄於 [AGENTS.md](AGENTS.md)。
+
+`!odds` 查詢 LoL、CS2、Valorant、MLB 與 NBA 的 Stake 盤口，預設產圖；加 `text` 可回傳文字，點選場次或翻頁時也會保留文字模式。電競提供整場獨贏、地圖讓分及總局數大小分；MLB／NBA 提供整場獨贏、讓分及總分大小分，保留來源的延長局／延長賽標示。沿用 `!bet`、`!r` 的 `config/stake_sources.json` 網域順序、proxy、驗證與失敗冷卻設定，每次重新取得賽事與盤口，不使用其他莊家補盤。
 
 格式為 `!odds 隊名 [日期] [game=項目] [text]`，項目一次指定一個：`lol`、`cs`、`val`、`mlb`、`nba`（也接受 `cs2`、`valorant`）。例如 `!odds G2 game=cs`、`!odds G2 game=val`、`!odds 勇士 game=nba`、`!odds 道奇 明天 game=mlb`。省略 `game=` 時同時搜尋五個項目；`!odds G2` 遇到跨遊戲同名，或 `!odds 勇士` 同時符合 NBA 金州勇士與 MLB 亞特蘭大勇士，會列出項目、對戰、台灣時間與可點選的場次短碼，不會默認選 LoL。查詢資料不完整時會提示來源失敗，不以局部結果猜場次。
+
+查詢僅提供上述三類整場盤口；暫停的選項標示「暫停」，未開放的類別顯示「暫無盤口」。`game=`、`text`、`page=` 可放在日期前後，例如 `!odds G2 game=lol 1107 text`。
+
+盤口每頁最多 12 個，可用上一頁／下一頁或 `!odds K7M2Q page=2` 翻頁；選場、翻頁及無效頁碼的回復按鈕會保留 `text` 文字模式。沒有「更新盤口」按鈕，需要最新盤口時重送指令即可。
 
 原有 `!odds BLG`、`!odds bili`、`!odds bilibili`、`!odds T1`、`!odds KC` 仍可使用；日期可用 `!odds BLG 11/06`、`!odds KC 1107`、`!odds T1 2026-11-07`、今天、明天、後天。日期依台灣開賽時間，未填年份使用當年；同隊同項目未填日期時先選進行中，再選最近的未開賽。指定日期有多場（包含 MLB 雙重賽）、或縮寫符合不同隊伍時會列出候選場次。只提供目前開放的賽事盤口，不提供歷史賠率。
 
 `!odds teams` 或 `!odds teams game=lol` 可查看依 [Riot 2026 League Handbook](https://lolesports.com/en-US/season/115547545029543948/handbook) 建立的六個一級聯賽共 60 隊（包含 LEC Versus 的 KCB、Los Ratones）。全名、官方縮寫與明確別名放在 `config/lol_teams.php`；不使用模糊字串猜隊伍，也不把母隊與二隊合併。`!odds teams game=nba`、`!odds teams game=mlb` 可查看球隊，中英文名稱、簡稱及縮寫由 `config/odds_teams.php` 與既有中文隊名表比對；不受賽程追蹤清單限制。NBA 僅匹配 `basketball/usa/nba`，MLB 僅匹配 `baseball/usa/mlb`，不混入其他聯盟。還可直接輸入 `!odds` 加上述五個項目的 Stake 單場比賽網址；網址只用來取 slug 並核對項目，HTTP 請求仍走既有 Stake API 來源。短碼或網址加上 `game=` 時，項目必須一致。
 
-`!match`／`!lol` 顯示的 LoL 賽事若與 Stake 雙方隊伍及開賽時間吻合（容許 15 分鐘差距，且只能匹配一場），圖片與文字會顯示 5 碼遊戲編號，可用 `!odds K7M2Q` 查詢。短碼以 UUID 的 SHA-256 雜湊產生，使用不含 `0/O/1/I/L` 的 31 字元表；Redis 分散式鎖保護分配，撞碼時加重試序號重新產生，不覆蓋仍有效的對照。僅在 Redis 的 `stake:odds:codes:v1:*` 儲存雙向身分對照，沒有新增資料表；TTL 預設 24 小時，由 `STAKE_ODDS_CODE_TTL_SECONDS=86400` 調整（最少 60 秒）。重新列出或成功查詢會刷新期限；短碼僅在有效期限內保證固定，過期後請重查賽程。Redis 不可用時仍可用隊名或網址取得盤口，賽程則省略短碼。部署後需重新載入設定並重啟 queue worker。
+`!match` 及 `!lol`／`!cs`／`!val`／`!mlb`／`!nba` 顯示的五項目賽事都會批次比對 Stake。相同項目的雙方隊伍及開賽時間吻合（容許 15 分鐘差距，且只能匹配一場）時，圖片與文字會顯示 5 碼遊戲編號，可用 `!odds K7M2Q` 查詢；完賽、取消、時間待定、未開盤或有多場可能符合時不附編號。短碼以 UUID 的 SHA-256 雜湊產生，使用不含 `0/O/1/I/L` 的 31 字元表；Redis 分散式鎖保護分配，撞碼時加重試序號重新產生，不覆蓋仍有效的對照。僅在 Redis 的 `stake:odds:codes:v1:*` 儲存雙向身分對照，沒有新增資料表；TTL 預設 24 小時，由 `STAKE_ODDS_CODE_TTL_SECONDS=86400` 調整（最少 60 秒）。重新列出或成功查詢會刷新期限；短碼僅在有效期限內保證固定，過期後請重查賽程。Redis 不可用時仍可用隊名或網址取得盤口，賽程則省略短碼。部署後需重新載入設定並重啟 queue worker。
 
 Webhook URL 設為 `https://你的網域/api/line/webhook`，並在 `.env` 設定：
 
@@ -156,9 +164,9 @@ LINE_SCHEDULE_IMAGE_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 LINE_SCHEDULE_IMAGE_RETENTION_DAYS=7
 ```
 
-輸入 `!help` 才會顯示使用說明；一般訊息與無效指令不會回覆。指令格式為 `!lol 08/11`、`!lol 0912`、`!lol 0912~0913`、`!val 今天`、`!cs 明天`；只輸入 `!match`、`!lol`、`!val`、`!cs`、`!mlb` 或 `!nba` 時，日期預設為台灣時間的今天。日期支援 `MMDD`（如 `0912`）、`MM/DD`、`MMDD~MMDD` 區間（如 `0912~0913`，區間最多 7 天）、今天、明天與後天，以及 `1d`～`7d`（包含今天起算，例如 10/28 輸入 `!match 2d` 即查詢 10/28～10/29，亦支援 `!lol 2d`、`!nba 2d` 及原有篩選參數）；查詢今天時顯示滾球中和尚未開打的賽事，滾球賽事會加上標記，並在資料可取得時顯示目前比分；電競預設只查 S Tier，MLB 與 NBA 不套用 Tier 篩選。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`；未指定 `limit` 時最多顯示 19 場。電競賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。LoL、VALORANT 與 CS2 賽程會另外透過 `BO3_API_URL` 取得最近五次 Head to Head 的系列賽勝場、小局總比分，以及每次交手的日期、BO 賽制、比分與勝方；逐場資訊會列在賽程圖中各對局的右側。資料暫時無法取得時仍會正常顯示賽程。
+輸入 `!h` 或 `!help` 可開啟圖片說明；一般訊息與不支援的指令不會回覆。指令格式為 `!lol 08/11`、`!lol 0912`、`!lol 0912~0913`、`!val 今天`、`!cs 明天`；只輸入 `!match`、`!lol`、`!val`、`!cs`、`!mlb` 或 `!nba` 時，日期預設為台灣時間的今天。日期支援 `MMDD`（如 `0912`）、`MM/DD`、`MMDD~MMDD` 區間（如 `0912~0913`，區間最多 7 天）、今天、明天與後天，以及 `1d`～`7d`（包含今天起算，例如 10/28 輸入 `!match 2d` 即查詢 10/28～10/29，亦支援 `!lol 2d`、`!nba 2d` 及原有篩選參數）；查詢今天時顯示滾球中和尚未開打的賽事，滾球賽事會加上標記，並在資料可取得時顯示目前比分；電競預設只查 S Tier，MLB 與 NBA 不套用 Tier 篩選。可加上 `tier=s`、`tier=a,b`、`tier=all`、`limit=5`、`team=G2` 等參數，例如 `!cs 08/11 tier=s limit=5`；未指定 `limit` 時最多顯示 19 場。電競賽程來自 bo3.gg，顯示時間使用 `BO3_TIMEZONE`（預設為 Asia/Taipei）。LoL、VALORANT 與 CS2 賽程會另外透過 `BO3_API_URL` 取得最近五次 Head to Head 的系列賽勝場、小局總比分，以及每次交手的日期、BO 賽制、比分與勝方；逐場資訊會列在賽程圖中各對局的右側。資料暫時無法取得時仍會正常顯示賽程。
 
-MLB 使用官方 Stats API，不需 API 金鑰。`!mlb` 查今天、`!mlb 明天` 查明天，亦支援 `!mlb 0921~0923`；`!match` 預設整合 LoL、VALORANT、CS2、MLB 與 NBA。可用 `!match 明天 game=lol/mlb/nba` 指定項目，或 `!mlb 明天 team=道奇` 再篩選球隊。查今天或包含今天的區間時，會另外納入所有球隊的當日滾球賽事；未開賽與其他日期仍依追蹤清單，`team=` 與 `limit=` 對滾球同樣有效。日期以台灣時間為準，會補查美國前一天的賽程後依實際開賽時間篩選；兩支追蹤球隊互打只列一次，雙重賽分別列出，客隊在左、主隊在右。MLB 目前提供賽程、比分與各隊近況，獨贏賠率與歷史交手未串接。
+MLB 使用官方 Stats API，不需 API 金鑰。`!mlb` 查今天、`!mlb 明天` 查明天，亦支援 `!mlb 0921~0923`；`!match` 預設整合 LoL、VALORANT、CS2、MLB 與 NBA。可用 `!match 明天 game=lol/mlb/nba` 指定項目，或 `!mlb 明天 team=道奇` 再篩選球隊。查今天或包含今天的區間時，會另外納入所有球隊的當日滾球賽事；未開賽與其他日期仍依追蹤清單，`team=` 與 `limit=` 對滾球同樣有效。日期以台灣時間為準，會補查美國前一天的賽程後依實際開賽時間篩選；兩支追蹤球隊互打只列一次，雙重賽分別列出，客隊在左、主隊在右。MLB 提供賽程、比分與各隊近況；賽程上的獨贏賠率與歷史交手未串接，但可使用遊戲編號或 `!odds 隊名 game=mlb` 查詢 Stake 詳細盤口。
 
 追蹤球隊設定在 `config/mlb.php` 的 `team_ids`，預設如下；只要任一隊在清單中即會納入。檔案內亦列有其餘 MLB 球隊 ID，修改清單即可增減，設成 `[]` 則停用 MLB 查詢：
 

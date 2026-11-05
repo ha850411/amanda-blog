@@ -667,6 +667,12 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
 
     public const MAX_DISPLAY_RECORD_BETS = 10;
 
+    public const MAX_ACTIVE_BETS = 20;
+
+    public const DEFAULT_BALANCE_DAYS = 3;
+
+    public const MAX_BALANCE_DAYS = 30;
+
     public function reply(string $argument = ''): LineBotReply
     {
         $token = trim((string) config('services.stake.access_token'));
@@ -722,12 +728,12 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             );
         }
 
-        $limit = 20;
+        $limit = self::MAX_ACTIVE_BETS;
         $forceText = false;
         if (in_array($lowerArg, ['text', 'txt', '文字'], true)) {
             $forceText = true;
         } elseif (ctype_digit($trimmedArg) && (int) $trimmedArg > 0) {
-            $limit = min((int) $trimmedArg, 20);
+            $limit = min((int) $trimmedArg, self::MAX_ACTIVE_BETS);
         }
 
         try {
@@ -866,10 +872,10 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
     /**
      * @return array{count: int, bets: array, balance: array|null}
      */
-    public function getActiveBetsOverview(int $limit = 20): array
+    public function getActiveBetsOverview(int $limit = self::MAX_ACTIVE_BETS): array
     {
         $response = $this->sendGraphQLRequest('ActiveBetsOverview', self::ACTIVE_BETS_OVERVIEW_QUERY, [
-            'limit' => min(20, max(1, $limit)),
+            'limit' => min(self::MAX_ACTIVE_BETS, max(1, $limit)),
         ]);
         $user = $response['data']['user'];
 
@@ -1110,7 +1116,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             return null;
         }
 
-        if (ctype_digit($trimmed) && strlen($trimmed) <= 2 && (int) $trimmed <= 20) {
+        if (ctype_digit($trimmed) && strlen($trimmed) <= 2 && (int) $trimmed <= self::MAX_ACTIVE_BETS) {
             return null;
         }
 
@@ -1355,9 +1361,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         $params = $this->parseBalanceArgument($argument, $timezone);
 
         if ($params['is_help']) {
-            return new LineBotReply(
-                "指令格式：\n!balance 或 !bal 或 !水位 [天數]\n查詢 Stake 資金水位的長條圖（根據每一單結盤時間點繪製）。\n\n預設回傳近 3 天，最多可查詢 30 天。\n\n支援範例：\n・!balance（預設 3 天）\n・!bal 7d 或 !bal 7天\n・!水位 30d\n・加 text 查看純文字（例如 !balance 3d text）"
-            );
+            return app(LineHelpService::class)->reply('balance');
         }
 
         try {
@@ -1462,8 +1466,8 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             $now = CarbonImmutable::now($timezone);
 
             return [
-                'days' => 3,
-                'start_date' => $now->subDays(2)->startOfDay(),
+                'days' => self::DEFAULT_BALANCE_DAYS,
+                'start_date' => $now->subDays(self::DEFAULT_BALANCE_DAYS - 1)->startOfDay(),
                 'end_date' => $now->endOfDay(),
                 'force_text' => false,
                 'is_help' => true,
@@ -1477,13 +1481,13 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             $raw = trim(preg_replace('/\b(text|txt|文字)\b/iu', '', $raw));
         }
 
-        $days = 3;
+        $days = self::DEFAULT_BALANCE_DAYS;
         $exceededMax = false;
 
         if (preg_match('/(?:近\s*)?(\d+)\s*(?:d|天|日)?/iu', $raw, $m)) {
             $parsedDays = (int) $m[1];
-            if ($parsedDays > 30) {
-                $days = 30;
+            if ($parsedDays > self::MAX_BALANCE_DAYS) {
+                $days = self::MAX_BALANCE_DAYS;
                 $exceededMax = true;
             } elseif ($parsedDays < 1) {
                 $days = 1;
@@ -1515,7 +1519,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
      */
     public function getSettledBetsAndBalanceForDays(int $days, string $timezone = 'Asia/Taipei'): array
     {
-        $days = min(30, max(1, $days));
+        $days = min(self::MAX_BALANCE_DAYS, max(1, $days));
         $now = CarbonImmutable::now($timezone);
         $startDay = $now->subDays($days - 1)->startOfDay();
         $endDay = $now->endOfDay();
@@ -1771,7 +1775,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
      */
     public function getSettledBetsForDays(int $days, string $timezone = 'Asia/Taipei'): array
     {
-        $days = min(30, max(1, $days));
+        $days = min(self::MAX_BALANCE_DAYS, max(1, $days));
         $now = CarbonImmutable::now($timezone);
         $startDay = $now->subDays($days - 1)->startOfDay();
         $endDay = $now->endOfDay();
@@ -2410,7 +2414,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
         ];
 
         if ($exceededMax) {
-            $lines[] = '提示｜查詢上限為 30 天，已自動為您呈現近 30 天數據。';
+            $lines[] = '提示｜查詢上限為 '.self::MAX_BALANCE_DAYS.' 天，已自動為您呈現近 '.self::MAX_BALANCE_DAYS.' 天數據。';
         }
 
         $lines[] = '時間基準｜台灣時間';

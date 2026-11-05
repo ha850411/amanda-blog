@@ -55,6 +55,6 @@ final readonly class LineBotReply
 
     public function prefersImage(): bool
     {
-        return $this->linkUrl !== null && $this->imageData !== null;
+        return $this->imageData !== null;
     }
 }

@@ -15,7 +15,9 @@ class StakeOddsService
 {
     private const TIMEZONE = 'Asia/Taipei';
 
-    private const PAGE_SIZE = 12;
+    public const PAGE_SIZE = 12;
+
+    public const MAX_CHOICES = 10;
 
     private const FIXTURE_FIELDS = <<<'GRAPHQL'
 id name status slug
@@ -37,7 +39,7 @@ GRAPHQL;
     public function reply(string $argument): LineBotReply
     {
         if ($argument === '' || mb_strtolower($argument) === 'help') {
-            return new LineBotReply($this->help());
+            return app(LineHelpService::class)->reply('odds');
         }
         try {
             $command = $this->parse($argument);
@@ -107,10 +109,11 @@ GRAPHQL;
             }
 
             $markets = $this->markets($fixture);
+            $suffix = $command['text'] ? ' text' : '';
             $pages = max(1, (int) ceil(count($markets) / self::PAGE_SIZE));
             if ($command['page'] > $pages) {
                 return new LineBotReply("目前只有 {$pages} 頁，請重新查詢第 1 頁。", $url, null, [
-                    ['label' => '第 1 頁', 'text' => '!odds id='.$fixture['id'].($command['text'] ? ' text' : '')],
+                    ['label' => '第 1 頁', 'text' => '!odds id='.$fixture['id'].$suffix],
                 ]);
             }
             $visible = array_slice($markets, ($command['page'] - 1) * self::PAGE_SIZE, self::PAGE_SIZE);
@@ -132,10 +135,13 @@ GRAPHQL;
                 'markets' => $visible,
                 'page' => $command['page'],
                 'pages' => $pages,
+                'market_count' => count($markets),
+                'market_scope' => '整場獨贏／讓分／大小分',
             ];
             $lines = [$data['title'], $data['fixture_name'], $data['tournament'],
                 '開賽｜'.$data['start_time'].'（台灣時間）｜'.$status,
-                '查詢時間｜'.$checkedAt.'（台灣時間）'];
+                '查詢時間｜'.$checkedAt.'（台灣時間）',
+                '玩法｜'.$data['market_scope'].'｜共 '.count($markets).' 個盤口'];
             if ($code !== null) {
                 $lines[] = '遊戲編號｜'.$code.'（!odds '.$code.'）';
             }
@@ -157,8 +163,7 @@ GRAPHQL;
             $data['missing_groups'] = array_values(array_diff(['獨贏', '讓分', '大小分'], array_column($markets, 'group_label')));
             $lines[] = "\n第 {$command['page']} / {$pages} 頁｜賠率以 Stake 當下顯示為準";
             $lines[] = '賽事連結｜'.$url;
-            $suffix = $command['text'] ? ' text' : '';
-            $quick = [['label' => '更新盤口', 'text' => '!odds '.$lookup.' page='.$command['page'].$suffix]];
+            $quick = [];
             foreach ([-1 => '上一頁', 1 => '下一頁'] as $delta => $label) {
                 $page = $command['page'] + $delta;
                 if ($page >= 1 && $page <= $pages) {
@@ -179,7 +184,7 @@ GRAPHQL;
 
     private function help(): string
     {
-        return "Stake 盤口｜LoL／CS2／VAL／MLB／NBA\n!odds 隊名 [日期] [game=項目] [text]\n!odds G2｜!odds G2 game=cs｜!odds G2 game=val\n!odds BLG 11/06｜!odds T1 明天 game=lol\n!odds 勇士 game=nba｜!odds 道奇 明天 game=mlb\n!odds K7M2Q（賽程或選單顯示的遊戲編號）\n!odds 加上 Stake 比賽網址（精準指定場次）\n!odds teams｜!odds teams game=nba｜!odds teams game=mlb\n\n省略 game= 時跨項目搜尋，跨項目同名會列出場次供選擇。\n電競：整場獨贏、地圖讓分、總局數；NBA／MLB：整場獨贏、讓分、總分。\n日期依台灣時間；省略年份時使用今年。\n未填日期：同隊同項目先找進行中，再找最近一場未開賽。\n指定日期有多場（含 MLB 雙重賽）會列出選項；只提供目前開放的 Stake 盤口。";
+        return app(LineHelpService::class)->text('odds');
     }
 
     private function teams(?string $game): LineBotReply
@@ -214,6 +219,8 @@ GRAPHQL;
         foreach ($tokens as $token) {
             if (mb_strtolower($token) === 'text') {
                 $result['text'] = true;
+            } elseif (mb_strtolower($token) === 'all') {
+                throw new InvalidArgumentException('賠率查詢不支援 all，請移除 all 後重試；僅提供整場獨贏、讓分與大小分。');
             } elseif (str_starts_with(mb_strtolower($token), 'game=')) {
                 $game = StakeOddsCatalog::game(substr($token, 5));
                 if ($game === null || ($result['game'] !== null && $result['game'] !== $game)) {
@@ -222,8 +229,8 @@ GRAPHQL;
                 $result['game'] = $game;
             } elseif (str_starts_with(mb_strtolower($token), 'page=')) {
                 $value = substr($token, 5);
-                if (! ctype_digit($value) || (int) $value < 1 || (int) $value > 100) {
-                    throw new InvalidArgumentException('頁碼必須介於 1～100。');
+                if (! ctype_digit($value) || strlen($value) > 9 || (int) $value < 1) {
+                    throw new InvalidArgumentException('頁碼必須是正整數。');
                 }
                 $result['page'] = (int) $value;
             } else {
@@ -295,9 +302,13 @@ GRAPHQL;
         return CarbonImmutable::create($year, $month, $day, 0, 0, 0, self::TIMEZONE);
     }
 
-    private function findFixtures(string $team, ?CarbonImmutable $date, ?string $game = null): array
+    private function findFixtures(string $team, ?CarbonImmutable $date, string|array|null $game = null): array
     {
-        $pending = $game === null ? StakeOddsCatalog::GAMES : [$game => StakeOddsCatalog::GAMES[$game]];
+        $pending = $game === null ? StakeOddsCatalog::GAMES
+            : array_intersect_key(StakeOddsCatalog::GAMES, array_flip((array) $game));
+        if ($pending === []) {
+            return [];
+        }
         $aliases = [];
         foreach ($pending as $key => $definition) {
             $aliases[$key] = StakeOddsCatalog::aliases($team, $key);
@@ -383,7 +394,8 @@ GRAPHQL;
     private function markets(array $fixture): array
     {
         $markets = [];
-        foreach (['winner' => '獨贏', 'handicap' => '讓分', 'total' => '大小分'] as $groupName => $label) {
+        $labels = ['winner' => '獨贏', 'handicap' => '讓分', 'total' => '大小分'];
+        foreach ($labels as $groupName => $label) {
             foreach ($fixture['groups'] as $group) {
                 if (strtolower($group['name'] ?? '') !== $groupName) {
                     continue;
@@ -427,7 +439,7 @@ GRAPHQL;
     {
         $lines = ['找到多場符合的賽事，請點選或使用該場遊戲編號查詢（台灣時間）：'];
         $quick = [];
-        foreach (array_slice($matches, 0, 10) as $index => $fixture) {
+        foreach (array_slice($matches, 0, self::MAX_CHOICES) as $index => $fixture) {
             $lookup = $this->code($fixture['id']) ?? 'id='.$fixture['id'];
             $label = StakeOddsCatalog::GAMES[$fixture['_game']]['label'];
             $command = '!odds '.$lookup.($textOnly ? ' text' : '');
@@ -436,8 +448,8 @@ GRAPHQL;
             $lines[] = $command;
             $quick[] = ['label' => ($index + 1).'. '.$label.' '.$fixture['_start_at']->format('m/d H:i'), 'text' => $command];
         }
-        if (count($matches) > 10) {
-            $lines[] = '僅列前 10 場，請加上 game=、日期或使用 Stake 比賽網址縮小範圍。';
+        if (count($matches) > self::MAX_CHOICES) {
+            $lines[] = '僅列前 '.self::MAX_CHOICES.' 場，請加上 game=、日期或使用 Stake 比賽網址縮小範圍。';
         }
 
         return new LineBotReply(implode("\n", $lines), null, null, $quick);
@@ -467,20 +479,23 @@ GRAPHQL;
     /** Match both opponents and start time; a shared team name is insufficient. */
     public function enrichSchedule(array $matches): array
     {
-        $eligible = array_filter($matches, fn (array $m): bool => ($m['game'] ?? '') === 'lol'
-            && ! ($m['is_finished'] ?? false) && ! ($m['is_cancelled'] ?? false));
+        $eligible = array_filter($matches, fn (array $m): bool => StakeOddsCatalog::game($m['game'] ?? '') !== null
+            && ! ($m['is_finished'] ?? false) && ! ($m['is_cancelled'] ?? false) && ! ($m['time_tbd'] ?? false));
         if ($eligible === [] || ! filled(config('services.stake.access_token'))) {
             return $matches;
         }
         try {
-            $fixtures = $this->findFixtures('', null, 'lol');
+            $games = array_values(array_unique(array_map(fn (array $m): string => StakeOddsCatalog::game($m['game']), $eligible)));
+            $fixtures = $this->findFixtures('', null, $games);
             foreach ($eligible as $index => $match) {
-                $left = StakeOddsCatalog::aliases($match['team1'], 'lol');
-                $right = StakeOddsCatalog::aliases($match['team2'], 'lol');
+                $game = StakeOddsCatalog::game($match['game']);
+                $left = StakeOddsCatalog::aliases($match['team1'], $game);
+                $right = StakeOddsCatalog::aliases($match['team2'], $game);
                 $candidates = [];
                 foreach ($fixtures as $fixture) {
                     $teams = $fixture['data']['competitors'] ?? [];
-                    if (count($teams) !== 2 || abs($fixture['_start_at']->diffInMinutes($match['start_at'], false)) > 15) {
+                    if ($fixture['_game'] !== $game || count($teams) !== 2
+                        || abs($fixture['_start_at']->diffInMinutes($match['start_at'], false)) > 15) {
                         continue;
                     }
                     $first = array_map(StakeOddsCatalog::normalize(...), [$teams[0]['name'] ?? '', $teams[0]['abbreviation'] ?? '']);

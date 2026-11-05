@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Services\LineSchedule\Renderers\BalanceChartRenderer;
 use App\Services\LineSchedule\Renderers\BetHistoryRenderer;
 use App\Services\LineSchedule\Renderers\BetsRenderer;
+use App\Services\LineSchedule\Renderers\HelpRenderer;
 use App\Services\LineSchedule\Renderers\OddsRenderer;
 use App\Services\LineSchedule\Renderers\ScheduleRenderer;
 use App\Services\LineSchedule\Support\ImageTheme;
@@ -18,7 +19,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 45;
+    private const CACHE_VERSION = 46;
 
     /** @var array<int, int> */
     private const IMAGE_WIDTHS = [700, 1440];
@@ -28,7 +29,7 @@ class LineScheduleImageService
      *
      * @param  array<string, mixed>  $data
      */
-    public function create(array $data, string $linkUrl): string
+    public function create(array $data, ?string $linkUrl = null): string
     {
         if (! extension_loaded('imagick')) {
             throw new RuntimeException('The Imagick extension is required for LINE schedule images.');
@@ -67,6 +68,10 @@ class LineScheduleImageService
      */
     private function render(array $data): Imagick
     {
+        if (($data['type'] ?? '') === 'help') {
+            return (new HelpRenderer)->render($data);
+        }
+
         if (($data['type'] ?? '') === 'odds') {
             return (new OddsRenderer)->render($data);
         }
