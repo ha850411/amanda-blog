@@ -43,6 +43,10 @@ class LineScheduleBot
             return new LineBotReply($this->help());
         }
 
+        if (preg_match('/^!(?:odds|賠率)(?:\s+(.*))?$/iu', $message, $matches)) {
+            return app(StakeOddsService::class)->reply(trim($matches[1] ?? ''));
+        }
+
         if (preg_match('/^!(?:bet|bets|stake|投注)(?:\s+(.*))?$/iu', $message, $matches)) {
             $argument = trim($matches[1] ?? '');
             if (mb_strtolower($argument) === 'help') {
@@ -277,6 +281,8 @@ class LineScheduleBot
         $markTiming('parallel_enrichment_ms');
         $visibleMatches = $this->bo3Odds->enrichMissing($visibleMatches);
         $markTiming('fallback_odds_ms');
+        $visibleMatches = app(StakeOddsService::class)->enrichSchedule($visibleMatches);
+        $markTiming('stake_fixture_codes_ms');
         $this->logScheduleTimings($command, $timings, count($visibleMatches));
         $lines = [
             "{$label}｜{$dateLabel}{$tierSuffix}",
@@ -311,6 +317,9 @@ class LineScheduleBot
 
             if (in_array($match['game'] ?? null, ['mlb', 'nba'], true)) {
                 $lines[] = '客隊 vs 主隊｜'.($match['status_label'] ?? '');
+            }
+            if (! empty($match['stake_code'])) {
+                $lines[] = '遊戲編號｜'.$match['stake_code'].'（!odds '.$match['stake_code'].'）';
             }
             $lines[] = '各隊近 5 場（新→舊）｜比分為本隊：對手';
             foreach (['team1', 'team2'] as $side) {
@@ -407,6 +416,7 @@ class LineScheduleBot
                     'team2' => $match['team2'],
                     'tournament' => $match['tournament'],
                     'odds' => $match['odds'],
+                    'stake_code' => $match['stake_code'] ?? null,
                     'h2h' => $match['h2h'] ?? null,
                     'recent_form' => $match['recent_form'] ?? null,
                     'status_label' => $match['status_label'] ?? null,
@@ -828,6 +838,6 @@ class LineScheduleBot
 
     private function help(): string
     {
-        return "指令格式：\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n!match 2d（含今天起 2 天，支援 1d～7d）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nNBA 所有賽事（含滾球）皆依追蹤清單；MLB 查今天另納入所有球隊的滾球，未開賽仍依追蹤清單。team= 可再篩選。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2";
+        return "指令格式：\n!odds 隊名 [日期]（LoL Stake 獨贏／讓分／大小分）\n!odds BLG 11/06｜!odds 加上 Stake 比賽網址\n!odds teams（完整一級聯賽隊名）\n\n!match｜!lol｜!val｜!cs｜!mlb｜!nba（未填日期預設今天）\n!賽程 08/15 game=lol/val/cs/mlb/nba\n!lol 今天｜!val 明天｜!cs 08/11\n!lol 0912 或 !lol 0912~0913（區間最多 7 天）\n!match 2d（含今天起 2 天，支援 1d～7d）\n\n查今天顯示滾球中和尚未開打的賽事，電競預設查 S Tier。\nNBA 所有賽事（含滾球）皆依追蹤清單；MLB 查今天另納入所有球隊的滾球，未開賽仍依追蹤清單。team= 可再篩選。\nMLB 依 config/mlb.php 球隊清單查詢（預設道奇、釀酒人），例如 !mlb 明天 team=道奇。\nNBA 依 config/nba.php 球隊清單查詢（預設76人、溜馬、尼克、熱火、雷霆、馬刺、灰狼、勇士），例如 !nba 明天 team=勇士。\n各隊近 5 場顯示已完賽勝敗（新→舊），電競以系列賽計算。\n可選參數：game=lol/val/cs/mlb/nba｜tier=s,a｜tier=all｜limit=5｜team=G2";
     }
 }

@@ -46,7 +46,7 @@ class ScheduleRenderer extends AbstractImageRenderer
 
         foreach ($matches as $match) {
             $this->drawScheduleCard($image, $draw, $x, $y, $match, $data['game'] ?? null, $iconsToDraw);
-            $y += self::CARD_HEIGHT + self::CARD_GAP;
+            $y += $this->cardHeight($match) + self::CARD_GAP;
         }
 
         $image->drawImage($draw);
@@ -170,7 +170,7 @@ class ScheduleRenderer extends AbstractImageRenderer
         $isLive = (bool) ($match['is_live'] ?? false);
         $cardBorder = $isLive ? '#dc2626' : ($theme['card_border'] ?? '#1e293b');
         $cardWidth = 1352;
-        $cardHeight = self::CARD_HEIGHT;
+        $cardHeight = $this->cardHeight($match);
 
         // 1. Card Container & Game Theme Left Accent
         $this->scheduleBox($draw, $x, $y, $cardWidth, $cardHeight, '#111827', $cardBorder, 14, $isLive ? 1.6 : 1.2);
@@ -353,6 +353,9 @@ class ScheduleRenderer extends AbstractImageRenderer
         );
 
         // Line 4: NBA bookmaker or H2H footer.
+        if (! empty($match['stake_code'])) {
+            $this->scheduleRawText($draw, $x + 6, $y + 181, '遊戲編號 '.$match['stake_code'].'  ｜  !odds '.$match['stake_code'], 16, '#38bdf8', 700);
+        }
         $h2hY = $y + 126;
         $this->scheduleBox($draw, $x, $h2hY, $w, 29, '#09101d', '#17253b', 6);
 
@@ -641,8 +644,13 @@ class ScheduleRenderer extends AbstractImageRenderer
     private function canvasHeight(array $matches): int
     {
         return self::CARDS_TOP
-            + (count($matches) * self::CARD_HEIGHT)
+            + array_sum(array_map($this->cardHeight(...), $matches))
             + (max(0, count($matches) - 1) * self::CARD_GAP)
             + self::CANVAS_BOTTOM_PADDING;
+    }
+
+    private function cardHeight(array $match): int
+    {
+        return self::CARD_HEIGHT + (empty($match['stake_code']) ? 0 : 28);
     }
 }

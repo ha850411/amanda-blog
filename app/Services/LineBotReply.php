@@ -41,6 +41,7 @@ final readonly class LineBotReply
      *             team2: ?array{sample_size: int, wins: int, losses: int, draws: int, results: array<int, string>, matches: array<int, array{date: string, opponent: string, format: string, team_score: int, opponent_score: int, result: string}>}
      *         },
      *         status_label?: ?string
+     *         stake_code?: ?string
      *     }>
      * }|null  $imageData
      * @param  array<int, array{label: string, text: string}>|null  $quickReplies

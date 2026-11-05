@@ -59,6 +59,32 @@ class TeamAbbreviation
         'team bds' => 'BDS',
     ];
 
+    /** Explicit aliases only: do not infer a team from arbitrary initials. */
+    public static function aliases(string $name): array
+    {
+        $normalize = static fn (string $value): string => mb_strtolower(preg_replace('/[^\p{L}\p{N}]/u', '', $value) ?? $value);
+        $key = $normalize($name);
+        $aliases = [$name];
+
+        foreach (config('lol_teams.leagues', []) as $teams) {
+            foreach ($teams as $team) {
+                $names = [$team['name'], $team['code'], ...$team['aliases']];
+                if (in_array($key, array_map($normalize, $names), true)) {
+                    $aliases = array_merge($aliases, $names);
+                }
+            }
+        }
+
+        foreach (self::KNOWN as $fullName => $abbreviation) {
+            if ($key === $normalize($fullName) || $key === $normalize($abbreviation)) {
+                $aliases[] = $fullName;
+                $aliases[] = $abbreviation;
+            }
+        }
+
+        return array_values(array_unique($aliases));
+    }
+
     public static function get(string $name): string
     {
         $normalized = mb_strtolower(trim($name));

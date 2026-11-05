@@ -75,6 +75,7 @@ return [
     ],
 
     'stake' => [
+        'odds_code_ttl_seconds' => (int) env('STAKE_ODDS_CODE_TTL_SECONDS', 86400),
         'access_token' => env('STAKE_ACCESS_TOKEN'),
         'sources_file' => env('STAKE_SOURCES_FILE', 'config/stake_sources.json'),
         'api_url' => env('STAKE_API_URL', 'https://stake.com/_api/graphql'),

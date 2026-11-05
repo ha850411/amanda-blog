@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Services\LineSchedule\Renderers\BalanceChartRenderer;
 use App\Services\LineSchedule\Renderers\BetHistoryRenderer;
 use App\Services\LineSchedule\Renderers\BetsRenderer;
+use App\Services\LineSchedule\Renderers\OddsRenderer;
 use App\Services\LineSchedule\Renderers\ScheduleRenderer;
 use App\Services\LineSchedule\Support\ImageTheme;
 use App\Services\LineSchedule\Support\TeamAbbreviation;
@@ -17,7 +18,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 44;
+    private const CACHE_VERSION = 45;
 
     /** @var array<int, int> */
     private const IMAGE_WIDTHS = [700, 1440];
@@ -66,6 +67,10 @@ class LineScheduleImageService
      */
     private function render(array $data): Imagick
     {
+        if (($data['type'] ?? '') === 'odds') {
+            return (new OddsRenderer)->render($data);
+        }
+
         if (($data['type'] ?? '') === 'balance_chart') {
             return (new BalanceChartRenderer)->render($data);
         }
