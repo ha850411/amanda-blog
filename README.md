@@ -134,11 +134,13 @@ Jenkins 使用 Credentials Binding 將 Secret text credential 綁定為 `GHCR_TO
 
 # LINE 賽程 Bot
 
-`!odds` 查詢 LoL 的 Stake 整場獨贏、地圖讓分及總局數大小分，預設產圖；加 `text` 可回傳文字。沿用 `!bet`、`!r` 的 `config/stake_sources.json` 網域順序、proxy、驗證與失敗冷卻設定，每次重新取得賽事與盤口，不使用其他莊家補盤。
+`!odds` 查詢 LoL、CS2、Valorant、MLB 與 NBA 的 Stake 盤口，預設產圖；加 `text` 可回傳文字，點選場次、更新或翻頁時也會保留文字模式。電競提供整場獨贏、地圖讓分及總局數大小分；MLB／NBA 提供整場獨贏、讓分及總分大小分，保留來源的延長局／延長賽標示。沿用 `!bet`、`!r` 的 `config/stake_sources.json` 網域順序、proxy、驗證與失敗冷卻設定，每次重新取得賽事與盤口，不使用其他莊家補盤。
 
-支援 `!odds BLG`、`!odds bili`、`!odds bilibili`、`!odds T1`、`!odds KC`；日期可用 `!odds BLG 11/06`、`!odds KC 1107`、`!odds T1 2026-11-07`、今天、明天、後天。日期依台灣開賽時間，未填年份使用當年；未填日期時先選進行中，再選最近的未開賽。指定日期有多場、或縮寫符合不同隊伍時會列出候選場次。只提供目前開放的賽事盤口，不提供歷史賠率。
+格式為 `!odds 隊名 [日期] [game=項目] [text]`，項目一次指定一個：`lol`、`cs`、`val`、`mlb`、`nba`（也接受 `cs2`、`valorant`）。例如 `!odds G2 game=cs`、`!odds G2 game=val`、`!odds 勇士 game=nba`、`!odds 道奇 明天 game=mlb`。省略 `game=` 時同時搜尋五個項目；`!odds G2` 遇到跨遊戲同名，或 `!odds 勇士` 同時符合 NBA 金州勇士與 MLB 亞特蘭大勇士，會列出項目、對戰、台灣時間與可點選的場次短碼，不會默認選 LoL。查詢資料不完整時會提示來源失敗，不以局部結果猜場次。
 
-`!odds teams` 可查看依 [Riot 2026 League Handbook](https://lolesports.com/en-US/season/115547545029543948/handbook) 建立的六個一級聯賽共 60 隊（包含 LEC Versus 的 KCB、Los Ratones）。全名、官方縮寫與明確別名放在 `config/lol_teams.php`；不使用模糊字串猜隊伍，也不把母隊與二隊合併。還可直接輸入 `!odds https://stake.com/zh/sports/league-of-legends/.../比賽slug` 精準指定單場；網址只用來取 slug，HTTP 請求仍走既有 Stake API 來源。
+原有 `!odds BLG`、`!odds bili`、`!odds bilibili`、`!odds T1`、`!odds KC` 仍可使用；日期可用 `!odds BLG 11/06`、`!odds KC 1107`、`!odds T1 2026-11-07`、今天、明天、後天。日期依台灣開賽時間，未填年份使用當年；同隊同項目未填日期時先選進行中，再選最近的未開賽。指定日期有多場（包含 MLB 雙重賽）、或縮寫符合不同隊伍時會列出候選場次。只提供目前開放的賽事盤口，不提供歷史賠率。
+
+`!odds teams` 或 `!odds teams game=lol` 可查看依 [Riot 2026 League Handbook](https://lolesports.com/en-US/season/115547545029543948/handbook) 建立的六個一級聯賽共 60 隊（包含 LEC Versus 的 KCB、Los Ratones）。全名、官方縮寫與明確別名放在 `config/lol_teams.php`；不使用模糊字串猜隊伍，也不把母隊與二隊合併。`!odds teams game=nba`、`!odds teams game=mlb` 可查看球隊，中英文名稱、簡稱及縮寫由 `config/odds_teams.php` 與既有中文隊名表比對；不受賽程追蹤清單限制。NBA 僅匹配 `basketball/usa/nba`，MLB 僅匹配 `baseball/usa/mlb`，不混入其他聯盟。還可直接輸入 `!odds` 加上述五個項目的 Stake 單場比賽網址；網址只用來取 slug 並核對項目，HTTP 請求仍走既有 Stake API 來源。短碼或網址加上 `game=` 時，項目必須一致。
 
 `!match`／`!lol` 顯示的 LoL 賽事若與 Stake 雙方隊伍及開賽時間吻合（容許 15 分鐘差距，且只能匹配一場），圖片與文字會顯示 5 碼遊戲編號，可用 `!odds K7M2Q` 查詢。短碼以 UUID 的 SHA-256 雜湊產生，使用不含 `0/O/1/I/L` 的 31 字元表；Redis 分散式鎖保護分配，撞碼時加重試序號重新產生，不覆蓋仍有效的對照。僅在 Redis 的 `stake:odds:codes:v1:*` 儲存雙向身分對照，沒有新增資料表；TTL 預設 24 小時，由 `STAKE_ODDS_CODE_TTL_SECONDS=86400` 調整（最少 60 秒）。重新列出或成功查詢會刷新期限；短碼僅在有效期限內保證固定，過期後請重查賽程。Redis 不可用時仍可用隊名或網址取得盤口，賽程則省略短碼。部署後需重新載入設定並重啟 queue worker。
 

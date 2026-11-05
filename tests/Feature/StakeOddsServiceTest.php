@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Services\Bo3HeadToHeadService;
 use App\Services\Bo3OddsService;
 use App\Services\Bo3ScheduleService;
+use App\Services\LineSchedule\Support\StakeOddsCatalog;
 use App\Services\LineScheduleBot;
 use App\Services\LineScheduleImageService;
 use App\Services\OddsApiService;
@@ -59,7 +60,7 @@ class StakeOddsServiceTest extends TestCase
         }
         Http::assertSentCount(8); // Every command fetches fresh fixtures and odds.
         Http::assertSent(fn (Request $r): bool => $r['operationName'] === 'StakeFixtureOdds'
-            && str_contains($r['query'], 'groups(groups: ["winner", "handicap", "total"])'));
+            && str_contains($r['query'], 'groups(groups: ["winner", "handicap", "total", "Handicap", "Total"])'));
         Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), 'odds-api'));
     }
 
@@ -86,7 +87,7 @@ class StakeOddsServiceTest extends TestCase
         Http::fake();
         $reply = app(LineScheduleBot::class)->reply($command);
         $this->assertFalse($reply->prefersImage());
-        $this->assertStringContainsString('LoL Stake 盤口', $reply->text);
+        $this->assertStringContainsString('Stake 盤口｜LoL／CS2／VAL／MLB／NBA', $reply->text);
         Http::assertNothingSent();
     }
 
@@ -94,6 +95,10 @@ class StakeOddsServiceTest extends TestCase
     {
         return [['!odds'], ['!odds help'], ['!odds T1 11/31'], ['!odds T1 0230'],
             ['!odds T1 2026-02-29'], ['!odds T1 page=0'], ['!odds T1 page=abc'],
+            ['!odds G2 game=unknown'], ['!odds G2 game=lol/cs'], ['!odds G2 game=lol game=cs'],
+            ['!odds https://stake.com/sports/basketball/usa/ncaa/test'],
+            ['!odds https://stake.com/sports/baseball/japan/npb/test'],
+            ['!odds https://stake.com/sports/basketball/usa/nba/test game=mlb'],
             ['!odds https://stake.com.evil.example/sports/league-of-legends/a/b/c'],
             ['!odds https://stake.com@evil.example/sports/league-of-legends/a/b/c'],
             ['!odds https://stake.com/zh/sports'], ['!odds https://127.0.0.1/internal']];
@@ -238,7 +243,7 @@ class StakeOddsServiceTest extends TestCase
             } else {
                 $result = $this->listResponse([$this->fixture()]);
             }
-            $result['data']['slugSport']['upcomingCount'] = 51;
+            $result['data']['lol']['upcomingCount'] = 51;
 
             return Http::response($result);
         });
@@ -256,6 +261,242 @@ class StakeOddsServiceTest extends TestCase
         $this->assertStringContainsString('BLG｜BILIBILI GAMING', $text);
         $this->assertStringContainsString('KCB｜Karmine Corp Blue（Versus 客席）', $text);
         Http::assertNothingSent();
+    }
+
+    public function test_g2_across_games_offers_labeled_choices_and_each_code_resolves_the_right_game(): void
+    {
+        $fixtures = [];
+        foreach (['lol', 'cs', 'val'] as $index => $game) {
+            $fixtures[] = $this->sportFixture($game, 'G2 Esports', 'G2', 'Team Liquid', 'TL', $index + 10);
+        }
+        $academy = $this->sportFixture('val', 'G2 Gozen', 'G2G', 'Team Liquid', 'TL', 13);
+        $this->fake([...$fixtures, $academy]);
+        $reply = app(LineScheduleBot::class)->reply('!odds G2');
+        $this->assertFalse($reply->prefersImage());
+        $this->assertCount(3, $reply->quickReplies);
+        foreach (['LoL', 'CS2', 'VAL'] as $label) {
+            $this->assertStringContainsString('【'.$label.'】', $reply->text);
+        }
+        $this->assertStringNotContainsString('G2 Gozen', $reply->text);
+        Http::assertSentCount(1);
+        foreach ($reply->quickReplies as $index => $quickReply) {
+            $selected = app(LineScheduleBot::class)->reply($quickReply['text']);
+            $this->assertSame($fixtures[$index]['id'], $selected->imageData['fixture_id']);
+            $this->assertSame(['lol', 'cs', 'val'][$index], $selected->imageData['game']);
+        }
+        Http::assertSentCount(4);
+    }
+
+    #[DataProvider('gameCommands')]
+    public function test_explicit_game_queries_only_that_sport(string $command, string $game): void
+    {
+        $fixture = $this->sportFixture($game, 'G2 Esports', 'G2', 'Team Liquid', 'TL', 15);
+        $this->fake([$fixture]);
+        $reply = app(LineScheduleBot::class)->reply($command);
+        $this->assertSame($game, $reply->imageData['game']);
+        $this->assertStringContainsString('Stake｜'.StakeOddsCatalog::GAMES[$game]['label'], $reply->text);
+        Http::assertSent(fn (Request $r): bool => $r['operationName'] === 'StakeOddsFixtures'
+            && substr_count($r['query'], 'slugSport(') === 1
+            && str_contains($r['query'], 'sport: "'.StakeOddsCatalog::GAMES[$game]['sport'].'"'));
+    }
+
+    public static function gameCommands(): array
+    {
+        return [['!odds G2 game=lol', 'lol'], ['!odds G2 game=cs', 'cs'],
+            ['!odds G2 GAME=CS2', 'cs'], ['!odds game=val G2 11/07', 'val'],
+            ['!odds G2 1107 game=valorant', 'val']];
+    }
+
+    #[DataProvider('sportsTeams')]
+    public function test_sports_team_aliases_work_with_localized_provider_names(string $game, string $name, string $abbreviation, array $aliases): void
+    {
+        config(['nba.team_ids' => [], 'mlb.team_ids' => []]);
+        $fixture = $this->sportFixture($game, $name, $abbreviation, 'Opponent', 'OPP', 16);
+        $this->fake([$fixture]);
+        foreach ($aliases as $alias) {
+            $reply = app(LineScheduleBot::class)->reply('!odds '.$alias.' game='.$game);
+            $this->assertSame($fixture['id'], $reply->imageData['fixture_id'], $alias);
+        }
+    }
+
+    public static function sportsTeams(): array
+    {
+        return [
+            ['nba', '金州勇士', '勇士', ['勇士', '金州勇士', 'Warriors', 'GSW', 'Golden State Warriors']],
+            ['nba', '密尔沃基雄鹿', '雄鹿', ['公鹿', 'Bucks', 'MIL']],
+            ['nba', '亚特兰大鹰', '鹰', ['老鷹', 'Hawks', 'ATL']],
+            ['nba', '圣安东尼奥马刺', '马刺', ['馬刺', 'Spurs', 'SAS']],
+            ['mlb', '洛杉矶道奇', '道奇', ['道奇', '洛杉磯道奇', 'Dodgers', 'LAD', 'Los Angeles Dodgers']],
+            ['mlb', '亚特兰大勇士', '勇士', ['勇士', '亞特蘭大勇士', 'Braves', 'ATL']],
+        ];
+    }
+
+    public function test_warriors_and_braves_are_separate_choices_even_if_one_is_live(): void
+    {
+        $nba = $this->sportFixture('nba', '金州勇士', '勇士', '邁阿密熱火', '熱火', 20);
+        $mlb = $this->sportFixture('mlb', '亞特蘭大勇士', '勇士', '紐約洋基', '洋基', 21);
+        $mlb['status'] = 'live';
+        $mlb['data']['startTime'] = '2026-11-05T03:00:00Z';
+        $this->fake([$nba], [$mlb]);
+        $reply = app(LineScheduleBot::class)->reply('!odds 勇士 text');
+        $this->assertCount(2, $reply->quickReplies);
+        $this->assertStringContainsString('【NBA】', $reply->text);
+        $this->assertStringContainsString('【MLB】', $reply->text);
+        $this->assertStringContainsString('滾球中', $reply->text);
+        $this->assertStringContainsString('text', $reply->quickReplies[0]['text']);
+        $this->assertFalse(app(LineScheduleBot::class)->reply($reply->quickReplies[0]['text'])->prefersImage());
+        $this->assertSame($nba['id'], app(LineScheduleBot::class)->reply('!odds 勇士 game=nba')->imageData['fixture_id']);
+        $this->assertSame($mlb['id'], app(LineScheduleBot::class)->reply('!odds 勇士 game=mlb')->imageData['fixture_id']);
+    }
+
+    public function test_mlb_doubleheader_on_requested_date_offers_both_games(): void
+    {
+        $first = $this->sportFixture('mlb', 'Los Angeles Dodgers', 'LAD', 'Atlanta Braves', 'ATL', 22);
+        $second = $this->sportFixture('mlb', 'Los Angeles Dodgers', 'LAD', 'Atlanta Braves', 'ATL', 23);
+        $second['data']['startTime'] = '2026-11-07T03:00:00Z';
+        $this->fake([$second, $first]);
+        $reply = app(LineScheduleBot::class)->reply('!odds 道奇 1107 game=mlb');
+        $this->assertCount(2, $reply->quickReplies);
+        $this->assertStringContainsString('11/07 06:00', $reply->text);
+        $this->assertStringContainsString('11/07 11:00', $reply->text);
+        $this->assertSame($first['id'], app(LineScheduleBot::class)->reply('!odds 道奇 game=mlb')->imageData['fixture_id']);
+    }
+
+    public function test_nba_and_mlb_filter_other_leagues_and_validate_direct_fixture_lookups(): void
+    {
+        $nba = $this->sportFixture('nba', 'Golden State Warriors', 'GSW', 'Miami Heat', 'MIA', 24);
+        $nba['tournament']['slug'] = 'nba-summer-league';
+        $mlb = $this->sportFixture('mlb', 'Los Angeles Dodgers', 'LAD', 'Atlanta Braves', 'ATL', 25);
+        $mlb['tournament']['category']['slug'] = 'japan';
+        $this->fake([$nba, $mlb]);
+        foreach (['!odds 勇士 game=nba', '!odds 道奇 game=mlb'] as $command) {
+            $this->assertStringContainsString('查無', app(LineScheduleBot::class)->reply($command)->text);
+        }
+        foreach ([$nba, $mlb] as $fixture) {
+            $reply = app(LineScheduleBot::class)->reply('!odds id='.$fixture['id']);
+            $this->assertStringContainsString('不在支援範圍', $reply->text);
+            $this->assertFalse($reply->prefersImage());
+        }
+    }
+
+    public function test_sports_urls_and_codes_resolve_without_searching_and_reject_game_mismatch(): void
+    {
+        $nba = $this->sportFixture('nba', 'Golden State Warriors', 'GSW', 'Miami Heat', 'MIA', 26);
+        $this->fake([$nba]);
+        $url = 'https://stake.com/zh/sports/basketball/usa/nba/'.$nba['slug'];
+        $reply = app(LineScheduleBot::class)->reply('!odds '.$url);
+        $this->assertSame($url, $reply->linkUrl);
+        $this->assertSame('nba', $reply->imageData['game']);
+        $code = $reply->imageData['fixture_code'];
+        $this->assertStringContainsString('不符', app(LineScheduleBot::class)->reply('!odds '.$code.' game=mlb')->text);
+        Http::assertNotSent(fn (Request $r): bool => $r['operationName'] === 'StakeOddsFixtures' || $r->method() === 'GET');
+    }
+
+    public function test_capitalized_sports_market_groups_are_included_and_period_markets_are_excluded(): void
+    {
+        $fixture = $this->sportFixture('nba', '金州勇士', '勇士', '邁阿密熱火', '熱火', 27);
+        $fixture['groups'][1]['name'] = 'Handicap';
+        $fixture['groups'][2]['name'] = 'Total';
+        $period = $fixture['groups'][1]['templates'][0]['markets'][0];
+        $period['id'] = 'quarter-handicap';
+        $period['name'] = '第一節讓分';
+        $period['specifiers'] = 'quarternr=1|hcp=-2.5';
+        $fixture['groups'][1]['templates'][0]['markets'][] = $period;
+        $this->fake([$fixture]);
+        $reply = app(LineScheduleBot::class)->reply('!odds 勇士 game=nba');
+        $this->assertSame(['獨贏', '讓分', '大小分'], array_column($reply->imageData['markets'], 'group_label'));
+        $this->assertStringNotContainsString('第一節', $reply->text);
+        $this->assertStringNotContainsString('選手擊殺', $reply->text);
+    }
+
+    public function test_incomplete_cross_game_response_does_not_silently_choose_a_match(): void
+    {
+        Http::fake(function () {
+            $response = $this->listResponse([$this->fixture()]);
+            $response['data']['cs'] = null;
+
+            return Http::response($response);
+        });
+        $reply = app(LineScheduleBot::class)->reply('!odds KC');
+        $this->assertStringContainsString('無法取得完整', $reply->text);
+        $this->assertFalse($reply->prefersImage());
+        Http::assertSentCount(1);
+    }
+
+    public function test_sports_team_lists_are_available_without_network_requests(): void
+    {
+        Http::fake();
+        foreach (['nba' => '勇士｜Golden State Warriors', 'mlb' => '道奇｜Los Angeles Dodgers'] as $game => $expected) {
+            $this->assertStringContainsString($expected, app(LineScheduleBot::class)->reply('!odds teams game='.$game)->text);
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_each_sport_finishes_pagination_before_cross_game_disambiguation(): void
+    {
+        $lol = $this->sportFixture('lol', 'G2 Esports', 'G2', 'Team Liquid', 'TL', 30);
+        $cs = $this->sportFixture('cs', 'G2 Esports', 'G2', 'Team Liquid', 'TL', 31);
+        $unrelated = $this->sportFixture('cs', 'Unrelated', 'U', 'Opponent', 'OPP', 32);
+        Http::fake(function (Request $request) use ($lol, $cs, $unrelated) {
+            if ($request['variables']['offset'] === 0) {
+                $response = $this->listResponse([$lol, ...array_fill(0, 50, $unrelated)]);
+            } else {
+                $this->assertSame(1, substr_count($request['query'], 'slugSport('));
+                $this->assertStringContainsString('cs: slugSport', $request['query']);
+                $response = $this->listResponse([$cs]);
+            }
+            $response['data']['cs']['upcomingCount'] = 51;
+
+            return Http::response($response);
+        });
+        $reply = app(LineScheduleBot::class)->reply('!odds G2');
+        $this->assertCount(2, $reply->quickReplies);
+        $this->assertStringContainsString('【LoL】', $reply->text);
+        $this->assertStringContainsString('【CS2】', $reply->text);
+        Http::assertSentCount(2);
+    }
+
+    public function test_mlb_markets_preserve_run_lines_totals_and_extra_innings_labels(): void
+    {
+        $fixture = $this->sportFixture('mlb', '洛杉磯道奇', '道奇', '亞特蘭大勇士', '勇士', 33);
+        $this->fake([$fixture]);
+        $reply = app(LineScheduleBot::class)->reply('!odds 道奇 game=mlb');
+        $this->assertSame('mlb', $reply->imageData['game']);
+        $this->assertSame(['獨贏', '讓分', '大小分'], array_column($reply->imageData['markets'], 'group_label'));
+        $this->assertStringContainsString('洛杉磯道奇 (-1.5)｜1.80', $reply->text);
+        $this->assertStringContainsString('大於 8.5｜1.90', $reply->text);
+        $this->assertStringContainsString('包括延長局', $reply->text);
+        $this->assertStringNotContainsString('總局數', $reply->text);
+    }
+
+    public function test_pagination_and_refresh_keep_the_selected_fixture_and_text_mode(): void
+    {
+        $fixture = $this->sportFixture('nba', '金州勇士', '勇士', '邁阿密熱火', '熱火', 34);
+        $template = $fixture['groups'][2]['templates'][0]['markets'][0];
+        for ($i = 1; $i <= 12; $i++) {
+            $fixture['groups'][2]['templates'][0]['markets'][] = [...$template, 'id' => 'total-'.$i];
+        }
+        $this->fake([$fixture]);
+        $reply = app(LineScheduleBot::class)->reply('!odds 勇士 game=nba text');
+        $this->assertStringContainsString('第 1 / 2 頁', $reply->text);
+        $next = array_values(array_filter($reply->quickReplies, fn (array $item): bool => $item['label'] === '下一頁'))[0];
+        $second = app(LineScheduleBot::class)->reply($next['text']);
+        $this->assertFalse($second->prefersImage());
+        $this->assertStringContainsString('第 2 / 2 頁', $second->text);
+        $this->assertSame($reply->linkUrl, $second->linkUrl);
+        $this->assertStringEndsWith('page=2 text', $second->quickReplies[0]['text']);
+        Http::assertSentCount(3);
+    }
+
+    public function test_a_generated_code_that_is_also_a_team_name_uses_the_fixture_id(): void
+    {
+        $fixture = $this->sportFixture('nba', '金州勇士', '勇士', '邁阿密熱火', '熱火', 35);
+        $this->fake([$fixture]);
+        $this->mock(StakeFixtureCodes::class, fn ($mock) => $mock->shouldReceive('forFixture')->andReturn('HAWKS'));
+        $reply = app(LineScheduleBot::class)->reply('!odds 勇士 game=nba');
+        $this->assertNull($reply->imageData['fixture_code']);
+        $this->assertStringStartsWith('!odds id='.$fixture['id'], $reply->quickReplies[0]['text']);
+        $this->assertSame($fixture['id'], app(LineScheduleBot::class)->reply($reply->quickReplies[0]['text'])->imageData['fixture_id']);
     }
 
     public function test_schedule_codes_match_both_opponents_and_time_and_resolve_to_live_odds(): void
@@ -343,8 +584,16 @@ class StakeOddsServiceTest extends TestCase
 
     private function listResponse(array $upcoming, array $live = []): array
     {
-        return ['data' => ['slugSport' => ['upcomingCount' => count($upcoming), 'liveCount' => count($live),
-            'upcoming' => $upcoming, 'live' => $live]]];
+        $data = [];
+        foreach (StakeOddsCatalog::GAMES as $game => $definition) {
+            $filter = fn (array $fixture): bool => ($fixture['tournament']['category']['sport']['slug'] ?? '') === $definition['sport'];
+            $upcomingFixtures = array_values(array_filter($upcoming, $filter));
+            $liveFixtures = array_values(array_filter($live, $filter));
+            $data[$game] = ['upcomingCount' => count($upcomingFixtures), 'liveCount' => count($liveFixtures),
+                'upcoming' => $upcomingFixtures, 'live' => $liveFixtures];
+        }
+
+        return ['data' => $data];
     }
 
     private function fixture(string $id = self::ID): array
@@ -369,5 +618,34 @@ class StakeOddsServiceTest extends TestCase
                 ['name' => 'main', ...$market('選手擊殺', ['Over 3.5' => 2.0])],
             ],
         ];
+    }
+
+    private function sportFixture(string $game, string $team, string $short, string $opponent, string $opponentShort, int $id): array
+    {
+        $fixture = $this->fixture(sprintf('00000000-0000-0000-0000-%012d', $id));
+        $fixture['name'] = $team.' - '.$opponent;
+        $fixture['slug'] = 'test-'.$game.'-'.$id;
+        $fixture['data']['competitors'] = [['name' => $team, 'abbreviation' => $short],
+            ['name' => $opponent, 'abbreviation' => $opponentShort]];
+        $definition = StakeOddsCatalog::GAMES[$game];
+        $fixture['tournament'] = ['name' => $definition['label'], 'slug' => $definition['tournament'] ?? 'test-league',
+            'category' => ['slug' => $definition['category'] ?? 'international', 'sport' => ['slug' => $definition['sport']]]];
+        if (in_array($game, ['nba', 'mlb'], true)) {
+            $settlement = $game === 'mlb' ? '（包括延長局）' : '（包含加時）';
+            $total = $game === 'mlb' ? '8.5' : '235.5';
+            foreach ([
+                ['winner', '獲勝者', '', [$team => 1.6, $opponent => 2.4]],
+                ['Handicap', '讓分', 'hcp=-1.5', [$team.' (-1.5)' => 1.8, $opponent.' (1.5)' => 2.0]],
+                ['Total', '總得分', 'total='.$total, ['Over '.$total => 1.9, 'Under '.$total => 1.9]],
+            ] as $index => [$group, $name, $specifiers, $outcomes]) {
+                $fixture['groups'][$index] = ['name' => $group, 'templates' => [['markets' => [[
+                    'id' => $group, 'name' => $name.$settlement, 'status' => 'active', 'specifiers' => $specifiers,
+                    'outcomes' => array_map(fn (string $label, float $price): array => ['id' => $label,
+                        'name' => $label, 'odds' => $price, 'active' => true], array_keys($outcomes), array_values($outcomes)),
+                ]]]]];
+            }
+        }
+
+        return $fixture;
     }
 }

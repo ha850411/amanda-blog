@@ -218,11 +218,18 @@ class StakeApiClient
         }
 
         if ($operationName === 'StakeOddsFixtures') {
-            $sport = $json['data']['slugSport'] ?? null;
+            if ($json['data'] === []) {
+                return false;
+            }
+            foreach ($json['data'] as $sport) {
+                if (! is_array($sport)
+                    || ! is_int($sport['upcomingCount'] ?? null) || ! is_int($sport['liveCount'] ?? null)
+                    || ! is_array($sport['upcoming'] ?? null) || ! is_array($sport['live'] ?? null)) {
+                    return false;
+                }
+            }
 
-            return is_array($sport)
-                && is_int($sport['upcomingCount'] ?? null) && is_int($sport['liveCount'] ?? null)
-                && is_array($sport['upcoming'] ?? null) && is_array($sport['live'] ?? null);
+            return true;
         }
 
         if (in_array($operationName, ['StakeFixtureOdds', 'StakeFixtureOddsBySlug'], true)) {
