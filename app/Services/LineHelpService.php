@@ -139,6 +139,7 @@ class LineHelpService
                 $section('隊名清單', ['!odds teams 或 !odds teams game=lol：LoL 隊名。',
                     '!odds teams game=nba｜!odds teams game=mlb',
                     '!odds teams game=cs｜!odds teams game=val：隊名查詢方式。',
+                    'CS2 隊名可用 BetBoom 或 BetBoom Team，例如 !odds BetBoom game=cs。',
                     '支援明確全名、簡稱與別名，如 BLG／bili／bilibili；不模糊合併二隊。NBA／MLB 不受賽程追蹤名單限制。']),
             ]],
             'markets' => ['title' => '盤口與選場', 'sections' => [

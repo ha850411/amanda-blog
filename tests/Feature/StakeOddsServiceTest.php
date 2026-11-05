@@ -611,6 +611,24 @@ class StakeOddsServiceTest extends TestCase
         Http::assertSentCount(6); // One batched lookup, then five precise code lookups.
     }
 
+    public function test_furia_betboom_schedule_aliases_match_stake_full_names_without_merging_academy_teams(): void
+    {
+        $fixture = $this->sportFixture('cs', 'FURIA Esports', 'FURIA Esports', 'BetBoom Team', 'BetBoom Team', 80);
+        $fixture['data']['startTime'] = '2026-11-06T09:45:00Z';
+        $this->fake([$fixture]);
+        $match = ['game' => 'cs', 'team1' => 'FURIA', 'team2' => 'BetBoom',
+            'start_at' => CarbonImmutable::parse('2026-11-06 17:45', 'Asia/Taipei')];
+        $matches = app(StakeOddsService::class)->enrichSchedule([
+            $match, [...$match, 'team2' => 'BetBoom Academy'], [...$match, 'team1' => 'FURIA Academy'],
+        ]);
+        $this->assertNotEmpty($matches[0]['stake_code']);
+        $this->assertArrayNotHasKey('stake_code', $matches[1]);
+        $this->assertArrayNotHasKey('stake_code', $matches[2]);
+        foreach (['!odds '.$matches[0]['stake_code'], '!odds BetBoom game=cs 1106', '!odds BetBoom Team game=cs 1106'] as $command) {
+            $this->assertSame($fixture['id'], app(LineScheduleBot::class)->reply($command)->imageData['fixture_id']);
+        }
+    }
+
     public function test_ambiguous_schedule_match_does_not_get_an_odds_code(): void
     {
         $fixture = $this->sportFixture('nba', '金州勇士', '勇士', '邁阿密熱火', '熱火', 59);

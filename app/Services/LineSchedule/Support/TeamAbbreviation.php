@@ -31,6 +31,7 @@ class TeamAbbreviation
         'natus vincere' => 'NAVI',
         'faze clan' => 'FaZe',
         'g2 esports' => 'G2',
+        'betboom team' => 'BetBoom',
         'team vitality' => 'VIT',
         'team liquid' => 'TL',
         'fnatic' => 'FNC',

@@ -134,6 +134,8 @@ Jenkins 使用 Credentials Binding 將 Secret text credential 綁定為 `GHCR_TO
 
 # LINE 賽程 Bot
 
+CS2 隊名支援 `BetBoom`／`BetBoom Team` 的明確別名對照，賽程與 Stake 使用不同名稱時仍可比對同一隊。可用 `!odds BetBoom game=cs 1106` 查詢；賽程編號仍需同時符合雙方隊伍、項目與開賽時間，不以部分字串合併二隊。
+
 `!h` 與 `!help` 以圖片回傳完整指令手冊，分成九頁：指令總覽、賽程查詢、賽程篩選、賠率查詢、盤口與選場、投注與即時餘額、投注紀錄與損益、紀錄日期格式、資金水位走勢。下方按鈕可切換分類與翻頁，也可輸入 `!h 2`、`!help odds` 或 `!h markets` 直接開啟指定頁。`!h odds text` 回傳同一頁的完整文字，文字模式會隨導覽保留；圖片產生或上傳失敗時也會改用文字。各指令及別名後加 `help`／`h` 可開啟所屬說明，例如 `!nba help`、`!odds help text`、`!bet help`、`!r help`、`!balance help`。
 
 指令別名由 `LineCommandRegistry` 統一用於路由與手冊，內容及範例由 `LineHelpService` 維護，預設值、天數與筆數上限共用服務常數，追蹤隊伍讀取目前設定。日後新增、移除或修改指令、參數與回覆行為時，必須在同一個變更中同步更新 `!h`／`!help`、README 與相關測試；規則記錄於 [AGENTS.md](AGENTS.md)。
