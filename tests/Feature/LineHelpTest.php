@@ -98,6 +98,10 @@ class LineHelpTest extends TestCase
         foreach (['odds', 'markets'] as $page) {
             $this->assertStringNotContainsString('all', $help->text($page));
             $this->assertStringNotContainsString('全部玩法', $help->text($page));
+            $this->assertStringContainsString('目前比分', $help->text($page));
+        }
+        foreach (['系列賽比分', '當局擊殺', '當局回合', '總比分', '暫無資料', '未開賽不顯示比分'] as $feature) {
+            $this->assertStringContainsString($feature, $help->text('markets'));
         }
         $this->assertStringContainsString('五項目皆會比對 Stake', $help->text('schedule'));
         $this->assertStringContainsString('最多 7 天', $help->text('schedule'));

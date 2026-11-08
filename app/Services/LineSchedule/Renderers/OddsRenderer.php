@@ -10,7 +10,9 @@ class OddsRenderer extends AbstractImageRenderer
     public function render(array $data): Imagick
     {
         $markets = $data['markets'] ?? [];
-        $height = 330;
+        $liveScore = $data['live_score'] ?? null;
+        $scoreHeight = $liveScore !== null ? 58 : 0;
+        $height = 330 + $scoreHeight;
         $group = null;
         foreach ($markets as $market) {
             if ($group !== $market['group_label']) {
@@ -34,8 +36,11 @@ class OddsRenderer extends AbstractImageRenderer
         $this->scheduleText($image, $draw, 48, 162, $data['tournament'], 23, '#94a3b8');
         $this->scheduleRawText($draw, 48, 205, '開賽 '.$data['start_time'].' 台灣時間', 24, '#e2e8f0');
         $this->scheduleRawText($draw, 1392, 205, $data['status'], 24, '#38bdf8', 600, Imagick::ALIGN_RIGHT);
+        if ($liveScore !== null) {
+            $this->scheduleRawText($draw, 48, 258, '目前比分｜'.$liveScore, 30, '#4ade80', 700);
+        }
 
-        $y = 230;
+        $y = 230 + $scoreHeight;
         $group = null;
         foreach ($markets as $market) {
             if ($group !== $market['group_label']) {

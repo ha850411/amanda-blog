@@ -142,6 +142,8 @@ CS2 隊名支援 `BetBoom`／`BetBoom Team` 的明確別名對照，賽程與 St
 
 `!odds` 查詢 LoL、CS2、Valorant、MLB 與 NBA 的 Stake 盤口，預設產圖；加 `text` 可回傳文字，點選場次或翻頁時也會保留文字模式。電競提供整場獨贏、地圖讓分及總局數大小分；MLB／NBA 提供整場獨贏、讓分及總分大小分，保留來源的延長局／延長賽標示。沿用 `!bet`、`!r` 的 `config/stake_sources.json` 網域順序、proxy、驗證與失敗冷卻設定，每次重新取得賽事與盤口，不使用其他莊家補盤。
 
+滾球比賽的圖片與文字都會列出目前比分，左右順序與上方隊伍相同。LoL／CS2／VAL 顯示系列賽比分；Stake 有提供時，另列 LoL 當局擊殺或 CS2／VAL 當局回合分。NBA／MLB 顯示總比分。比分未提供或不完整時標示「暫無資料」，未開賽不顯示比分；滾球的有效 `0：0` 會正常顯示。隊名、遊戲編號、UUID、網址及翻頁查詢皆會重新讀取 Stake 的比分與盤口，例如 `!odds T1`、`!odds 勇士 game=nba text`。
+
 格式為 `!odds 隊名 [日期] [game=項目] [text]`，項目一次指定一個：`lol`、`cs`、`val`、`mlb`、`nba`（也接受 `cs2`、`valorant`）。例如 `!odds G2 game=cs`、`!odds G2 game=val`、`!odds 勇士 game=nba`、`!odds 道奇 明天 game=mlb`。省略 `game=` 時同時搜尋五個項目；`!odds G2` 遇到跨遊戲同名，或 `!odds 勇士` 同時符合 NBA 金州勇士與 MLB 亞特蘭大勇士，會列出項目、對戰、台灣時間與可點選的場次短碼，不會默認選 LoL。查詢資料不完整時會提示來源失敗，不以局部結果猜場次。
 
 查詢僅提供上述三類整場盤口；暫停的選項標示「暫停」，未開放的類別顯示「暫無盤口」。`game=`、`text`、`page=` 可放在日期前後，例如 `!odds G2 game=lol 1107 text`。

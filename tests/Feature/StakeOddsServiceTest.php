@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessLineWebhookEvent;
 use App\Services\Bo3HeadToHeadService;
 use App\Services\Bo3OddsService;
 use App\Services\Bo3ScheduleService;
+use App\Services\LineSchedule\Renderers\OddsRenderer;
 use App\Services\LineSchedule\Support\StakeOddsCatalog;
 use App\Services\LineScheduleBot;
 use App\Services\LineScheduleImageService;
@@ -19,6 +21,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Imagick;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\TestCase;
 
 class StakeOddsServiceTest extends TestCase
@@ -142,6 +145,187 @@ class StakeOddsServiceTest extends TestCase
         $reply = app(LineScheduleBot::class)->reply('!odds KC');
         $this->assertSame($live['id'], $reply->imageData['fixture_id']);
         $this->assertSame('滾球中', $reply->imageData['status']);
+    }
+
+    #[DataProvider('liveScores')]
+    public function test_live_scores_are_in_both_image_and_text_replies(string $game, array $event, string $expected): void
+    {
+        $fixture = $this->sportFixture($game, 'Team A', 'A', 'Team B', 'B', 80);
+        $fixture['status'] = 'live';
+        $fixture['eventStatus'] = $event;
+        $this->fake([], [$fixture]);
+
+        $command = '!odds id='.$fixture['id'];
+        $reply = app(LineScheduleBot::class)->reply($command);
+        $this->assertSame($expected, $reply->imageData['live_score']);
+        $this->assertStringContainsString('目前比分｜'.$expected, $reply->text);
+        $text = app(LineScheduleBot::class)->reply($command.' text');
+        $this->assertFalse($text->prefersImage());
+        $this->assertSame($reply->text, $text->text);
+        Http::assertSentCount(2);
+        Http::assertSent(fn (Request $r): bool => str_contains($r['query'], 'eventStatus {')
+            && str_contains($r['query'], '... on SportFixtureEventStatusData { homeScore awayScore }')
+            && str_contains($r['query'], '... on EsportFixtureEventStatus {')
+            && str_contains($r['query'], 'scoreboard { homeKills awayKills homeWonRounds awayWonRounds }'));
+    }
+
+    public static function liveScores(): array
+    {
+        return [
+            'LoL series and kills' => ['lol', ['homeScore' => 1, 'awayScore' => 0,
+                'scoreboard' => ['homeKills' => 14, 'awayKills' => 7, 'homeWonRounds' => 0, 'awayWonRounds' => 0]], '系列賽 1：0｜當局擊殺 14：7'],
+            'CS2 series and rounds' => ['cs', ['homeScore' => '1', 'awayScore' => '1',
+                'scoreboard' => ['homeKills' => 55, 'awayKills' => 44, 'homeWonRounds' => 12, 'awayWonRounds' => 9]], '系列賽 1：1｜當局回合 12：9'],
+            'VAL series and rounds' => ['val', ['homeScore' => 0, 'awayScore' => 1,
+                'scoreboard' => ['homeWonRounds' => 6, 'awayWonRounds' => 11]], '系列賽 0：1｜當局回合 6：11'],
+            'NBA totals' => ['nba', ['homeScore' => 102, 'awayScore' => 98], '102：98'],
+            'MLB totals' => ['mlb', ['homeScore' => 3, 'awayScore' => 0], '3：0'],
+            'zero series and kills' => ['lol', ['homeScore' => 0, 'awayScore' => 0,
+                'scoreboard' => ['homeKills' => 0, 'awayKills' => 0]], '系列賽 0：0｜當局擊殺 0：0'],
+            'zero sports scores' => ['nba', ['homeScore' => '0', 'awayScore' => '0'], '0：0'],
+            'series only' => ['cs', ['homeScore' => 1, 'awayScore' => 0, 'scoreboard' => null], '系列賽 1：0'],
+            'no series score but current kills' => ['lol', ['scoreboard' => ['homeKills' => 3, 'awayKills' => 1]], '系列賽 暫無資料｜當局擊殺 3：1'],
+            'partial current scoreboard' => ['val', ['homeScore' => 0, 'awayScore' => 0,
+                'scoreboard' => ['homeWonRounds' => 4]], '系列賽 0：0'],
+            'completed map is not the current score' => ['cs', ['homeScore' => 1, 'awayScore' => 0,
+                'periodScores' => [['homeScore' => 1, 'awayScore' => 0, 'homeWonRounds' => 13, 'awayWonRounds' => 8]]], '系列賽 1：0'],
+        ];
+    }
+
+    public function test_live_scores_work_with_names_aliases_codes_ids_urls_and_pagination_and_refresh_each_time(): void
+    {
+        $fixture = $this->fixture();
+        $fixture['status'] = 'live';
+        $fixture['data']['startTime'] = '2026-11-05T03:00:00Z';
+        $market = $fixture['groups'][2]['templates'][0]['markets'][0];
+        for ($i = 0; $i < 12; $i++) {
+            $fixture['groups'][2]['templates'][0]['markets'][] = [...$market, 'id' => 'total-'.$i];
+        }
+        $reads = 0;
+        Http::fake(function (Request $request) use ($fixture, &$reads) {
+            if ($request['operationName'] === 'StakeOddsFixtures') {
+                return Http::response($this->listResponse([], [$fixture]));
+            }
+            $fixture['eventStatus'] = ['homeScore' => 1, 'awayScore' => 0,
+                'scoreboard' => ['homeKills' => ++$reads, 'awayKills' => 0]];
+
+            return Http::response(['data' => ['sportFixture' => $fixture]]);
+        });
+        $code = app(StakeFixtureCodes::class)->forFixture($fixture['id']);
+        $url = 'https://stake.com/zh/sports/league-of-legends/international-1/world-championship-2026-t3/'.$fixture['slug'];
+        foreach (['!odds T1', '!賠率 KC 1105', '!odds '.$code, '!odds id='.$fixture['id'], '!odds '.$url] as $command) {
+            $reply = app(LineScheduleBot::class)->reply($command);
+            $this->assertSame('系列賽 1：0｜當局擊殺 '.$reads.'：0', $reply->imageData['live_score']);
+            $page = app(LineScheduleBot::class)->reply($reply->quickReplies[0]['text']);
+            $this->assertSame(2, $page->imageData['page']);
+            $this->assertSame('系列賽 1：0｜當局擊殺 '.$reads.'：0', $page->imageData['live_score']);
+            $this->assertNotSame($reply->imageData['live_score'], $page->imageData['live_score']);
+        }
+        $this->assertSame(10, $reads);
+    }
+
+    public function test_scores_follow_away_first_competitor_order_for_series_and_current_game(): void
+    {
+        $fixture = $this->fixture();
+        $fixture['status'] = 'live';
+        $fixture['data']['competitors'][0]['extId'] = 'team-kc';
+        $fixture['data']['teams'] = [
+            ['extId' => 'team-t1', 'name' => 'T1', 'qualifier' => 'home'],
+            ['extId' => 'team-kc', 'name' => 'KC', 'qualifier' => 'away'],
+        ];
+        $fixture['eventStatus'] = ['homeScore' => 2, 'awayScore' => 1,
+            'scoreboard' => ['homeKills' => 17, 'awayKills' => 10]];
+        $this->fake([], [$fixture]);
+
+        $reply = app(LineScheduleBot::class)->reply('!odds KC');
+        $this->assertSame('系列賽 1：2｜當局擊殺 10：17', $reply->imageData['live_score']);
+        $this->assertStringContainsString('目前比分｜系列賽 1：2｜當局擊殺 10：17', $reply->text);
+    }
+
+    public function test_sports_scores_follow_away_first_team_names_when_external_ids_are_missing(): void
+    {
+        $fixture = $this->sportFixture('nba', 'Golden State Warriors', 'GSW', 'Miami Heat', 'MIA', 82);
+        $fixture['status'] = 'live';
+        $fixture['data']['teams'] = [
+            ['name' => 'Miami Heat', 'qualifier' => 'home'],
+            ['name' => 'Golden State Warriors', 'qualifier' => 'away'],
+        ];
+        $fixture['eventStatus'] = ['homeScore' => 98, 'awayScore' => 102];
+        $this->fake([], [$fixture]);
+
+        $reply = app(LineScheduleBot::class)->reply('!odds 勇士 game=nba text');
+        $this->assertStringContainsString('Golden State Warriors - Miami Heat', $reply->text);
+        $this->assertStringContainsString('目前比分｜102：98', $reply->text);
+    }
+
+    #[DataProvider('invalidLiveScores')]
+    public function test_missing_or_invalid_scores_do_not_turn_into_zero_or_hide_the_markets(?array $event): void
+    {
+        $fixture = $this->sportFixture('nba', 'Golden State Warriors', 'GSW', 'Miami Heat', 'MIA', 81);
+        $fixture['status'] = 'live';
+        $fixture['eventStatus'] = $event;
+        $this->fake([], [$fixture]);
+
+        $reply = app(LineScheduleBot::class)->reply('!odds 勇士 game=nba');
+        $this->assertSame('暫無資料', $reply->imageData['live_score']);
+        $this->assertSame(3, $reply->imageData['market_count']);
+        $this->assertStringContainsString('目前比分｜暫無資料', $reply->text);
+        $this->assertStringNotContainsString('0：0', $reply->text);
+    }
+
+    public static function invalidLiveScores(): array
+    {
+        return [[null], [[]], [['homeScore' => 0]], [['homeScore' => null, 'awayScore' => 0]],
+            [['homeScore' => '-', 'awayScore' => 0]], [['homeScore' => -1, 'awayScore' => 0]],
+            [['homeScore' => 1.5, 'awayScore' => 0]], [['homeScore' => false, 'awayScore' => true]]];
+    }
+
+    #[DataProvider('fixtureScoreVisibility')]
+    public function test_only_live_fixtures_show_scores_even_when_stake_supplies_pregame_placeholders(string $status, bool $live): void
+    {
+        $fixture = $this->fixture();
+        $fixture['status'] = $status;
+        $fixture['eventStatus'] = ['homeScore' => 0, 'awayScore' => 0];
+        $this->fake($live ? [] : [$fixture], $live ? [$fixture] : []);
+        $reply = app(LineScheduleBot::class)->reply('!odds KC');
+        if ($live) {
+            $this->assertSame('滾球中', $reply->imageData['status']);
+            $this->assertSame('系列賽 0：0', $reply->imageData['live_score']);
+        } else {
+            $this->assertNull($reply->imageData['live_score']);
+            $this->assertStringNotContainsString('目前比分', $reply->text);
+        }
+    }
+
+    public static function fixtureScoreVisibility(): array
+    {
+        // A fixture from the live list may still have active/suspended market status.
+        return [['active', false], ['suspended', false], ['active', true], ['suspended', true]];
+    }
+
+    public function test_odds_image_failure_keeps_live_scores_in_the_text_fallback(): void
+    {
+        $fixture = $this->fixture();
+        $fixture['status'] = 'live';
+        $fixture['eventStatus'] = ['homeScore' => 1, 'awayScore' => 0,
+            'scoreboard' => ['homeKills' => 14, 'awayKills' => 7]];
+        config(['services.line.channel_access_token' => 'test-token']);
+        $this->mock(LineScheduleImageService::class, function ($mock): void {
+            $mock->shouldReceive('create')->once()
+                ->withArgs(fn (array $data): bool => $data['live_score'] === '系列賽 1：0｜當局擊殺 14：7')
+                ->andThrow(new RuntimeException('Image storage unavailable.'));
+        });
+        Http::fake([
+            'https://stake.com/*' => Http::response(['data' => ['sportFixture' => $fixture]]),
+            'https://api.line.me/*' => Http::response([]),
+        ]);
+        $job = new ProcessLineWebhookEvent(['type' => 'message', 'replyToken' => 'odds-token',
+            'message' => ['id' => 'odds-fallback', 'type' => 'text', 'text' => '!odds id='.$fixture['id']]]);
+        $this->app->call([$job, 'handle']);
+        Http::assertSent(fn (Request $r): bool => $r->url() === 'https://api.line.me/v2/bot/message/reply'
+            && $r['messages'][0]['type'] === 'text'
+            && str_contains($r['messages'][0]['text'], '目前比分｜系列賽 1：0｜當局擊殺 14：7')
+            && str_contains($r['messages'][0]['text'], '大於 3.5｜1.45'));
     }
 
     public function test_multiple_matches_on_a_date_offer_fixture_ids_instead_of_guessing(): void
@@ -708,7 +892,11 @@ class StakeOddsServiceTest extends TestCase
         }
         config(['services.line.schedule_image_disk' => 'odds-images']);
         Storage::fake('odds-images');
-        $this->fake([$this->fixture()]);
+        $fixture = $this->fixture();
+        $fixture['status'] = 'live';
+        $fixture['eventStatus'] = ['homeScore' => 1, 'awayScore' => 1,
+            'scoreboard' => ['homeKills' => 14, 'awayKills' => 7]];
+        $this->fake([], [$fixture]);
         $reply = app(LineScheduleBot::class)->reply('!odds KC');
         app(LineScheduleImageService::class)->create($reply->imageData, $reply->linkUrl);
         $files = Storage::disk('odds-images')->allFiles('line-schedules');
@@ -721,6 +909,15 @@ class StakeOddsServiceTest extends TestCase
             $this->assertSame('PNG', $image->getImageFormat());
             $image->clear();
         }
+
+        $renderer = new OddsRenderer;
+        $before = $renderer->render($reply->imageData);
+        $updated = [...$reply->imageData, 'live_score' => '系列賽 1：1｜當局擊殺 15：7'];
+        $after = $renderer->render($updated);
+        $this->assertSame($before->getImageGeometry(), $after->getImageGeometry());
+        $this->assertNotSame($before->getImageSignature(), $after->getImageSignature());
+        $before->clear();
+        $after->clear();
     }
 
     private function fake(array $upcoming, array $live = []): void

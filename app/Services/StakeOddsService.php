@@ -25,6 +25,17 @@ data { ... on SportFixtureDataMatch { startTime competitors { name abbreviation 
 tournament { name slug category { slug sport { name slug } } }
 GRAPHQL;
 
+    private const LIVE_SCORE_FIELDS = <<<'GRAPHQL'
+data { ... on SportFixtureDataMatch { competitors { extId } teams { extId name qualifier } } }
+eventStatus {
+  ... on SportFixtureEventStatusData { homeScore awayScore }
+  ... on EsportFixtureEventStatus {
+    homeScore awayScore
+    scoreboard { homeKills awayKills homeWonRounds awayWonRounds }
+  }
+}
+GRAPHQL;
+
     private const MARKET_FIELDS = <<<'GRAPHQL'
 groups(groups: ["winner", "handicap", "total", "Handicap", "Total"]) {
   name
@@ -120,7 +131,8 @@ GRAPHQL;
             $checkedAt = CarbonImmutable::now(self::TIMEZONE)->format('Y/m/d H:i:s');
             $code = $this->code($fixture['id']);
             $lookup = $code ?? 'id='.$fixture['id'];
-            $status = ($isLive || $fixture['status'] === 'live') ? '滾球中' : ($fixture['status'] === 'suspended' ? '暫停開盤' : '未開賽');
+            $isLive = $isLive || $fixture['status'] === 'live';
+            $status = $isLive ? '滾球中' : ($fixture['status'] === 'suspended' ? '暫停開盤' : '未開賽');
             $data = [
                 'type' => 'odds',
                 'title' => 'Stake｜'.StakeOddsCatalog::GAMES[$game]['label'].' 盤口',
@@ -131,6 +143,7 @@ GRAPHQL;
                 'tournament' => ChineseConverter::toTraditional($fixture['tournament']['name'] ?? ''),
                 'start_time' => $startAt->format('Y/m/d H:i'),
                 'status' => $status,
+                'live_score' => $isLive ? $this->liveScore($fixture, $game) : null,
                 'checked_at' => $checkedAt,
                 'markets' => $visible,
                 'page' => $command['page'],
@@ -139,9 +152,13 @@ GRAPHQL;
                 'market_scope' => '整場獨贏／讓分／大小分',
             ];
             $lines = [$data['title'], $data['fixture_name'], $data['tournament'],
-                '開賽｜'.$data['start_time'].'（台灣時間）｜'.$status,
+                '開賽｜'.$data['start_time'].'（台灣時間）｜'.$status];
+            if ($data['live_score'] !== null) {
+                $lines[] = '目前比分｜'.$data['live_score'];
+            }
+            array_push($lines,
                 '查詢時間｜'.$checkedAt.'（台灣時間）',
-                '玩法｜'.$data['market_scope'].'｜共 '.count($markets).' 個盤口'];
+                '玩法｜'.$data['market_scope'].'｜共 '.count($markets).' 個盤口');
             if ($code !== null) {
                 $lines[] = '遊戲編號｜'.$code.'（!odds '.$code.'）';
             }
@@ -376,7 +393,7 @@ GRAPHQL;
     {
         $operation = $slug === null ? 'StakeFixtureOdds' : 'StakeFixtureOddsBySlug';
         $field = $slug === null ? 'sportFixture(fixtureId: $value)' : 'sportFixture: slugFixture(fixture: $value)';
-        $query = 'query '.$operation.'($value: String!) { '.$field.' { '.self::FIXTURE_FIELDS.' '.self::MARKET_FIELDS.' } }';
+        $query = 'query '.$operation.'($value: String!) { '.$field.' { '.self::FIXTURE_FIELDS.' '.self::LIVE_SCORE_FIELDS.' '.self::MARKET_FIELDS.' } }';
         $response = $this->api->query($operation, $query, ['value' => $slug ?? $id]);
         if (! empty($response['errors']) || ! is_array($response['data'] ?? null) || ! array_key_exists('sportFixture', $response['data'])) {
             throw new RuntimeException('Invalid Stake odds response.');
@@ -389,6 +406,58 @@ GRAPHQL;
         }
 
         return $fixture;
+    }
+
+    private function liveScore(array $fixture, string $game): string
+    {
+        $event = $fixture['eventStatus'] ?? [];
+        $reverse = $this->scoresReversed($fixture);
+        $score = $this->scorePair($event['homeScore'] ?? null, $event['awayScore'] ?? null, $reverse);
+        if (in_array($game, ['nba', 'mlb'], true)) {
+            return $score ?? '暫無資料';
+        }
+
+        $parts = ['系列賽 '.($score ?? '暫無資料')];
+        $scoreboard = $event['scoreboard'] ?? [];
+        $field = $game === 'lol' ? 'Kills' : 'WonRounds';
+        $current = $this->scorePair($scoreboard['home'.$field] ?? null, $scoreboard['away'.$field] ?? null, $reverse);
+        if ($current !== null) {
+            $parts[] = ($game === 'lol' ? '當局擊殺 ' : '當局回合 ').$current;
+        }
+
+        return implode('｜', $parts);
+    }
+
+    /** Align both score pairs with the fixture's displayed competitor order. */
+    private function scoresReversed(array $fixture): bool
+    {
+        $first = $fixture['data']['competitors'][0] ?? [];
+        foreach ($fixture['data']['teams'] ?? [] as $team) {
+            if (! in_array($team['qualifier'] ?? null, ['home', 'away'], true)) {
+                continue;
+            }
+            $sameTeam = isset($first['extId'], $team['extId'])
+                ? (string) $first['extId'] === (string) $team['extId']
+                : isset($first['name'], $team['name']) && StakeOddsCatalog::normalize($first['name']) === StakeOddsCatalog::normalize($team['name']);
+            if ($sameTeam) {
+                return $team['qualifier'] === 'away';
+            }
+        }
+
+        // Stake's default competitor order is home, away (also used by !bet).
+        return false;
+    }
+
+    private function scorePair(mixed $home, mixed $away, bool $reverse): ?string
+    {
+        foreach ([$home, $away] as $value) {
+            if (! is_numeric($value) || ! is_finite((float) $value) || (float) $value < 0
+                || (float) $value >= PHP_INT_MAX || floor((float) $value) !== (float) $value) {
+                return null;
+            }
+        }
+
+        return $reverse ? ((int) $away).'：'.((int) $home) : ((int) $home).'：'.((int) $away);
     }
 
     private function markets(array $fixture): array

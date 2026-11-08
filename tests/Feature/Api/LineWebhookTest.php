@@ -423,6 +423,8 @@ class LineWebhookTest extends TestCase
         Http::assertSent(fn ($request): bool => $request['messages'][0]['type'] === 'text'
             && str_contains($request['messages'][0]['text'], '!odds T1 1107 text')
             && str_contains($request['messages'][0]['text'], 'page=2')
+            && str_contains($request['messages'][0]['text'], '目前比分')
+            && str_contains($request['messages'][0]['text'], '當局擊殺')
             && ! empty($request['messages'][0]['quickReply']['items']));
     }
 
