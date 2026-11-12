@@ -9,6 +9,8 @@ class BetHistoryRenderer extends AbstractImageRenderer
 {
     private const CANVAS_BOTTOM_PADDING = 30;
 
+    private const LEG_HEIGHT = 72;
+
     /**
      * @param  array{
      *     title?: string,
@@ -326,7 +328,7 @@ class BetHistoryRenderer extends AbstractImageRenderer
             $legStartY = $y + 80;
             $isParlay = (bool) ($bet['is_parlay'] ?? false);
             foreach ($legs as $idx => $leg) {
-                $curLegY = $legStartY + ($idx * 52);
+                $curLegY = $legStartY + ($idx * self::LEG_HEIGHT);
                 $legStatus = (string) ($leg['status'] ?? 'pending');
                 $badgeText = (string) ($leg['status_text'] ?? match ($legStatus) {
                     'won' => '已過',
@@ -397,12 +399,13 @@ class BetHistoryRenderer extends AbstractImageRenderer
                 $matchStr = $leg['fixture_name'] ?? '';
                 $fullHeader = $prefixIdx.$sportStr.$tournStr.$matchStr;
 
-                $legHeader = $this->fitText($image, $draw, $fullHeader, $availHeaderW, 16);
-
                 $draw->setFillColor('#94a3b8');
                 $draw->setFontSize(20);
                 $draw->setFontWeight(500);
+                $legHeader = $this->fitText($image, $draw, $fullHeader, $availHeaderW, 16);
                 $draw->annotation($leftStart, $curLegY, $legHeader);
+
+                $this->scheduleRawText($draw, $leftStart, $curLegY + 30, '比分｜'.($leg['score'] ?? '暫無資料'), 22, '#cbd5e1', 700);
             }
 
             // Bottom Right Financial Bar
@@ -442,7 +445,7 @@ class BetHistoryRenderer extends AbstractImageRenderer
 
     private function betHistoryCardHeight(int $legCount): int
     {
-        return 116 + ($legCount * 52);
+        return 116 + ($legCount * self::LEG_HEIGHT);
     }
 
     private function betHistoryCanvasHeight(array $bets, bool $isEmpty, int $omittedCount = 0): int

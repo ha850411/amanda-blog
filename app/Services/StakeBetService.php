@@ -2888,6 +2888,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                     'sport_slug' => $sportSlug,
                     'tournament_name' => ChineseConverter::toTraditional($tournamentName),
                     'fixture_name' => ChineseConverter::toTraditional($fixtureName),
+                    'score' => $this->formatHistoryFixtureScore($fixture),
                     'market_name' => ChineseConverter::toTraditional($marketName),
                     'outcome_name' => ChineseConverter::toTraditional($outcomeName),
                     'odds' => $odds,
@@ -3091,6 +3092,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                         $leg['tournament_name'] ?: $leg['fixture_name'],
                         $leg['fixture_name']
                     );
+                    $lines[] = '  比分｜'.($leg['score'] ?? '暫無資料');
                     $marketDesc = $leg['market_name'] !== '' ? "（{$leg['market_name']}）" : '';
                     $lines[] = sprintf(
                         '  選項：%s @ %.2f%s',
@@ -3111,6 +3113,7 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
                     if ($leg['fixture_name'] !== '') {
                         $lines[] = "  {$leg['fixture_name']}";
                     }
+                    $lines[] = '  比分｜'.($leg['score'] ?? '暫無資料');
                     $marketDesc = $leg['market_name'] !== '' ? "（{$leg['market_name']}）" : '';
                     $statusTag = $leg['status_label'] ?? ($leg['status_symbol'] ?? '');
                     $lines[] = sprintf(
@@ -3586,6 +3589,35 @@ GRAPHQL."\n".self::SPORT_BET_FRAGMENTS;
             'balance_formatted' => $balance !== null ? $this->formatBalanceForImage($balance) : null,
             'bets' => $betsForImage,
         ];
+    }
+
+    /** Use the match total, not the last map's rounds or kills. */
+    private function formatHistoryFixtureScore(array $fixture): ?string
+    {
+        $event = $fixture['eventStatus'] ?? [];
+        $home = $event['homeScore'] ?? null;
+        $away = $event['awayScore'] ?? null;
+        foreach ([$home, $away] as $value) {
+            if (! is_numeric($value) || ! is_finite((float) $value) || (float) $value < 0
+                || (float) $value >= PHP_INT_MAX || floor((float) $value) !== (float) $value) {
+                return null;
+            }
+        }
+
+        // Match the displayed fixture order; Stake otherwise defaults to home, away.
+        $names = preg_split('/\s+(?:vs?\.?|[-–—])\s+/iu', (string) ($fixture['name'] ?? ''), 2);
+        $firstName = count($names) === 2 ? $names[0] : ($fixture['data']['competitors'][0]['name'] ?? '');
+        $normalize = static fn (string $name): string => mb_strtolower(trim(ChineseConverter::toTraditional($name)));
+        foreach ($fixture['data']['teams'] ?? [] as $team) {
+            if ($firstName !== '' && isset($team['name']) && $normalize($team['name']) === $normalize($firstName)) {
+                if (($team['qualifier'] ?? null) === 'away') {
+                    return ((int) $away).'：'.((int) $home);
+                }
+                break;
+            }
+        }
+
+        return ((int) $home).'：'.((int) $away);
     }
 
     private function resolveGameSlug(string $slug, string $name): ?string

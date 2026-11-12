@@ -2,12 +2,17 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessLineWebhookEvent;
+use App\Services\LineCommandRegistry;
 use App\Services\LineScheduleBot;
+use App\Services\LineScheduleImageService;
 use App\Services\StakeBetService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\TestCase;
 
 class StakeBetServiceTest extends TestCase
@@ -821,12 +826,28 @@ class StakeBetServiceTest extends TestCase
         $bot = app(LineScheduleBot::class);
 
         // Standalone commands defaulting to today
-        $commands = ['!r', '!record', '!history', '!pnl', '!損益', '!紀錄'];
+        $commands = array_map(fn (string $alias): string => '!'.$alias, LineCommandRegistry::COMMANDS['records']['aliases']);
         foreach ($commands as $cmd) {
             $reply = $bot->reply($cmd);
             $this->assertNotNull($reply, "Failed executing {$cmd}");
             $this->assertStringContainsString('Stake 體育投注｜每日損益與紀錄', $reply->text);
             $this->assertSame('bet_history', $reply->imageData['type']);
+            $this->assertStringContainsString("Team Spirit vs Heroic\n  比分｜2：1", $reply->text, $cmd);
+            $this->assertStringContainsString("Vitality vs G2\n  比分｜0：3", $reply->text, $cmd);
+            $won = collect($reply->imageData['bets'])->firstWhere('id', 'hist-bet-1');
+            $lost = collect($reply->imageData['bets'])->firstWhere('id', 'hist-bet-2');
+            $this->assertSame('won', $won['status']);
+            $this->assertSame('2：1', $won['legs'][0]['score']);
+            $this->assertSame('lost', $lost['status']);
+            $this->assertSame('0：3', $lost['legs'][0]['score']);
+            $this->assertSame($reply->text, $bot->reply($cmd.' text')->text);
+        }
+
+        foreach (['!r 7d text', '!bet record 7d text'] as $command) {
+            $reply = $bot->reply($command);
+            $this->assertFalse($reply->prefersImage());
+            $this->assertStringContainsString("Team Spirit vs Heroic\n  比分｜2：1", $reply->text);
+            $this->assertStringContainsString("Vitality vs G2\n  比分｜0：3", $reply->text);
         }
 
         // Help commands
@@ -1130,6 +1151,8 @@ class StakeBetServiceTest extends TestCase
                     'outcome' => ['name' => 'T1 Esports', 'odds' => 1.70],
                     'fixture' => [
                         'name' => 'T1 vs DK',
+                        'eventStatus' => ['homeScore' => 2, 'awayScore' => 1,
+                            'scoreboard' => ['homeKills' => 18, 'awayKills' => 9]],
                         'tournament' => [
                             'name' => 'LCK 2026 Season Playoffs',
                             'category' => ['sport' => ['name' => '英雄聯盟']],
@@ -1143,6 +1166,8 @@ class StakeBetServiceTest extends TestCase
                     'outcome' => ['name' => 'Team Vitality', 'odds' => 1.50],
                     'fixture' => [
                         'name' => 'Vitality vs G2',
+                        'eventStatus' => ['homeScore' => 0, 'awayScore' => 2,
+                            'scoreboard' => ['homeWonRounds' => 9, 'awayWonRounds' => 13]],
                         'tournament' => [
                             'name' => 'ESL Pro League',
                             'category' => ['sport' => ['name' => '反恐精英']],
@@ -1185,11 +1210,11 @@ class StakeBetServiceTest extends TestCase
         $this->assertNotNull($textReply);
         $this->assertStringContainsString('3 關串關', $textReply->text);
         $this->assertStringContainsString('關卡 1/3｜已過 ✅', $textReply->text);
-        $this->assertStringContainsString('T1 vs DK', $textReply->text);
+        $this->assertStringContainsString("T1 vs DK\n  比分｜2：1", $textReply->text);
         $this->assertStringContainsString('關卡 2/3｜未過 ❌', $textReply->text);
-        $this->assertStringContainsString('Vitality vs G2', $textReply->text);
+        $this->assertStringContainsString("Vitality vs G2\n  比分｜0：2", $textReply->text);
         $this->assertStringContainsString('關卡 3/3｜進行中 ⏳', $textReply->text);
-        $this->assertStringContainsString('DRX vs PRX', $textReply->text);
+        $this->assertStringContainsString("DRX vs PRX\n  比分｜暫無資料", $textReply->text);
 
         // 2. Image data mode verification
         $imgReply = $bot->reply('!r 2026-09-06');
@@ -1199,6 +1224,7 @@ class StakeBetServiceTest extends TestCase
 
         $legs = $imgReply->imageData['bets'][0]['legs'];
         $this->assertCount(3, $legs);
+        $this->assertSame(['2：1', '0：2', null], array_column($legs, 'score'));
 
         $this->assertSame('won', $legs[0]['status']);
         $this->assertSame('已過 ✅', $legs[0]['status_label']);
@@ -1273,6 +1299,77 @@ class StakeBetServiceTest extends TestCase
         $this->assertNotNull($reply);
         $this->assertStringContainsString('關卡 1/2｜已過 ✅', $reply->text);
         $this->assertStringContainsString('關卡 2/2｜已過 ✅', $reply->text);
+    }
+
+    #[DataProvider('historyScores')]
+    public function test_history_scores_handle_zero_missing_data_and_team_order(array $fixture, ?string $expected): void
+    {
+        $service = app(StakeBetService::class);
+        $date = CarbonImmutable::now('Asia/Taipei');
+        $data = $service->calculateDatePnL([[
+            'status' => 'settled', 'amount' => 10, 'payout' => 0,
+            'outcomes' => [['status' => 'lost', 'fixture' => $fixture]],
+        ]], 'Asia/Taipei');
+
+        $this->assertSame($expected, $data['bets'][0]['legs'][0]['score']);
+        $image = $service->buildBetHistoryImageData($date, null, $data['bets'], $data['summary']);
+        $this->assertSame($expected, $image['bets'][0]['legs'][0]['score']);
+        $text = $service->formatBetHistoryMessage($date, null, $data['bets'], $data['summary']);
+        $this->assertStringContainsString('比分｜'.($expected ?? '暫無資料'), $text);
+    }
+
+    public static function historyScores(): array
+    {
+        $nba = ['name' => 'Warriors vs Lakers', 'data' => [
+            'teams' => [['name' => 'Lakers', 'qualifier' => 'home'], ['name' => 'Warriors', 'qualifier' => 'away']],
+            'competitors' => [['name' => 'Warriors'], ['name' => 'Lakers']],
+        ], 'eventStatus' => ['homeScore' => 105, 'awayScore' => 112]];
+
+        return [
+            'zero scores' => [['eventStatus' => ['homeScore' => 0, 'awayScore' => 0]], '0：0'],
+            'numeric strings' => [['eventStatus' => ['homeScore' => '2', 'awayScore' => '0']], '2：0'],
+            'missing scores' => [[], null],
+            'null event' => [['eventStatus' => null], null],
+            'partial scores' => [['eventStatus' => ['homeScore' => 2]], null],
+            'null score' => [['eventStatus' => ['homeScore' => 2, 'awayScore' => null]], null],
+            'invalid score' => [['eventStatus' => ['homeScore' => '-', 'awayScore' => 0]], null],
+            'negative score' => [['eventStatus' => ['homeScore' => -1, 'awayScore' => 0]], null],
+            'fractional score' => [['eventStatus' => ['homeScore' => 1.5, 'awayScore' => 0]], null],
+            'last map only' => [['eventStatus' => ['scoreboard' => ['homeWonRounds' => 13, 'awayWonRounds' => 9]]], null],
+            'away team displayed first' => [$nba, '112：105'],
+            'home team displayed first' => [[...$nba, 'name' => 'Lakers - Warriors'], '105：112'],
+            'competitor order fallback' => [[...$nba, 'name' => 'NBA Playoffs'], '112：105'],
+        ];
+    }
+
+    public function test_record_image_failure_keeps_winning_and_losing_scores_in_text(): void
+    {
+        config(['services.line.channel_access_token' => 'test-line-token']);
+        $this->mock(LineScheduleImageService::class, function ($mock): void {
+            $mock->shouldReceive('create')->once()
+                ->withArgs(fn (array $data, $url): bool => $data['type'] === 'bet_history')
+                ->andThrow(new RuntimeException('Image storage unavailable.'));
+        });
+        Http::fake([
+            'https://stake.com/_api/graphql' => function ($request) {
+                return match ($request->header('x-operation-name')[0] ?? '') {
+                    'FetchActiveSportBets' => Http::response(['data' => ['user' => ['activeSportBets' => []]]]),
+                    'FetchSportBetList' => Http::response($this->sampleSportBetListResponse()),
+                    'UserBalances' => Http::response($this->sampleUserBalancesResponse()),
+                    default => Http::response([]),
+                };
+            },
+            'https://api.line.me/*' => Http::response([]),
+        ]);
+        $job = new ProcessLineWebhookEvent(['type' => 'message', 'replyToken' => 'record-token',
+            'message' => ['id' => 'record-fallback', 'type' => 'text', 'text' => '!r']]);
+        $this->app->call([$job, 'handle']);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.line.me/v2/bot/message/reply'
+            && $request['messages'][0]['type'] === 'text'
+            && str_contains($request['messages'][0]['text'], "Team Spirit vs Heroic\n  比分｜2：1")
+            && str_contains($request['messages'][0]['text'], "Vitality vs G2\n  比分｜0：3")
+            && ! empty($request['messages'][0]['quickReply']['items']));
     }
 
     public function test_bet_history_image_rendering(): void
@@ -2350,6 +2447,7 @@ class StakeBetServiceTest extends TestCase
                                         'outcome' => ['name' => 'Team Spirit', 'odds' => 1.4],
                                         'fixture' => [
                                             'name' => 'Team Spirit vs Heroic',
+                                            'eventStatus' => ['homeScore' => 2, 'awayScore' => 1],
                                             'tournament' => [
                                                 'name' => 'ESL Pro League',
                                                 'category' => ['sport' => ['name' => '反恐精英']],
@@ -2379,6 +2477,7 @@ class StakeBetServiceTest extends TestCase
                                         'outcome' => ['name' => 'Team Vitality', 'odds' => 1.472],
                                         'fixture' => [
                                             'name' => 'Vitality vs G2',
+                                            'eventStatus' => ['homeScore' => 0, 'awayScore' => 3],
                                             'tournament' => [
                                                 'name' => 'LEC',
                                                 'category' => ['sport' => ['name' => '英雄联盟']],

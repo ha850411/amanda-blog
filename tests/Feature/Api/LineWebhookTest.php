@@ -410,22 +410,26 @@ class LineWebhookTest extends TestCase
         });
     }
 
-    public function test_help_image_failure_returns_complete_page_text_and_navigation(): void
+    #[DataProvider('helpFallbackPages')]
+    public function test_help_image_failure_returns_complete_page_text_and_navigation(string $page): void
     {
         $this->mock(LineScheduleImageService::class, function ($mock): void {
             $mock->shouldReceive('create')->once()->withArgs(fn (array $data, $url): bool => $data['type'] === 'help' && $url === null)
                 ->andThrow(new RuntimeException('Image storage unavailable.'));
         });
         Http::fake(['https://api.line.me/*' => Http::response([])]);
+        $expectedText = app(LineScheduleBot::class)->reply('!h '.$page.' text')->text;
         $job = new ProcessLineWebhookEvent(['type' => 'message', 'replyToken' => 'help-token',
-            'message' => ['id' => 'help-fallback', 'type' => 'text', 'text' => '!h markets']]);
+            'message' => ['id' => 'help-fallback', 'type' => 'text', 'text' => '!h '.$page]]);
         $this->app->call([$job, 'handle']);
         Http::assertSent(fn ($request): bool => $request['messages'][0]['type'] === 'text'
-            && str_contains($request['messages'][0]['text'], '!odds T1 1107 text')
-            && str_contains($request['messages'][0]['text'], 'page=2')
-            && str_contains($request['messages'][0]['text'], '目前比分')
-            && str_contains($request['messages'][0]['text'], '當局擊殺')
+            && $request['messages'][0]['text'] === $expectedText
             && ! empty($request['messages'][0]['quickReply']['items']));
+    }
+
+    public static function helpFallbackPages(): array
+    {
+        return [['markets'], ['records']];
     }
 
     public function test_non_command_message_is_ignored(): void

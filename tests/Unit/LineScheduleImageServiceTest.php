@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Services\LineSchedule\Renderers\BetHistoryRenderer;
 use App\Services\LineSchedule\Renderers\ScheduleRenderer;
 use App\Services\LineScheduleImageService;
 use Illuminate\Support\Facades\Storage;
@@ -11,6 +12,31 @@ use Tests\TestCase;
 
 class LineScheduleImageServiceTest extends TestCase
 {
+    public function test_bet_history_images_render_scores_for_wins_losses_and_every_parlay_leg(): void
+    {
+        if (! extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick is required to verify bet history scores.');
+        }
+
+        $renderer = new BetHistoryRenderer;
+        foreach (['won', 'lost'] as $status) {
+            $data = ['bets' => [['status' => $status, 'is_parlay' => true, 'legs' => [
+                ['fixture_name' => 'T1 vs DK', 'status' => 'won', 'score' => '2：1'],
+                ['fixture_name' => 'Vitality vs G2', 'status' => $status, 'score' => '0：3'],
+            ]]]];
+            $original = $renderer->render($data);
+            foreach ([0, 1] as $legIndex) {
+                $changed = $data;
+                $changed['bets'][0]['legs'][$legIndex]['score'] = '3：2';
+                $updated = $renderer->render($changed);
+                $this->assertNotSame($original->getImageSignature(), $updated->getImageSignature(), $status.' leg '.$legIndex);
+                $this->assertSame($original->getImageHeight(), $updated->getImageHeight());
+                $updated->clear();
+            }
+            $original->clear();
+        }
+    }
+
     #[DataProvider('matchScoreStates')]
     public function test_score_display_depends_on_match_status(array $state, ?string $seriesScore, ?string $score, bool $showScore): void
     {

@@ -107,6 +107,9 @@ class LineHelpTest extends TestCase
         $this->assertStringContainsString('最多 7 天', $help->text('schedule'));
         $this->assertStringContainsString('1～19', $help->text('filters'));
         $this->assertStringContainsString('最多 30 天', $help->text('records'));
+        foreach (['獲勝與未中獎', '串關逐場列出', '比分順序', '系列賽比分', '總比分', '暫無資料'] as $feature) {
+            $this->assertStringContainsString($feature, $help->text('records'));
+        }
         $this->assertStringContainsString('!bet balance', $help->text('bets'));
     }
 

@@ -19,7 +19,7 @@ class LineScheduleImageService
 {
     private const CANVAS_WIDTH = 1440;
 
-    private const CACHE_VERSION = 46;
+    private const CACHE_VERSION = 47;
 
     /** @var array<int, int> */
     private const IMAGE_WIDTHS = [700, 1440];
