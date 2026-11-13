@@ -91,18 +91,27 @@
             },
             mounted() {
                 this.lock = Number(this.article.status) === 2 && !this.article.is_password_verified;
+                this.openContentLinksInNewTab();
             },
             watch: {
             },
             computed: {
             },
             methods: {
+                openContentLinksInNewTab() {
+                    this.$el.querySelectorAll('.article-content a[href]').forEach(link => {
+                        link.target = '_blank';
+                        link.relList.add('noopener', 'noreferrer');
+                    });
+                },
                 async verify() {
                     try {
                         const verifiedArticle = await this.verifyArticlePassword(this.article.id, this.password);
                         Object.assign(this.article, verifiedArticle);
                         this.lock = !this.article.is_password_verified;
                         this.password = '';
+                        await this.$nextTick();
+                        this.openContentLinksInNewTab();
                     } catch (error) {
                         Swal.fire({
                             icon: 'error',
