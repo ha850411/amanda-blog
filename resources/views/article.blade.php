@@ -99,7 +99,7 @@
             },
             methods: {
                 openContentLinksInNewTab() {
-                    this.$el.querySelectorAll('.article-content a[href]').forEach(link => {
+                    document.querySelectorAll('#app .article-content a[href]').forEach(link => {
                         link.target = '_blank';
                         link.relList.add('noopener', 'noreferrer');
                     });
