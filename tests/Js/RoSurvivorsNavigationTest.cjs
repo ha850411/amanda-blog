@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname,
     '../../public/userscripts/ro-survivors-control.user.js'), 'utf8');
 const begin = source.indexOf('  function createLobbyNavigator(');
-const end = source.indexOf('  // 2ad7e24b 的一般單人難度', begin);
+const end = source.indexOf('  // 一般單人難度', begin);
 assert.ok(begin >= 0 && end > begin);
 const create = vm.runInNewContext(source.slice(begin, end) + '\ncreateLobbyNavigator;');
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };

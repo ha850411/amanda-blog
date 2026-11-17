@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.7
+// @version      0.6.8
 // @homepageURL  https://amanda-blog.com/
 // @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 // @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
-// @description  2ad7e24b：自動走向遠征隊長／節慶主持人、單人連刷、難度、立即開卡與結算診斷。
+// @description  自動走向遠征隊長／節慶主持人、單人連刷、難度、立即開卡與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
 // @match        https://www.ro-survivors.com/*
 // @run-at       document-idle
@@ -212,7 +212,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.7', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.8', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -1046,9 +1046,14 @@
       const request = ++revision;
       Promise.resolve().then(loadModule).then(module => {
         if (request !== revision) return;
-        const prototype = module.ed?.prototype;
+        const values = module && typeof module === 'object' ? Object.values(module) : [];
+        const World = (typeof module?.ed?.prototype?.render === 'function' ? module.ed : null)
+          ?? values.find(v => typeof v === 'function' && typeof v.prototype?.render === 'function' && typeof v.prototype?.pickGround === 'function');
+        const sheets = (typeof module?.cn?.sheetInfo === 'function' ? module.cn : null)
+          ?? values.find(v => v && typeof v === 'object' && typeof v.sheetInfo === 'function');
+        const prototype = World?.prototype;
         if (typeof prototype?.render !== 'function' ||
-            typeof module.cn?.sheetInfo !== 'function') {
+            typeof sheets?.sheetInfo !== 'function') {
           throw Error('版本不符，無法連接廣場尋路');
         }
         const original = prototype.render;
@@ -1061,7 +1066,7 @@
               const player = { x: this.target?.x, y: this.target?.z };
               const npcs = {};
               for (const [key, { sprite }] of Object.entries(lobbyNpcs)) {
-                const sheet = module.cn.sheetInfo(sprite);
+                const sheet = sheets.sheetInfo(sprite);
                 const actor = sheet && layer?.children?.find(view =>
                   view.children?.some(child => child.sheet === sheet));
                 if (usable(actor)) npcs[key] = { x: actor.x, y: actor.y };
@@ -1142,7 +1147,7 @@
     };
   }
 
-  // 2ad7e24b 的一般單人難度；出發前仍核對遊戲控制項的範圍。
+  // 一般單人難度；出發前仍核對遊戲控制項的範圍。
   const farmDifficultyFields = [
     ['count', '怪物數量', 350],
     ['damage', '怪物傷害', 175],
@@ -1266,7 +1271,7 @@
     function checkBuild() {
       return Array.from(doc.scripts).some(script => {
         try {
-          return new URL(script.src).pathname === '/build/main-DyDJZBsa.js';
+          return /^\/build\/main-[A-Za-z0-9_-]+\.js$/.test(new URL(script.src).pathname);
         } catch {
           return false;
         }
@@ -1800,7 +1805,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.7</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.8</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -2056,14 +2061,35 @@
   let modulePromise = null;
   let samples = [];
 
-  function loadGameModule(main = Array.from(document.scripts).find(script => {
-    try {
-      const url = new URL(script.src);
-      return url.origin === location.origin && url.pathname === '/build/main-DyDJZBsa.js';
-    } catch { return false; }
-  })) {
-    if (!main) return Promise.reject(Error('版本不符；僅支援 2ad7e24b'));
-    modulePromise ??= import(new URL('./soul_linker-BxFtxbV_.js', main.src).href)
+  const MAIN_SCRIPT_RE = /^\/build\/main-[A-Za-z0-9_-]+\.js$/;
+  const SOUL_LINKER_RE = /(["'])(\.\/soul_linker-[A-Za-z0-9_-]+\.js)\1/;
+  const isGameHooks = v =>
+    !!v && typeof v === 'object' &&
+    ['start', 'tick', 'hurt', 'damageMult'].every(k => Array.isArray(v[k]));
+
+  function findMainScript() {
+    return Array.from(document.scripts).find(script => {
+      try {
+        const url = new URL(script.src);
+        return url.origin === location.origin && MAIN_SCRIPT_RE.test(url.pathname);
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function loadGameModule(main = findMainScript()) {
+    if (!main) return Promise.reject(Error('找不到遊戲主腳本（/build/main-*.js）'));
+    modulePromise ??= fetch(main.src, { credentials: 'same-origin' })
+      .then(res => {
+        if (!res.ok) throw Error(`讀取主腳本失敗（${res.status}）`);
+        return res.text();
+      })
+      .then(text => {
+        const match = text.match(SOUL_LINKER_RE);
+        if (!match) throw Error('版本不符；找不到 soul_linker 模組');
+        return import(new URL(match[2], main.src).href);
+      })
       .catch(error => { modulePromise = null; throw error; });
     return modulePromise;
   }
@@ -2285,19 +2311,9 @@
     }
 
     try {
-      const main = Array.from(document.scripts).find(s => {
-        try {
-          const u = new URL(s.src);
-          return (
-            u.origin === location.origin &&
-            u.pathname === '/build/main-DyDJZBsa.js'
-          );
-        } catch {
-          return false;
-        }
-      });
+      const main = findMainScript();
 
-      if (!main) throw Error('版本不符；僅支援 2ad7e24b');
+      if (!main) throw Error('找不到遊戲主腳本（/build/main-*.js）');
 
       const speedChanged = state.speed !== desired.speed;
       Object.assign(state, desired);
@@ -2338,7 +2354,10 @@
         if (request !== generation) return;
 
         if (!gameControl) {
-          gameControl = installGameHook(module.ei, state, report);
+          const hooks = isGameHooks(module.ei)
+            ? module.ei
+            : Object.values(module).find(isGameHooks);
+          gameControl = installGameHook(hooks, state, report);
         }
       }
 
