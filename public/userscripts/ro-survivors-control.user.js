@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.1
+// @version      0.6.2
 // @homepageURL  https://amanda-blog.com/
 // @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 // @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
-// @description  adc0fdf6：自動單人連刷、選關與全滿難度；速度、選卡、尋寶、傷害與冷卻。
+// @description  adc0fdf6：自動單人連刷、可選難度與立即開卡；速度、選卡、尋寶、傷害與冷卻。
 // @match        https://ro-survivors.com/*
 // @match        https://www.ro-survivors.com/*
 // @run-at       document-idle
@@ -15,7 +15,7 @@
 // ==/UserScript==
 /* 請取代舊版後重新整理。預設不加成，滑桿即時套用。
  * 尋寶率改變局內品質抽選，不保證伺服器接受修改後的結算數值。
- * 連刷預設關閉；選關、全滿難度與選首張可記憶，重新整理需重新開始。
+ * 連刷預設關閉；關卡、難度、開卡模式與選首張可記憶，重新整理需重新開始。
  * 還原不撤銷已恢復的 HP、已造成的傷害、進度或已排程動畫。 */
 (() => {
   'use strict';
@@ -806,6 +806,19 @@
     };
   }
 
+  // adc0fdf6 的一般單人難度；出發前仍核對遊戲控制項的範圍。
+  const farmDifficultyFields = [
+    ['count', '怪物數量', 350],
+    ['damage', '怪物傷害', 175],
+    ['hp', '怪物生命', 250],
+    ['speed', '怪物速度', 175],
+    ['events', '事件數量', 250]
+  ];
+  const farmDifficultyModes = {
+    max: '全滿', normal: '一般（全部 100%）',
+    custom: '自訂', current: '沿用遊戲設定'
+  };
+
   function createAutoFarm(
     config,
     notify,
@@ -982,7 +995,7 @@
           }
 
           const sliders = all('#npc-text .diff input[data-key]');
-          const keys = ['count', 'damage', 'hp', 'speed', 'events'];
+          const keys = farmDifficultyFields.map(([key]) => key);
 
           if (
             sliders.length !== keys.length ||
@@ -995,50 +1008,65 @@
             return;
           }
 
-          if (config.maxDifficulty) {
-            for (const input of sliders) {
-              if (
-                !Number.isFinite(Number(input.max)) ||
-                Number(input.max) <= 0
-              ) {
-                stop('難度上限讀取失敗');
-                return;
-              }
+          if (!Object.hasOwn(farmDifficultyModes, config.difficultyMode)) {
+            stop('難度模式無效，已停止');
+            return;
+          }
 
-              input.value = input.max;
+          if (config.difficultyMode !== 'current') {
+            const desired = sliders.map(input => {
+              const min = Number(input.min);
+              const max = Number(input.max);
+              const step = Number(input.step);
+              const value = config.difficultyMode === 'max' ? max
+                : config.difficultyMode === 'normal' ? 1
+                  : Number(config.difficulty?.[input.dataset.key]) / 100;
+              const steps = (value - min) / step;
+              return { input, min, max, step, value, steps };
+            });
+
+            if (desired.some(({ input, min, max, step, value, steps }) =>
+              !input.min || !input.max || !input.step ||
+              ![min, max, step, value].every(Number.isFinite) ||
+              min <= 0 || max < min || step <= 0 ||
+              value < min || value > max ||
+              Math.abs(steps - Math.round(steps)) > 1e-6
+            )) {
+              stop('所選難度不符合遊戲範圍，已停止');
+              return;
+            }
+
+            for (const { input, value } of desired) {
+              input.value = String(value);
               input.dispatchEvent(
                 new doc.defaultView.Event('input', { bubbles: true })
               );
             }
 
-            if (
-              sliders.some(input =>
-                Number(input.value) !== Number(input.max)
-              )
-            ) {
-              stop('難度未成功設為全滿');
+            if (desired.some(({ input, value }) =>
+              Math.abs(Number(input.value) - value) > 1e-6
+            )) {
+              stop('難度未成功套用，已停止');
               return;
             }
           }
 
-          if (config.autoPick) {
-            const immediate = one('#npc-text .diff [data-bank="0"]');
-
-            if (!enabled(immediate)) {
-              stop('找不到升級模式控制項');
-              return;
-            }
-
-            if (!immediate.classList.contains('active')) {
-              immediate.click();
-            }
-          }
-
-          say(
-            config.maxDifficulty
-              ? '難度全滿，準備出發…'
-              : '使用遊戲目前難度出發…'
+          const bankMode = one(
+            `#npc-text .diff [data-bank="${config.immediateCards ? 0 : 1}"]`
           );
+          if (!enabled(bankMode)) {
+            stop('找不到升級模式控制項');
+            return;
+          }
+          if (!bankMode.classList.contains('active')) bankMode.click();
+          if (!bankMode.classList.contains('active')) {
+            stop('開卡模式未成功套用，已停止');
+            return;
+          }
+
+          say(`難度：${farmDifficultyModes[config.difficultyMode]} · ${
+            config.immediateCards ? '立即開卡' : '累積後手動開卡'
+          }，準備出發…`);
 
           clickOnce(
             'launch',
@@ -1255,7 +1283,7 @@
 
         const bank = one('#bank-btn');
 
-        if (config.autoPick && enabled(bank)) {
+        if (config.immediateCards && config.autoPick && enabled(bank)) {
           nextAt = now + 1000;
           bank.click();
         }
@@ -1349,7 +1377,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.1</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.2</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -1364,15 +1392,31 @@
           <select id="farmStage" aria-label="連刷關卡">
             <option value="">先開啟一次遠征選單</option>
           </select>
+          <label for="farmDifficulty">連刷難度</label>
+          <select id="farmDifficulty">
+            ${Object.entries(farmDifficultyModes).map(([value, label]) =>
+              `<option value="${value}">${label}</option>`
+            ).join('')}
+          </select>
+          <div id="farmCustom" class="hidden">
+            ${farmDifficultyFields.map(([key, label, max]) => `
+              <label for="farmDiff_${key}">${label}
+                <output id="farmDiff_${key}Value">${max}%</output>
+              </label>
+              <input id="farmDiff_${key}" type="range"
+                min="100" max="${max}" step="5" value="${max}">
+            `).join('')}
+          </div>
           <div class="row">
             <label>
-              <input id="farmMax" type="checkbox" checked>難度全滿
+              <input id="farmImmediate" type="checkbox" checked>立即開卡
             </label>
             <label>
               <input id="farmPick" type="checkbox" checked
                 title="選第一張可選卡片，遇到技能替換也會確認">自動選首張
             </label>
           </div>
+          <small>關閉立即開卡：升級／寶箱先累積，手動開啟後才選卡。</small>
           <button id="farmToggle" style="width:100%;margin-top:7px">
             開始連刷
           </button>
@@ -1562,7 +1606,11 @@
   const farmConfigKey = 'ros-auto-farm-v1';
   const farmConfig = {
     stage: '',
-    maxDifficulty: true,
+    difficultyMode: 'max',
+    difficulty: Object.fromEntries(
+      farmDifficultyFields.map(([key, , max]) => [key, max])
+    ),
+    immediateCards: true,
     autoPick: true
   };
 
@@ -1573,8 +1621,19 @@
       if (/^\d+$/.test(String(saved.stage))) {
         farmConfig.stage = String(saved.stage);
       }
-      if (typeof saved.maxDifficulty === 'boolean') {
-        farmConfig.maxDifficulty = saved.maxDifficulty;
+      if (Object.hasOwn(farmDifficultyModes, saved.difficultyMode)) {
+        farmConfig.difficultyMode = saved.difficultyMode;
+      } else if (saved.maxDifficulty === false) {
+        farmConfig.difficultyMode = 'current';
+      }
+      for (const [key, , max] of farmDifficultyFields) {
+        const value = Number(saved.difficulty?.[key]);
+        if (Number.isFinite(value) && value >= 100 && value <= max) {
+          farmConfig.difficulty[key] = Math.round(value / 5) * 5;
+        }
+      }
+      if (typeof saved.immediateCards === 'boolean') {
+        farmConfig.immediateCards = saved.immediateCards;
       }
       if (typeof saved.autoPick === 'boolean') {
         farmConfig.autoPick = saved.autoPick;
@@ -1588,7 +1647,20 @@
     } catch {}
   };
 
-  $('farmMax').checked = farmConfig.maxDifficulty;
+  function showFarmDifficulty() {
+    $('farmDifficulty').value = farmConfig.difficultyMode;
+    $('farmCustom').classList.toggle(
+      'hidden', farmConfig.difficultyMode !== 'custom'
+    );
+    for (const [key] of farmDifficultyFields) {
+      $('farmDiff_' + key).value = String(farmConfig.difficulty[key]);
+      $('farmDiff_' + key + 'Value').textContent =
+        farmConfig.difficulty[key] + '%';
+    }
+  }
+
+  showFarmDifficulty();
+  $('farmImmediate').checked = farmConfig.immediateCards;
   $('farmPick').checked = farmConfig.autoPick;
 
   const farm = createAutoFarm(
@@ -1603,9 +1675,12 @@
         $('farmRead').disabled =
         info.running || info.reading;
 
-      $('farmMax').disabled =
-        $('farmPick').disabled =
-        info.running || info.reading;
+      for (const id of [
+        'farmDifficulty', 'farmImmediate', 'farmPick',
+        ...farmDifficultyFields.map(([key]) => 'farmDiff_' + key)
+      ]) {
+        $(id).disabled = info.running || info.reading;
+      }
     },
     stages => {
       const selected =
@@ -1637,8 +1712,22 @@
     saveFarm();
   });
 
-  $('farmMax').addEventListener('change', () => {
-    farmConfig.maxDifficulty = $('farmMax').checked;
+  $('farmDifficulty').addEventListener('change', () => {
+    farmConfig.difficultyMode = $('farmDifficulty').value;
+    showFarmDifficulty();
+    saveFarm();
+  });
+
+  for (const [key] of farmDifficultyFields) {
+    $('farmDiff_' + key).addEventListener('input', () => {
+      farmConfig.difficulty[key] = Number($('farmDiff_' + key).value);
+      showFarmDifficulty();
+      saveFarm();
+    });
+  }
+
+  $('farmImmediate').addEventListener('change', () => {
+    farmConfig.immediateCards = $('farmImmediate').checked;
     saveFarm();
   });
 
