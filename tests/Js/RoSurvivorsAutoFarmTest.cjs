@@ -1,0 +1,169 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const source = fs.readFileSync(path.join(__dirname, '../../public/userscripts/ro-survivors-control.user.js'), 'utf8');
+const begin = source.indexOf('  const farmDifficultyFields =');
+const end = source.indexOf("  const host = document.createElement('div');", begin);
+assert.ok(begin >= 0 && end > begin);
+const createAutoFarm = vm.runInNewContext(
+    source.slice(begin, end) + '\ncreateAutoFarm;', { URL }
+);
+
+function environment({ screen = 'settlement', label = '單人大廳', dismiss = true,
+    soloDisabled = false, chooser = true, extraButton = false } = {}) {
+    let now = 0, returned = 0, soloClicks = 0, publicClicks = 0, launches = 0, captainClicks = 0;
+    const node = (properties = {}) => ({
+        isConnected: true, disabled: false, textContent: '',
+        closest: () => null, getClientRects: () => [{}], getAttribute: () => null,
+        classList: { contains: () => false }, click() {}, ...properties
+    });
+    const solo = node({ textContent: label, disabled: soloDisabled,
+        click() { soloClicks++; if (dismiss) screen = 'lobby'; } });
+    const publicLobby = node({ textContent: '阿斯嘉特', click() { publicClicks++; } });
+    const restart = node({ textContent: '返回角色', click() { returned++; screen = 'chooser'; } });
+    const captain = node({ textContent: '與隊長交談', click() { captainClicks++; screen = 'stages'; } });
+    const card = node({ dataset: { i: '0' }, classList: { contains: name => name === 'sel' },
+        querySelector: () => ({ textContent: '斐揚洞穴' }) });
+    const go = node({ click() { screen = 'difficulty'; } });
+    const launch = node({ click() { launches++; screen = 'playing'; } });
+    const sliders = ['count', 'damage', 'hp', 'speed', 'events'].map(key => node({ dataset: { key } }));
+    const bank = node({ classList: { contains: name => name === 'active' } });
+    const doc = {
+        scripts: [{ src: 'https://ro-survivors.com/build/main-2n_YvaNQ.js' }],
+        body: { classList: { contains: name => name === 'in-lobby' && screen === 'lobby' } },
+        querySelector(selector) {
+            if (selector === '#gameover') return screen === 'settlement' ? node() : null;
+            if (selector === '#btn-restart') return restart;
+            if (selector === '#npc-dialog') return ['chooser', 'difficulty'].includes(screen) ? node() : null;
+            if (selector === '#npc-text .lb-pick') return screen === 'chooser' && chooser ? node() : null;
+            if (selector === '#npc-text .diff') return screen === 'difficulty' ? node() : null;
+            if (selector === '#npc-name') return { textContent: '選擇大廳' };
+            if (selector === '#lobby-prompt') return captain;
+            if (selector === '#stages') return screen === 'stages' ? node() : null;
+            if (selector === '#stg-go') return go;
+            if (selector === '#npc-options button.primary') return launch;
+            if (selector === '#npc-text .diff [data-bank="1"]') return bank;
+            if (selector === '#hud') return screen === 'playing' ? node() : null;
+            return null;
+        },
+        querySelectorAll(selector) {
+            if (selector === '#stg-list .stg-card') return [card];
+            if (selector === '#npc-options button') return extraButton ? [solo, publicLobby] : [solo];
+            if (selector === '#npc-text .diff input[data-key]') return sliders;
+            if (selector === '#npc-text [data-lb]') return [publicLobby];
+            if (selector === '.overlay') return screen === 'unknown' ? [node()] : [];
+            return [];
+        }
+    };
+    const config = { stage: '0', difficultyMode: 'current', immediateCards: false, autoPick: false };
+    const farm = createAutoFarm(config, () => {}, () => {}, doc, () => now);
+    return {
+        farm, solo,
+        tick(ms = 2000) { now += ms; farm.tick(); },
+        set screen(value) { screen = value; }, get screen() { return screen; },
+        get returned() { return returned; }, get soloClicks() { return soloClicks; },
+        get publicClicks() { return publicClicks; }, get launches() { return launches; },
+        get captainClicks() { return captainClicks; }
+    };
+}
+
+test('settlement -> solo lobby -> captain -> stage -> next run, for two rounds', () => {
+    const env = environment();
+    env.farm.start();
+    assert.equal(env.returned, 0, 'wait for settlement grace period');
+    for (let round = 1; round <= 2; round++) {
+        env.tick();
+        assert.equal(env.screen, 'chooser');
+        env.tick();
+        assert.equal(env.screen, 'lobby');
+        env.tick();
+        assert.equal(env.screen, 'stages');
+        env.tick();
+        assert.equal(env.screen, 'difficulty');
+        env.tick();
+        assert.equal(env.screen, 'playing');
+        assert.equal(env.launches, round);
+        assert.equal(env.soloClicks, round);
+        assert.equal(env.publicClicks, 0);
+        assert.equal(env.farm.running, true);
+        env.tick();
+        env.screen = 'settlement';
+        env.tick();
+    }
+});
+
+for (const label of ['單人大廳', 'Solo lobby', 'Lobby solo']) {
+    test(`handles lobby selector when starting: ${label}`, () => {
+        const env = environment({ screen: 'chooser', label });
+        env.farm.start();
+        assert.equal(env.soloClicks, 1);
+        assert.equal(env.publicClicks, 0);
+        assert.equal(env.farm.running, true);
+    });
+}
+
+test('read stages mode also passes through solo lobby and then stops at stages', () => {
+    const env = environment({ screen: 'chooser' });
+    env.farm.start(true);
+    env.tick();
+    env.tick();
+    assert.equal(env.soloClicks, 1);
+    assert.equal(env.captainClicks, 1);
+    assert.equal(env.launches, 0);
+    assert.equal(env.farm.running, false);
+    assert.match(env.farm.status, /關卡已更新/);
+});
+
+test('an unresponsive chooser is clicked once and times out', () => {
+    const env = environment({ screen: 'chooser', dismiss: false });
+    env.farm.start();
+    env.tick(); env.tick();
+    assert.equal(env.soloClicks, 1);
+    env.tick(16000);
+    assert.equal(env.soloClicks, 1);
+    assert.equal(env.farm.running, false);
+    assert.match(env.farm.status, /沒有回應/);
+});
+
+test('waits for a disabled solo button to become enabled', () => {
+    const env = environment({ screen: 'chooser', soloDisabled: true });
+    env.farm.start();
+    assert.equal(env.soloClicks, 0);
+    env.solo.disabled = false;
+    env.tick();
+    assert.equal(env.soloClicks, 1);
+});
+
+test('a permanently disabled button times out without clicking', () => {
+    const env = environment({ screen: 'chooser', soloDisabled: true });
+    env.farm.start();
+    env.tick(16000);
+    assert.equal(env.soloClicks, 0);
+    assert.equal(env.farm.running, false);
+});
+
+for (const overrides of [{ chooser: false }, { label: '刪除角色' }, { extraButton: true }]) {
+    test(`does not click an unrelated or ambiguous dialog: ${JSON.stringify(overrides)}`, () => {
+        const env = environment({ screen: 'chooser', ...overrides });
+        env.farm.start();
+        assert.equal(env.soloClicks, 0);
+        assert.equal(env.publicClicks, 0);
+        assert.equal(env.farm.running, false);
+    });
+}
+
+test('does not handle dialogs when automation is stopped', () => {
+    const env = environment({ screen: 'chooser' });
+    env.tick();
+    assert.equal(env.soloClicks, 0);
+});
+
+test('unknown overlays continue to stop automation', () => {
+    const env = environment({ screen: 'unknown' });
+    env.farm.start();
+    assert.equal(env.farm.running, false);
+    assert.equal(env.soloClicks, 0);
+});

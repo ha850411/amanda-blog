@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.2
+// @version      0.6.3
 // @homepageURL  https://amanda-blog.com/
 // @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 // @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
@@ -985,6 +985,27 @@
       }
 
       if (shown('#npc-dialog')) {
+        // Returning to town can open the lobby chooser before the captain.
+        // Its lobby rows are in npc-text; the solo action is in npc-options.
+        if (one('#npc-text .lb-pick')) {
+          changePhase('lobby-choice', now);
+          const buttons = all('#npc-options button');
+          const solo = buttons.length === 1 && buttons[0];
+
+          if (now - phaseAt > 15000) {
+            stop('選擇單人大廳沒有回應，已停止');
+          } else if (
+            solo &&
+            /^(單人大廳|Solo lobby|Lobby solo)$/i.test(solo.textContent.trim())
+          ) {
+            say('選擇單人大廳，準備返回遠征隊長…');
+            clickOnce('solo-lobby', solo, now, 1000);
+          } else {
+            stop('大廳選單找不到單人大廳按鈕，已停止');
+          }
+          return;
+        }
+
         changePhase('dialog', now);
         const diff = one('#npc-text .diff');
 
@@ -1377,7 +1398,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.2</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.3</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
