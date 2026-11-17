@@ -62,7 +62,15 @@ https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 2. 若已手動安裝舊版，確認只啟用一份「RO Survivors 實驗控制面板」，再重新整理遊戲頁面。
 3. 腳本已設定 `@updateURL`、`@downloadURL` 與 `@version`；後續會依竄改猴的更新設定從本站檢查及下載新版，也可手動檢查更新。
 
-後續請以本專案內的檔案為準修改，發布時同步遞增 `@version` 與面板顯示版本。這是直接提供的靜態 JavaScript，不需要 Vite 建置，也不會在部落格頁面執行。必須完成專案部署後，正式網域才會提供新增或修改的版本；若 CDN 設有長效快取，發布時需清除此網址的快取。
+後續請以本專案內的檔案為準修改，發布時同步遞增 `@version` 與面板顯示版本。這是直接提供的靜態 JavaScript，不需要 Vite 建置，也不會在部落格頁面執行。必須完成專案部署後，正式網域才會提供新增或修改的版本。
+
+此腳本的固定網址已在 `.docker/nginx/laravel.conf` 與備用的 `.docker/compose/nginx.conf` 設定 `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`，並對 CDN／Cloudflare 設定 `no-store`。停用 ETag 與時間條件回應，避免同秒且同大小的新版被誤判未修改。其餘靜態檔沿用原本快取設定。
+
+首次部署快取修正時：
+
+1. 部署設定後，重建 Nginx 容器，或在 `.docker/compose` 執行 `docker compose exec -T nginx nginx -t`，成功後執行 `docker compose exec -T nginx nginx -s reload`。只更新掛載的設定檔不會讓執行中的 Nginx 自動重載。
+2. 在 Cloudflare 對 `https://amanda-blog.com/userscripts/ro-survivors-control.user.js` 執行一次單一網址 Purge Cache；舊快取不會因來源站新增標頭而立即消失。如果有強制快取的 Cache Rule／Worker，需讓此路徑略過快取，且不要覆寫來源站的瀏覽器快取標頭。
+3. 用 `curl -sS -D - -o /dev/null https://amanda-blog.com/userscripts/ro-survivors-control.user.js` 確認 `Cache-Control` 包含 `no-store`，連續請求不再顯示 `CF-Cache-Status: HIT`。然後在竄改猴檢查更新；若本機仍保留舊的四小時快取，可清除此網址的瀏覽器快取，或從加上一次性查詢參數的網址手動更新，例如 `https://amanda-blog.com/userscripts/ro-survivors-control.user.js?refresh=20261117`。腳本內的更新網址維持固定，無須每版更換。
 
 連刷面板支援「全滿」「一般（全部 100%）」「自訂」「沿用遊戲設定」。自訂可分別調整怪物數量、傷害、生命、速度及事件數量，每次出發都會套用並核對設定。
 
