@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.3
+// @version      0.6.4
 // @homepageURL  https://amanda-blog.com/
 // @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 // @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
-// @description  adc0fdf6：自動單人連刷、可選難度與立即開卡；速度、選卡、尋寶、傷害與冷卻。
+// @description  adc0fdf6：自動單人連刷、難度、立即開卡與結算診斷；速度、選卡、尋寶、傷害與冷卻。
 // @match        https://ro-survivors.com/*
 // @match        https://www.ro-survivors.com/*
 // @run-at       document-idle
@@ -39,6 +39,186 @@
     Number.isFinite(Number(v))
       ? Math.max(1, Math.min(max, Number(v)))
       : 1;
+
+  // Observe the current game's JSON API without changing requests or responses.
+  // Keep only diagnostic fields: never retain headers, sessions or account docs.
+  function createLootAudit(getSettings, notify) {
+    const runs = new Map();
+    let sequence = 0;
+    let revision = 0;
+    let restoreFetch = null;
+    const number = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
+    const count = v => Number.isSafeInteger(v) && v >= 0 ? v : null;
+    const round = v => Math.round(v * 100) / 100;
+    const update = () => { try { notify(); } catch {} };
+
+    function drops(dr) {
+      if (!dr || typeof dr !== 'object' || Array.isArray(dr)) return null;
+      const sources = [];
+      for (const [source, row] of Object.entries(dr)) {
+        if (!Array.isArray(row)) return null;
+        const indexed = Array.isArray(row[0]) && Array.isArray(row[1]);
+        const gear = indexed ? row[0].length : count(row[0]);
+        const cards = indexed ? row[1].length : count(row[1]);
+        if (gear === null || cards === null) return null;
+        sources.push({
+          source, gear, cards,
+          ...(indexed ? {
+            gearIndices: [...row[0]], cardIndices: [...row[1]],
+            discovery: Array.isArray(row[2]) ? [...row[2]] : null
+          } : {})
+        });
+      }
+      return {
+        gear: sources.reduce((sum, row) => sum + row.gear, 0),
+        cards: sources.reduce((sum, row) => sum + row.cards, 0), sources
+      };
+    }
+
+    function request(input, init) {
+      const url = new URL(typeof input === 'string' ? input : input?.url ?? input,
+        document.baseURI);
+      if (url.origin !== location.origin ||
+          !['/api/run', '/api/op', '/api/save'].includes(url.pathname) ||
+          typeof init?.body !== 'string') return null;
+      const body = JSON.parse(init.body);
+      const op = url.pathname === '/api/run' ? 'run'
+        : url.pathname === '/api/save' ? 'save' : body.op;
+      if (!['run', 'save', 'tick', 'loot', 'gloot'].includes(op)) return null;
+      const data = op === 'save' || op === 'tick' ? body.rk : body;
+      if (!data || typeof data.key !== 'string') return null;
+      const now = performance.now();
+      let run = runs.get(data.key);
+      if (!run) {
+        run = {
+          id: ++sequence, started: new Date().toISOString(), start: now,
+          // Missing the start or resuming makes wall-time comparisons incomplete.
+          completeStart: op === 'run' && !body.played,
+          stage: typeof body.stage === 'string' ? body.stage : null,
+          multiplier: number(body.mult), events: [], omittedEvents: 0
+        };
+        runs.set(data.key, run);
+        if (runs.size > 12) runs.delete(runs.keys().next().value);
+      }
+      const settings = getSettings();
+      const event = {
+        op, atSeconds: round((now - run.start) / 1000),
+        gameSeconds: number(data.secs),
+        settings: Object.fromEntries(['speed', 'discovery', 'attack', 'cooldown',
+          'targets', 'pickup', 'suction', 'animation'].map(k => [k, number(settings[k])])),
+        kills: data.kills && typeof data.kills === 'object'
+          ? Object.fromEntries(Object.entries(data.kills).filter(([, v]) => count(v) !== null))
+          : null,
+        discovery: number(data.disc), sent: drops(data.dr), status: 'pending'
+      };
+      run.events.push(event);
+      if (run.events.length > 120) {
+        run.events.shift();
+        run.omittedEvents++;
+      }
+      update();
+      return { run, event, now, revision };
+    }
+
+    async function response(ticket, result) {
+      if (!ticket || ticket.revision !== revision) return;
+      const { run, event } = ticket;
+      event.httpStatus = result.status;
+      event.responseSeconds = round((performance.now() - ticket.now) / 1000);
+      event.status = result.ok ? 'ok' : 'http-error';
+      try {
+        const data = await result.clone().json();
+        if (ticket.revision !== revision) return;
+        if (typeof data.error === 'string') event.error = data.error.slice(0, 100);
+        if (event.op === 'run' && data.cap) {
+          run.cap = {
+            mob: count(data.cap.mob), card: count(data.cap.card),
+            boss: Object.fromEntries(Object.entries(data.cap.boss ?? {})
+              .filter(([, v]) => count(v) !== null))
+          };
+          run.seeded = Number.isInteger(data.seed) && data.seed > 0;
+        }
+        if (data.granted && Array.isArray(data.granted.gear)) {
+          const g = data.granted;
+          event.granted = {
+            gear: g.gear.length, cards: Array.isArray(g.cards) ? g.cards.length : null,
+            eggs: Array.isArray(g.eggs) ? g.eggs.length : null,
+            mail: g.mail === true,
+            items: g.gear.map(item => ({
+              itemId: number(item.itemId), quality: number(item.quality),
+              source: typeof item.src === 'string' ? item.src : null
+            }))
+          };
+          event.again = data.again === true;
+        } else if (data.granted?.mail) {
+          event.granted = { mail: true };
+        }
+      } catch {
+        event.status = result.ok ? 'unreadable-response' : 'http-error';
+      }
+      update();
+    }
+
+    return {
+      start() {
+        if (restoreFetch) return;
+        const original = window.fetch;
+        const descriptor = Object.getOwnPropertyDescriptor(window, 'fetch');
+        let active = true;
+        function wrapped(...args) {
+          let ticket = null;
+          try { if (active) ticket = request(...args); } catch {}
+          // Return the exact original promise, including its rejection behavior.
+          const result = original.apply(this, args);
+          if (ticket) result.then(
+            value => response(ticket, value),
+            () => {
+              if (ticket.revision !== revision) return;
+              ticket.event.status = 'network-error';
+              update();
+            }
+          ).catch(() => {});
+          return result;
+        }
+        window.fetch = wrapped;
+        restoreFetch = () => {
+          active = false;
+          if (window.fetch !== wrapped) return;
+          if (descriptor) Object.defineProperty(window, 'fetch', descriptor);
+          else delete window.fetch;
+        };
+        update();
+      },
+      stop() {
+        revision++;
+        restoreFetch?.();
+        restoreFetch = null;
+        update();
+      },
+      summary() {
+        const run = [...runs.values()].at(-1);
+        if (!run) return restoreFetch ? '診斷已開啟，等待下一局' : '診斷已關閉';
+        const event = run.events.findLast(e => e.op === 'loot' || e.op === 'gloot')
+          ?? run.events.at(-1);
+        const sent = event.sent?.gear ?? '—';
+        const received = event.granted?.mail ? '郵差領取'
+          : event.granted?.gear ?? (event.status === 'pending' ? '等待中' : '未確認');
+        return `第 ${run.id} 局：送出 ${sent} 件／核發 ${received}` +
+          ` · 遊戲 ${event.gameSeconds ?? '—'} 秒／` +
+          `${run.completeStart ? '實際' : '記錄期間'} ${event.atSeconds} 秒` +
+          (['http-error', 'network-error', 'unreadable-response'].includes(event.status)
+            ? ` · ${event.httpStatus ?? ''} ${event.error ?? event.status}` : '') +
+          (event.op === 'gloot' ? '（組隊分配未追蹤）' : '');
+      },
+      exportData() {
+        return JSON.parse(JSON.stringify({
+          version: 1, scriptVersion: '0.6.4', exported: new Date().toISOString(),
+          note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
+          runs: [...runs.values()].map(({ start, ...run }) => run)
+        }));
+      }
+    };
+  }
 
   function installStatBoosts(game, state) {
     if (
@@ -1398,7 +1578,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.3</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.4</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -1470,6 +1650,14 @@
           <div id="status">就緒</div>
           <div id="meter">實測速度：—</div>
           <div id="discoveryStatus">尋寶率：—</div>
+        </div>
+        <div class="info">
+          <div class="row">
+            <label><input id="lootAudit" type="checkbox" checked>結算診斷</label>
+            <button id="lootExport">匯出報告</button>
+          </div>
+          <small id="lootStatus" aria-live="polite">等待下一局</small>
+          <small>記錄最近 12 局的送出與核發件數；重新整理前可匯出。</small>
         </div>
         <small>
           尋寶率影響品質；結算由伺服器核發。<br>
@@ -1609,6 +1797,27 @@
     fullHp: false,
     limited: 0,
     inputClockBlocked: false
+  };
+
+  const lootAudit = createLootAudit(() => state, () => {
+    $('lootStatus').textContent = lootAudit.summary();
+  });
+  lootAudit.start();
+  $('lootAudit').addEventListener('change', () => {
+    if ($('lootAudit').checked) lootAudit.start();
+    else lootAudit.stop();
+  });
+  $('lootExport').onclick = () => {
+    const blob = new Blob([JSON.stringify(lootAudit.exportData(), null, 2)],
+      { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'ro-settlement-diagnostic.json';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
   const settingValue = (id, v) =>
