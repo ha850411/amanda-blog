@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.5
+// @version      0.6.6
 // @homepageURL  https://amanda-blog.com/
 // @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 // @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
-// @description  adc0fdf6：自動走向遠征隊長、單人連刷、難度、立即開卡與結算診斷。
+// @description  adc0fdf6：自動走向遠征隊長／節慶主持人、單人連刷、難度、立即開卡與結算診斷。
 // @match        https://ro-survivors.com/*
 // @match        https://www.ro-survivors.com/*
 // @run-at       document-idle
@@ -212,7 +212,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.5', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.6', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -990,12 +990,17 @@
   // from the rendered actors, so camera rotation and zoom do not affect them.
   function createLobbyNavigator(loadModule, doc = document,
     clock = () => performance.now()) {
+    const lobbyNpcs = {
+      captain: { sprite: 'npc_knight', label: '遠征隊長' },
+      festival: { sprite: 'npc_lantern_girl', label: '節慶主持人' }
+    };
     let revision = 0;
     let loading = false;
     let failure = '';
     let unhook = null;
     let scene = null;
     let moving = false;
+    let currentTarget = 'captain';
     let sentAt = -Infinity;
     let progressAt = 0;
     let bestDistance = Infinity;
@@ -1053,12 +1058,21 @@
           const result = original.call(this, layer, ...args);
           try {
             if (active && inLobby() && this.map?.name === 'prontera_plaza' && !this.gone) {
-              const sheet = module.cn.sheetInfo('npc_knight');
-              const captain = sheet && layer?.children?.find(view =>
-                view.children?.some(sprite => sprite.sheet === sheet));
               const player = { x: this.target?.x, y: this.target?.z };
-              if (usable(player) && usable(captain)) {
-                scene = { world: this, player, captain: { x: captain.x, y: captain.y }, at: clock() };
+              const npcs = {};
+              for (const [key, { sprite }] of Object.entries(lobbyNpcs)) {
+                const sheet = module.cn.sheetInfo(sprite);
+                const actor = sheet && layer?.children?.find(view =>
+                  view.children?.some(child => child.sheet === sheet));
+                if (usable(actor)) npcs[key] = { x: actor.x, y: actor.y };
+              }
+              if (usable(player) && Object.keys(npcs).length) {
+                scene = {
+                  world: this, player, npcs,
+                  captain: npcs.captain || null,
+                  festival: npcs.festival || null,
+                  at: clock()
+                };
               }
             }
           } catch { failure = '廣場資料不相容，無法定位遠征隊長'; }
@@ -1079,27 +1093,35 @@
     }
 
     return {
-      step() {
+      step(targetKey = 'captain') {
+        const npcInfo = lobbyNpcs[targetKey] || lobbyNpcs.captain;
+        if (currentTarget !== targetKey) {
+          currentTarget = targetKey;
+          moving = false;
+          sentAt = -Infinity;
+          bestDistance = Infinity;
+        }
         if (failure) throw Error(failure);
         connect();
-        if (doc.hidden) return '請切回遊戲分頁，繼續前往遠征隊長';
+        if (doc.hidden) return `請切回遊戲分頁，繼續前往${npcInfo.label}`;
         const now = clock();
-        if (!scene || scene.world.gone || now - scene.at > 1500) {
-          return '正在定位廣場中的遠征隊長…';
+        const destination = scene?.npcs?.[targetKey] ?? scene?.[targetKey];
+        if (!scene || scene.world.gone || now - scene.at > 1500 || !usable(destination)) {
+          return `正在定位廣場中的${npcInfo.label}…`;
         }
-        const distance = Math.hypot(scene.captain.x - scene.player.x,
-          scene.captain.y - scene.player.y);
+        const distance = Math.hypot(destination.x - scene.player.x,
+          destination.y - scene.player.y);
         if (!moving || distance < bestDistance - 8) {
           bestDistance = distance;
           progressAt = now;
         } else if (now - progressAt > 12000) {
-          throw Error('前往遠征隊長時沒有進展，已停止；請確認路線');
+          throw Error(`前往${npcInfo.label}時沒有進展，已停止；請確認路線`);
         }
-        if (now - sentAt >= 1800 && walkTo(scene.captain)) {
+        if (now - sentAt >= 1800 && walkTo(destination)) {
           sentAt = now;
           moving = true;
         }
-        return '正在自動走向遠征隊長…';
+        return `正在自動走向${npcInfo.label}…`;
       },
       stop(cancelMovement = true) {
         revision++;
@@ -1112,6 +1134,7 @@
           unhook = scene = null;
           failure = '';
           moving = false;
+          currentTarget = 'captain';
           sentAt = -Infinity;
           bestDistance = Infinity;
         }
@@ -1130,6 +1153,12 @@
   const farmDifficultyModes = {
     max: '全滿', normal: '一般（全部 100%）',
     custom: '自訂', current: '沿用遊戲設定'
+  };
+  const festivalStage = {
+    id: 'louyang',
+    name: '燈籠節（節慶主持人）',
+    blocked: false,
+    selected: false
   };
 
   function createAutoFarm(
@@ -1204,9 +1233,7 @@
 
     function refreshStages() {
       const cards = all('#stg-list .stg-card');
-      if (!cards.length) return;
-
-      const next = cards.map(card => ({
+      const regular = cards.map(card => ({
         id: String(card.dataset.i),
         name:
           card.querySelector('.stg-card-info b')?.textContent?.trim() || '',
@@ -1216,6 +1243,13 @@
           card.classList.contains('soon'),
         selected: card.classList.contains('sel')
       })).filter(stage => /^\d+$/.test(stage.id) && stage.name);
+
+      if (!regular.length && choices.length) return;
+
+      const next = [
+        ...regular,
+        { ...festivalStage, selected: config.stage === festivalStage.id }
+      ];
 
       const value = JSON.stringify(
         next.map(({ id, name, blocked }) => ({ id, name, blocked }))
@@ -1249,8 +1283,9 @@
 
       if (
         !scanOnly &&
-        (!/^\d+$/.test(config.stage) ||
-          (choices.length && !choices.some(stage => stage.id === config.stage && !stage.blocked)))
+        (config.stage !== festivalStage.id && !/^\d+$/.test(config.stage) ||
+          (choices.some(stage => /^d+$/.test(stage.id)) &&
+            !choices.some(stage => stage.id === config.stage && !stage.blocked)))
       ) {
         stop('請先讀取關卡，並選擇已解鎖的關卡');
         return;
@@ -1336,23 +1371,27 @@
           const sliders = all('#npc-text .diff input[data-key]');
           const keys = farmDifficultyFields.map(([key]) => key);
 
+          const isFestival = config.stage === festivalStage.id;
+
           if (
-            sliders.length !== keys.length ||
-            !keys.every(key =>
-              sliders.some(input => input.dataset.key === key)
-            ) ||
-            one('#npc-text .diff input[data-pick]')
+            one('#npc-text .diff input[data-pick]') ||
+            (isFestival
+              ? sliders.length !== 0
+              : (sliders.length !== keys.length ||
+                  !keys.every(key =>
+                    sliders.some(input => input.dataset.key === key)
+                  )))
           ) {
             stop('此模式不是一般單人關卡，已停止');
             return;
           }
 
-          if (!Object.hasOwn(farmDifficultyModes, config.difficultyMode)) {
+          if (!isFestival && !Object.hasOwn(farmDifficultyModes, config.difficultyMode)) {
             stop('難度模式無效，已停止');
             return;
           }
 
-          if (config.difficultyMode !== 'current') {
+          if (!isFestival && config.difficultyMode !== 'current') {
             const desired = sliders.map(input => {
               const min = Number(input.min);
               const max = Number(input.max);
@@ -1403,7 +1442,9 @@
             return;
           }
 
-          say(`難度：${farmDifficultyModes[config.difficultyMode]} · ${
+          say(`${
+            isFestival ? '節慶固定難度' : `難度：${farmDifficultyModes[config.difficultyMode]}`
+          } · ${
             config.immediateCards ? '立即開卡' : '累積後手動開卡'
           }，準備出發…`);
 
@@ -1492,11 +1533,43 @@
 
       settlementReady = null;
 
+      if (shown('#festival')) {
+        changePhase('festival', now);
+
+        if (reading || config.stage !== festivalStage.id) {
+          stop('請先關閉節慶視窗，再開始連刷');
+          return;
+        }
+
+        const play = one('#festival-play');
+
+        if (!enabled(play)) {
+          stop('節慶關卡目前無法開始，已停止');
+          return;
+        }
+
+        say('準備進入：' + festivalStage.name);
+
+        if (clickOnce('depart:' + festivalStage.id, play, now)) {
+          departedStage = festivalStage.id;
+        }
+
+        if (now - phaseAt > 15000) {
+          stop('開啟節慶出發選單沒有回應，已停止');
+        }
+        return;
+      }
+
       if (shown('#stages')) {
         changePhase('stages', now);
 
         if (reading) {
           stop('關卡已更新，請選關後開始連刷');
+          return;
+        }
+
+        if (config.stage === festivalStage.id) {
+          stop('請先關閉遠征選單，再開始連刷節慶關卡');
           return;
         }
 
@@ -1592,25 +1665,32 @@
       if (doc.body.classList.contains('in-lobby')) {
         changePhase('lobby', now);
         const prompt = one('#lobby-prompt');
+        const isFestival = !reading && config.stage === festivalStage.id;
+        const targetKey = isFestival ? 'festival' : 'captain';
+        const targetLabel = isFestival ? '節慶主持人' : '遠征隊長';
+        const menuLabel = isFestival ? '節慶選單' : '遠征選單';
+        const promptPattern = isFestival
+          ? /主持人|host|anfitriona|anfitriã/i
+          : /隊長|captain|capitán|capitão/i;
 
         if (
           enabled(prompt) &&
-          /隊長|captain|capitán|capitão/i.test(prompt.textContent)
+          promptPattern.test(prompt.textContent)
         ) {
           navigation?.stop();
-          say('開啟遠征選單…');
-          clickOnce('captain', prompt, now);
+          say(`開啟${menuLabel}…`);
+          clickOnce(targetKey, prompt, now);
 
           if (now - phaseAt > 15000) {
-            stop('遠征選單沒有回應，已停止');
+            stop(`${menuLabel}沒有回應，已停止`);
           }
         } else if (now - phaseAt > (navigation ? 45000 : 20000)) {
-          stop(navigation ? '自動前往遠征隊長逾時，已停止' : '請移動到遠征隊長旁，再開始連刷');
+          stop(navigation ? `自動前往${targetLabel}逾時，已停止` : `請移動到${targetLabel}旁，再開始連刷`);
         } else if (navigation) {
-          try { say(navigation.step()); }
+          try { say(navigation.step(targetKey)); }
           catch (error) { stop(error.message); }
         } else {
-          say('等待廣場載入／靠近遠征隊長…');
+          say(`等待廣場載入／靠近${targetLabel}…`);
         }
         return;
       }
@@ -1720,7 +1800,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.5</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.6</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -1764,7 +1844,7 @@
             開始連刷
           </button>
           <small id="farmStatus">尚未開始</small>
-          <small>讀取關卡／開始連刷會自動走向遠征隊長。</small>
+          <small>讀取關卡／開始連刷會自動走向遠征隊長或節慶主持人。</small>
         </div>
         ${[
           ['speed', '遊戲速度', 1, 10, 1, 1, '×'],
@@ -2005,7 +2085,7 @@
     const saved = JSON.parse(localStorage.getItem(farmConfigKey));
 
     if (saved) {
-      if (/^\d+$/.test(String(saved.stage))) {
+      if (/^(\d+|louyang)$/.test(String(saved.stage))) {
         farmConfig.stage = String(saved.stage);
       }
       if (Object.hasOwn(farmDifficultyModes, saved.difficultyMode)) {
@@ -2071,6 +2151,8 @@
     },
     stages => {
       const selected =
+        stages.find(s => /^\d+$/.test(s.id) && s.selected && !s.blocked) ||
+        stages.find(s => /^\d+$/.test(s.id) && !s.blocked) ||
         stages.find(s => s.selected && !s.blocked) ||
         stages.find(s => !s.blocked);
 

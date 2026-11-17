@@ -14,8 +14,10 @@ const createAutoFarm = vm.runInNewContext(
 
 function environment({ screen = 'settlement', label = '單人大廳', dismiss = true,
     soloDisabled = false, chooser = true, extraButton = false,
-    captainNear = true, stagesLoaded = true, navigation = null } = {}) {
+    captainNear = true, festivalNear = false, stagesLoaded = true,
+    stage = '0', navigation = null } = {}) {
     let now = 0, returned = 0, soloClicks = 0, publicClicks = 0, launches = 0, captainClicks = 0;
+    let festivalClicks = 0, festivalPlays = 0, latestStages = [];
     const node = (properties = {}) => ({
         isConnected: true, disabled: false, textContent: '',
         closest: () => null, getClientRects: () => [{}], getAttribute: () => null,
@@ -26,6 +28,8 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
     const publicLobby = node({ textContent: '阿斯嘉特', click() { publicClicks++; } });
     const restart = node({ textContent: '返回角色', click() { returned++; screen = 'chooser'; } });
     const captain = node({ textContent: '與隊長交談', click() { captainClicks++; screen = 'stages'; } });
+    const festivalHost = node({ textContent: '與主持人交談', click() { festivalClicks++; screen = 'festival'; } });
+    const festivalPlay = node({ textContent: '開始遊戲', click() { festivalPlays++; screen = 'festival-diff'; } });
     const card = node({ dataset: { i: '0' }, classList: { contains: name => name === 'sel' },
         querySelector: () => ({ textContent: '斐揚洞穴' }) });
     const go = node({ click() { screen = 'difficulty'; } });
@@ -38,12 +42,14 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
         querySelector(selector) {
             if (selector === '#gameover') return screen === 'settlement' ? node() : null;
             if (selector === '#btn-restart') return restart;
-            if (selector === '#npc-dialog') return ['chooser', 'difficulty'].includes(screen) ? node() : null;
+            if (selector === '#npc-dialog') return ['chooser', 'difficulty', 'festival-diff'].includes(screen) ? node() : null;
             if (selector === '#npc-text .lb-pick') return screen === 'chooser' && chooser ? node() : null;
-            if (selector === '#npc-text .diff') return screen === 'difficulty' ? node() : null;
+            if (selector === '#npc-text .diff') return ['difficulty', 'festival-diff'].includes(screen) ? node() : null;
             if (selector === '#npc-name') return { textContent: '選擇大廳' };
-            if (selector === '#lobby-prompt') return captainNear ? captain : null;
+            if (selector === '#lobby-prompt') return festivalNear ? festivalHost : captainNear ? captain : null;
             if (selector === '#stages') return screen === 'stages' ? node() : null;
+            if (selector === '#festival') return screen === 'festival' ? node() : null;
+            if (selector === '#festival-play') return festivalPlay;
             if (selector === '#stg-go') return go;
             if (selector === '#npc-options button.primary') return launch;
             if (selector === '#npc-text .diff [data-bank="1"]') return bank;
@@ -53,23 +59,27 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
         querySelectorAll(selector) {
             if (selector === '#stg-list .stg-card') return stagesLoaded ? [card] : [];
             if (selector === '#npc-options button') return extraButton ? [solo, publicLobby] : [solo];
-            if (selector === '#npc-text .diff input[data-key]') return sliders;
+            if (selector === '#npc-text .diff input[data-key]') return screen === 'festival-diff' ? [] : sliders;
             if (selector === '#npc-text [data-lb]') return [publicLobby];
             if (selector === '.overlay') return screen === 'unknown' ? [node()] : [];
             return [];
         }
     };
-    const config = { stage: '0', difficultyMode: 'current', immediateCards: false, autoPick: false };
-    const farm = createAutoFarm(config, () => {}, () => {}, doc, () => now, navigation);
+    const config = { stage, difficultyMode: 'current', immediateCards: false, autoPick: false };
+    const farm = createAutoFarm(config, () => {}, list => { latestStages = list; }, doc, () => now, navigation);
     return {
-        farm, solo,
+        farm, solo, config,
         tick(ms = 2000) { now += ms; farm.tick(); },
         set screen(value) { screen = value; }, get screen() { return screen; },
         set captainNear(value) { captainNear = value; },
+        set festivalNear(value) { festivalNear = value; },
         set stagesLoaded(value) { stagesLoaded = value; },
         get returned() { return returned; }, get soloClicks() { return soloClicks; },
         get publicClicks() { return publicClicks; }, get launches() { return launches; },
-        get captainClicks() { return captainClicks; }
+        get captainClicks() { return captainClicks; },
+        get festivalClicks() { return festivalClicks; },
+        get festivalPlays() { return festivalPlays; },
+        get latestStages() { return latestStages; }
     };
 }
 
@@ -221,4 +231,31 @@ test('unknown overlays continue to stop automation', () => {
     env.farm.start();
     assert.equal(env.farm.running, false);
     assert.equal(env.soloClicks, 0);
+});
+
+test('includes festival stage in stage list without requiring reading captain stages first', () => {
+    const targets = [];
+    const navigation = {
+        step(target) { targets.push(target); return '正在自動走向節慶主持人…'; },
+        stop() {}
+    };
+    const env = environment({
+        screen: 'lobby', captainNear: false, festivalNear: false,
+        stagesLoaded: false, stage: 'louyang', navigation
+    });
+    env.farm.refreshStages();
+    assert.ok(env.latestStages.some(s => s.id === 'louyang'));
+    env.farm.start(false);
+    assert.equal(env.farm.running, true);
+    assert.deepEqual(targets, ['festival']);
+    env.festivalNear = true;
+    env.tick();
+    assert.equal(env.festivalClicks, 1);
+    assert.equal(env.screen, 'festival');
+    env.tick();
+    assert.equal(env.festivalPlays, 1);
+    assert.equal(env.screen, 'festival-diff');
+    env.tick();
+    assert.equal(env.launches, 1);
+    assert.equal(env.screen, 'playing');
 });

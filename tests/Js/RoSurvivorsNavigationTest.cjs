@@ -25,8 +25,10 @@ function environment({ loader, onTap } = {}) {
     }
     const originalRender = World.prototype.render;
     const world = new World();
+    const festivalSheet = {};
     const captain = { x: 900, y: 750, children: [{ sheet }] };
-    const layer = { children: [{ x: 1, y: 1, children: [{ sheet: {} }] }, captain] };
+    const festival = { x: 520, y: 310, children: [{ sheet: festivalSheet }] };
+    const layer = { children: [{ x: 1, y: 1, children: [{ sheet: {} }] }, captain, festival] };
     const stage = { dispatchEvent(event) { down.push(event); } };
     const win = {
         PointerEvent: class { constructor(type, args) { this.type = type; Object.assign(this, args); } },
@@ -44,7 +46,13 @@ function environment({ loader, onTap } = {}) {
         getElementById: id => id === 'stage' ? stage : null,
         querySelector: () => overlay ? {} : null
     };
-    const module = { ed: World, cn: { sheetInfo: name => name === 'npc_knight' ? sheet : null } };
+    const module = {
+        ed: World,
+        cn: {
+            sheetInfo: name => name === 'npc_knight' ? sheet
+                : name === 'npc_lantern_girl' ? festivalSheet : null
+        }
+    };
     const navigation = create(loader ?? (() => Promise.resolve(module)), doc, () => now);
     return {
         navigation, world, World, layer, captain, taps, down, doc, module,
@@ -149,4 +157,14 @@ test('leaving town restores the hook without issuing another movement command', 
     e.navigation.stop(false);
     assert.equal(e.taps.length, 1);
     assert.equal(e.World.prototype.render, e.originalRender);
+});
+
+test('targets the festival host when requested and resets route progress on target switch', async () => {
+    const e = environment();
+    await e.connect();
+    assert.match(e.navigation.step('festival'), /節慶主持人/);
+    assert.deepEqual(e.taps, [{ x: 520, y: 310 }]);
+    assert.match(e.navigation.step('captain'), /遠征隊長/);
+    assert.deepEqual(e.taps[1], { x: 900, y: 750 });
+    e.navigation.stop(false);
 });
