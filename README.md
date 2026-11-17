@@ -52,6 +52,18 @@ REDIS_PORT=63800
 
 以上使用 `.docker/compose/.env.example` 的 `APP_PORT=8900`；若自行修改，請使用對應連接埠。
 
+# RO Survivors 竄改猴腳本
+
+腳本維護於 `public/userscripts/ro-survivors-control.user.js`，隨專案部署後可從以下網址安裝：
+
+https://amanda-blog.com/userscripts/ro-survivors-control.user.js
+
+1. 安裝並啟用 Tampermonkey（竄改猴），開啟上述網址後確認安裝。若未出現安裝畫面，可在竄改猴的「實用工具 → 從網址安裝」貼上該網址。
+2. 若已手動安裝舊版，確認只啟用一份「RO Survivors 實驗控制面板」，再重新整理遊戲頁面。
+3. 腳本已設定 `@updateURL`、`@downloadURL` 與 `@version`；後續會依竄改猴的更新設定從本站檢查及下載新版，也可手動檢查更新。
+
+後續請以本專案內的檔案為準修改，發布時同步遞增 `@version` 與面板顯示版本。這是直接提供的靜態 JavaScript，不需要 Vite 建置，也不會在部落格頁面執行。必須完成專案部署後，正式網域才會提供新增或修改的版本；若 CDN 設有長效快取，發布時需清除此網址的快取。
+
 # Google AdSense 廣告收益
 
 網站透過 Google AdSense 的手動廣告單元放送廣告。網站端提供帳戶驗證 meta tag、`/ads.txt` 與固定版位；實際帳戶啟用、網站審查及收款資料仍需在 AdSense 後台完成。
