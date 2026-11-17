@@ -37,7 +37,7 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
     const sliders = ['count', 'damage', 'hp', 'speed', 'events'].map(key => node({ dataset: { key } }));
     const bank = node({ classList: { contains: name => name === 'active' } });
     const doc = {
-        scripts: [{ src: 'https://ro-survivors.com/build/main-2n_YvaNQ.js' }],
+        scripts: [{ src: 'https://ro-survivors.com/build/main-DyDJZBsa.js' }],
         body: { classList: { contains: name => name === 'in-lobby' && screen === 'lobby' } },
         querySelector(selector) {
             if (selector === '#gameover') return screen === 'settlement' ? node() : null;

@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.6
+// @version      0.6.7
 // @homepageURL  https://amanda-blog.com/
 // @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 // @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
-// @description  adc0fdf6：自動走向遠征隊長／節慶主持人、單人連刷、難度、立即開卡與結算診斷。
+// @description  2ad7e24b：自動走向遠征隊長／節慶主持人、單人連刷、難度、立即開卡與結算診斷。
 // @match        https://ro-survivors.com/*
 // @match        https://www.ro-survivors.com/*
 // @run-at       document-idle
@@ -212,7 +212,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.6', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.7', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -1142,7 +1142,7 @@
     };
   }
 
-  // adc0fdf6 的一般單人難度；出發前仍核對遊戲控制項的範圍。
+  // 2ad7e24b 的一般單人難度；出發前仍核對遊戲控制項的範圍。
   const farmDifficultyFields = [
     ['count', '怪物數量', 350],
     ['damage', '怪物傷害', 175],
@@ -1266,7 +1266,7 @@
     function checkBuild() {
       return Array.from(doc.scripts).some(script => {
         try {
-          return new URL(script.src).pathname === '/build/main-2n_YvaNQ.js';
+          return new URL(script.src).pathname === '/build/main-DyDJZBsa.js';
         } catch {
           return false;
         }
@@ -1800,7 +1800,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.6</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.7</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -2059,11 +2059,11 @@
   function loadGameModule(main = Array.from(document.scripts).find(script => {
     try {
       const url = new URL(script.src);
-      return url.origin === location.origin && url.pathname === '/build/main-2n_YvaNQ.js';
+      return url.origin === location.origin && url.pathname === '/build/main-DyDJZBsa.js';
     } catch { return false; }
   })) {
-    if (!main) return Promise.reject(Error('版本不符；僅支援 adc0fdf6'));
-    modulePromise ??= import(new URL('./soul_linker-BNTKE1pN.js', main.src).href)
+    if (!main) return Promise.reject(Error('版本不符；僅支援 2ad7e24b'));
+    modulePromise ??= import(new URL('./soul_linker-BxFtxbV_.js', main.src).href)
       .catch(error => { modulePromise = null; throw error; });
     return modulePromise;
   }
@@ -2290,14 +2290,14 @@
           const u = new URL(s.src);
           return (
             u.origin === location.origin &&
-            u.pathname === '/build/main-2n_YvaNQ.js'
+            u.pathname === '/build/main-DyDJZBsa.js'
           );
         } catch {
           return false;
         }
       });
 
-      if (!main) throw Error('版本不符；僅支援 adc0fdf6');
+      if (!main) throw Error('版本不符；僅支援 2ad7e24b');
 
       const speedChanged = state.speed !== desired.speed;
       Object.assign(state, desired);
