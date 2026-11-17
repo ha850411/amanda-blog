@@ -13,7 +13,8 @@ const createAutoFarm = vm.runInNewContext(
 );
 
 function environment({ screen = 'settlement', label = '單人大廳', dismiss = true,
-    soloDisabled = false, chooser = true, extraButton = false } = {}) {
+    soloDisabled = false, chooser = true, extraButton = false,
+    captainNear = true, stagesLoaded = true, navigation = null } = {}) {
     let now = 0, returned = 0, soloClicks = 0, publicClicks = 0, launches = 0, captainClicks = 0;
     const node = (properties = {}) => ({
         isConnected: true, disabled: false, textContent: '',
@@ -41,7 +42,7 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
             if (selector === '#npc-text .lb-pick') return screen === 'chooser' && chooser ? node() : null;
             if (selector === '#npc-text .diff') return screen === 'difficulty' ? node() : null;
             if (selector === '#npc-name') return { textContent: '選擇大廳' };
-            if (selector === '#lobby-prompt') return captain;
+            if (selector === '#lobby-prompt') return captainNear ? captain : null;
             if (selector === '#stages') return screen === 'stages' ? node() : null;
             if (selector === '#stg-go') return go;
             if (selector === '#npc-options button.primary') return launch;
@@ -50,7 +51,7 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
             return null;
         },
         querySelectorAll(selector) {
-            if (selector === '#stg-list .stg-card') return [card];
+            if (selector === '#stg-list .stg-card') return stagesLoaded ? [card] : [];
             if (selector === '#npc-options button') return extraButton ? [solo, publicLobby] : [solo];
             if (selector === '#npc-text .diff input[data-key]') return sliders;
             if (selector === '#npc-text [data-lb]') return [publicLobby];
@@ -59,16 +60,70 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
         }
     };
     const config = { stage: '0', difficultyMode: 'current', immediateCards: false, autoPick: false };
-    const farm = createAutoFarm(config, () => {}, () => {}, doc, () => now);
+    const farm = createAutoFarm(config, () => {}, () => {}, doc, () => now, navigation);
     return {
         farm, solo,
         tick(ms = 2000) { now += ms; farm.tick(); },
         set screen(value) { screen = value; }, get screen() { return screen; },
+        set captainNear(value) { captainNear = value; },
+        set stagesLoaded(value) { stagesLoaded = value; },
         get returned() { return returned; }, get soloClicks() { return soloClicks; },
         get publicClicks() { return publicClicks; }, get launches() { return launches; },
         get captainClicks() { return captainClicks; }
     };
 }
+
+for (const scanOnly of [true, false]) {
+    test(`${scanOnly ? 'read stages' : 'auto farm'} walks to captain before opening the menu`, () => {
+        let steps = 0, stops = 0;
+        const navigation = {
+            step() { steps++; return '正在自動走向遠征隊長…'; },
+            stop() { stops++; }
+        };
+        const e = environment({ screen: 'lobby', captainNear: false,
+            stagesLoaded: false, navigation });
+        e.farm.start(scanOnly);
+        assert.equal(e.farm.running, true);
+        assert.equal(steps, 1);
+        assert.equal(e.captainClicks, 0);
+        e.captainNear = true;
+        e.tick();
+        assert.equal(e.captainClicks, 1);
+        assert.ok(stops >= 2, 'resets navigation on start and stops at the captain');
+        e.stagesLoaded = true;
+        e.tick();
+        if (scanOnly) {
+            assert.equal(e.farm.running, false);
+            assert.match(e.farm.status, /關卡已更新/);
+            assert.equal(e.launches, 0);
+        } else {
+            e.tick();
+            assert.equal(e.screen, 'playing');
+            assert.equal(e.launches, 1);
+        }
+    });
+}
+
+test('navigation failure stops automation and releases navigation', () => {
+    let stops = 0;
+    const e = environment({ screen: 'lobby', captainNear: false, navigation: {
+        step() { throw Error('路線受阻'); }, stop() { stops++; }
+    } });
+    e.farm.start(true);
+    assert.equal(e.farm.running, false);
+    assert.match(e.farm.status, /路線受阻/);
+    assert.equal(e.captainClicks, 0);
+    assert.equal(stops, 2);
+});
+
+test('navigation times out when the captain never appears', () => {
+    const e = environment({ screen: 'lobby', captainNear: false,
+        navigation: { step: () => '定位中', stop() {} } });
+    e.farm.start(true);
+    e.tick(46000);
+    assert.equal(e.farm.running, false);
+    assert.match(e.farm.status, /逾時/);
+});
 
 test('settlement -> solo lobby -> captain -> stage -> next run, for two rounds', () => {
     const env = environment();

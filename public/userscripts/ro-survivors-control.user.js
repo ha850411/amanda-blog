@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.4
+// @version      0.6.5
 // @homepageURL  https://amanda-blog.com/
 // @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 // @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
-// @description  adc0fdf6：自動單人連刷、難度、立即開卡與結算診斷；速度、選卡、尋寶、傷害與冷卻。
+// @description  adc0fdf6：自動走向遠征隊長、單人連刷、難度、立即開卡與結算診斷。
 // @match        https://ro-survivors.com/*
 // @match        https://www.ro-survivors.com/*
 // @run-at       document-idle
@@ -212,7 +212,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.4', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.5', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -986,6 +986,139 @@
     };
   }
 
+  // Use the plaza's own touch-to-walk pathfinding. Its NPC coordinates come
+  // from the rendered actors, so camera rotation and zoom do not affect them.
+  function createLobbyNavigator(loadModule, doc = document,
+    clock = () => performance.now()) {
+    let revision = 0;
+    let loading = false;
+    let failure = '';
+    let unhook = null;
+    let scene = null;
+    let moving = false;
+    let sentAt = -Infinity;
+    let progressAt = 0;
+    let bestDistance = Infinity;
+
+    const inLobby = () => doc.body.classList.contains('in-lobby');
+    const menuOpen = () => !!doc.querySelector('.overlay:not(.hidden)');
+    const usable = value => Number.isFinite(value?.x) && Number.isFinite(value?.y);
+
+    function walkTo(point) {
+      const stage = doc.getElementById('stage');
+      const win = doc.defaultView;
+      const world = scene?.world;
+      if (!stage || !win?.PointerEvent || !world || world.gone ||
+          !inLobby() || doc.hidden || menuOpen() || !usable(point)) return false;
+      const original = world.pickGround;
+      const descriptor = Object.getOwnPropertyDescriptor(world, 'pickGround');
+      if (typeof original !== 'function') throw Error('找不到廣場尋路介面');
+      // A synchronous synthetic tap supplies the exact world destination to
+      // the normal moveTo handler; it never assigns the character's position.
+      const pick = () => ({ x: point.x, y: point.y });
+      world.pickGround = pick;
+      try {
+        // Outside the viewport avoids opening another player's context menu.
+        const options = {
+          bubbles: true, cancelable: true, pointerType: 'touch',
+          pointerId: 5253, isPrimary: true, button: 0,
+          clientX: -10000, clientY: -10000
+        };
+        stage.dispatchEvent(new win.PointerEvent('pointerdown', { ...options, buttons: 1 }));
+        win.dispatchEvent(new win.PointerEvent('pointerup', { ...options, buttons: 0 }));
+      } finally {
+        if (world.pickGround === pick) {
+          if (descriptor) Object.defineProperty(world, 'pickGround', descriptor);
+          else delete world.pickGround;
+        }
+      }
+      return true;
+    }
+
+    function connect() {
+      if (loading || unhook || failure) return;
+      loading = true;
+      const request = ++revision;
+      Promise.resolve().then(loadModule).then(module => {
+        if (request !== revision) return;
+        const prototype = module.ed?.prototype;
+        if (typeof prototype?.render !== 'function' ||
+            typeof module.cn?.sheetInfo !== 'function') {
+          throw Error('版本不符，無法連接廣場尋路');
+        }
+        const original = prototype.render;
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, 'render');
+        let active = true;
+        function wrapped(layer, ...args) {
+          const result = original.call(this, layer, ...args);
+          try {
+            if (active && inLobby() && this.map?.name === 'prontera_plaza' && !this.gone) {
+              const sheet = module.cn.sheetInfo('npc_knight');
+              const captain = sheet && layer?.children?.find(view =>
+                view.children?.some(sprite => sprite.sheet === sheet));
+              const player = { x: this.target?.x, y: this.target?.z };
+              if (usable(player) && usable(captain)) {
+                scene = { world: this, player, captain: { x: captain.x, y: captain.y }, at: clock() };
+              }
+            }
+          } catch { failure = '廣場資料不相容，無法定位遠征隊長'; }
+          return result;
+        }
+        prototype.render = wrapped;
+        unhook = () => {
+          active = false;
+          if (prototype.render !== wrapped) return;
+          if (descriptor) Object.defineProperty(prototype, 'render', descriptor);
+          else delete prototype.render;
+        };
+      }).catch(error => {
+        if (request === revision) failure = error.message;
+      }).finally(() => {
+        if (request === revision) loading = false;
+      });
+    }
+
+    return {
+      step() {
+        if (failure) throw Error(failure);
+        connect();
+        if (doc.hidden) return '請切回遊戲分頁，繼續前往遠征隊長';
+        const now = clock();
+        if (!scene || scene.world.gone || now - scene.at > 1500) {
+          return '正在定位廣場中的遠征隊長…';
+        }
+        const distance = Math.hypot(scene.captain.x - scene.player.x,
+          scene.captain.y - scene.player.y);
+        if (!moving || distance < bestDistance - 8) {
+          bestDistance = distance;
+          progressAt = now;
+        } else if (now - progressAt > 12000) {
+          throw Error('前往遠征隊長時沒有進展，已停止；請確認路線');
+        }
+        if (now - sentAt >= 1800 && walkTo(scene.captain)) {
+          sentAt = now;
+          moving = true;
+        }
+        return '正在自動走向遠征隊長…';
+      },
+      stop(cancelMovement = true) {
+        revision++;
+        loading = false;
+        // Clicking the current ground position cancels the native walking path.
+        try { if (cancelMovement && moving && scene) walkTo(scene.player); }
+        catch { /* A disappearing scene must not prevent releasing the hook. */ }
+        finally {
+          unhook?.();
+          unhook = scene = null;
+          failure = '';
+          moving = false;
+          sentAt = -Infinity;
+          bestDistance = Infinity;
+        }
+      }
+    };
+  }
+
   // adc0fdf6 的一般單人難度；出發前仍核對遊戲控制項的範圍。
   const farmDifficultyFields = [
     ['count', '怪物數量', 350],
@@ -1004,7 +1137,8 @@
     notify,
     stagesChanged,
     doc = document,
-    clock = () => performance.now()
+    clock = () => performance.now(),
+    navigation = null
   ) {
     const one = selector => doc.querySelector(selector);
     const all = selector => Array.from(doc.querySelectorAll(selector));
@@ -1046,11 +1180,13 @@
     function stop(text = '已停止；本局可繼續手動遊玩') {
       running = reading = false;
       actions.clear();
+      navigation?.stop();
       say(text);
     }
 
     function changePhase(value, now) {
       if (phase !== value) {
+        if (phase === 'lobby') navigation?.stop(false);
         phase = value;
         phaseAt = now;
         actions.clear();
@@ -1113,7 +1249,8 @@
 
       if (
         !scanOnly &&
-        !choices.some(stage => stage.id === config.stage && !stage.blocked)
+        (!/^\d+$/.test(config.stage) ||
+          (choices.length && !choices.some(stage => stage.id === config.stage && !stage.blocked)))
       ) {
         stop('請先讀取關卡，並選擇已解鎖的關卡');
         return;
@@ -1121,6 +1258,7 @@
 
       running = !scanOnly;
       reading = scanOnly;
+      navigation?.stop();
       phase = '';
       nextAt = 0;
       actions.clear();
@@ -1459,14 +1597,18 @@
           enabled(prompt) &&
           /隊長|captain|capitán|capitão/i.test(prompt.textContent)
         ) {
+          navigation?.stop();
           say('開啟遠征選單…');
           clickOnce('captain', prompt, now);
 
           if (now - phaseAt > 15000) {
             stop('遠征選單沒有回應，已停止');
           }
-        } else if (now - phaseAt > 20000) {
-          stop('請移動到遠征隊長旁，再開始連刷');
+        } else if (now - phaseAt > (navigation ? 45000 : 20000)) {
+          stop(navigation ? '自動前往遠征隊長逾時，已停止' : '請移動到遠征隊長旁，再開始連刷');
+        } else if (navigation) {
+          try { say(navigation.step()); }
+          catch (error) { stop(error.message); }
         } else {
           say('等待廣場載入／靠近遠征隊長…');
         }
@@ -1578,7 +1720,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.4</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.5</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -1591,7 +1733,7 @@
             <button id="farmRead">讀取關卡</button>
           </div>
           <select id="farmStage" aria-label="連刷關卡">
-            <option value="">先開啟一次遠征選單</option>
+            <option value="">按「讀取關卡」自動前往遠征隊長</option>
           </select>
           <label for="farmDifficulty">連刷難度</label>
           <select id="farmDifficulty">
@@ -1622,6 +1764,7 @@
             開始連刷
           </button>
           <small id="farmStatus">尚未開始</small>
+          <small>讀取關卡／開始連刷會自動走向遠征隊長。</small>
         </div>
         ${[
           ['speed', '遊戲速度', 1, 10, 1, 1, '×'],
@@ -1833,6 +1976,20 @@
   let modulePromise = null;
   let samples = [];
 
+  function loadGameModule(main = Array.from(document.scripts).find(script => {
+    try {
+      const url = new URL(script.src);
+      return url.origin === location.origin && url.pathname === '/build/main-2n_YvaNQ.js';
+    } catch { return false; }
+  })) {
+    if (!main) return Promise.reject(Error('版本不符；僅支援 adc0fdf6'));
+    modulePromise ??= import(new URL('./soul_linker-BNTKE1pN.js', main.src).href)
+      .catch(error => { modulePromise = null; throw error; });
+    return modulePromise;
+  }
+
+  const lobbyNavigation = createLobbyNavigator(() => loadGameModule());
+
   const farmConfigKey = 'ros-auto-farm-v1';
   const farmConfig = {
     stage: '',
@@ -1934,7 +2091,10 @@
 
       $('farmStage').value = farmConfig.stage;
       saveFarm();
-    }
+    },
+    document,
+    () => performance.now(),
+    lobbyNavigation
   );
 
   $('farmStage').addEventListener('change', () => {
@@ -2092,14 +2252,7 @@
       if (needGame && !gameControl) {
         report('連接中…');
 
-        modulePromise ??= import(
-          new URL('./soul_linker-BNTKE1pN.js', main.src).href
-        ).catch(e => {
-          modulePromise = null;
-          throw e;
-        });
-
-        const module = await modulePromise;
+        const module = await loadGameModule(main);
         if (request !== generation) return;
 
         if (!gameControl) {
