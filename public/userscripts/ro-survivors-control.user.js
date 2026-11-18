@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.10
+// @version      0.6.11
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -210,7 +210,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.10', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.11', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -550,12 +550,16 @@
       let record = games.get(game);
 
       if (!record) {
+        const initialTime = Number.isFinite(game.time) ? Math.max(0, game.time) : 0;
         record = {
           godApplied: false,
           methods: [],
           weapons: new Map(),
           discovery: null,
-          cooldowns: null
+          cooldowns: null,
+          accelerated: false,
+          realTime: initialTime,
+          lastGameTime: initialTime
         };
 
         games.set(game, record);
@@ -563,6 +567,16 @@
         try {
           record.discovery = installStatBoosts(game, state);
           record.cooldowns = installCooldown(game, state);
+
+          const syncRealTime = (gameObj, beforeTime, factorUsed) => {
+            if (!Number.isFinite(gameObj.time)) return;
+            if (gameObj.time < record.lastGameTime) {
+              record.realTime = Math.max(0, gameObj.time);
+            } else if (Number.isFinite(beforeTime)) {
+              record.realTime += Math.max(0, gameObj.time - beforeTime) / factorUsed;
+            }
+            record.lastGameTime = gameObj.time;
+          };
 
           patch(game, record, 'advance', original => function(dt) {
             const factor = clamp(state.speed, 10);
@@ -574,9 +588,17 @@
               !Number.isFinite(dt) ||
               dt <= 0
             ) {
+              if (this.state === 'playing') {
+                const beforeTime = Number.isFinite(this.time) ? this.time : NaN;
+                const result = original.call(this, dt);
+                syncRealTime(this, beforeTime, 1);
+                return result;
+              }
               return original.call(this, dt);
             }
 
+            record.accelerated = true;
+            const beforeTime = Number.isFinite(this.time) ? this.time : NaN;
             const count = Math.ceil(factor);
             const began = performance.now();
             let result;
@@ -592,6 +614,7 @@
               result = original.call(this, dt * factor / count);
             }
 
+            syncRealTime(this, beforeTime, factor);
             return result;
           });
 
@@ -697,6 +720,13 @@
 
         const value = record.discovery.value();
         return `尋寶率：${(value.base * 100).toFixed(0)}% → ${(value.total * 100).toFixed(0)}%`;
+      },
+      realSeconds() {
+        const record = latest && games.get(latest);
+        if (!record || !record.accelerated || !Number.isFinite(record.realTime)) {
+          return null;
+        }
+        return Math.max(0, Math.round(record.realTime));
       },
       restore() {
         disposed = true;
@@ -2032,7 +2062,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.10</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.11</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -2924,11 +2954,45 @@
   }, 500);
 
   let apiNetworkErrors = 0;
+  const adjustedSecsByKey = new Map();
   const origFetch = window.fetch;
+  function normalizeAcceleratedRunTime(input, init) {
+    if (!init || typeof init.body !== 'string') return init;
+    const url = new URL(typeof input === 'string' ? input : input?.url ?? input, document.baseURI);
+    if (url.origin !== location.origin || (url.pathname !== '/api/op' && url.pathname !== '/api/save')) {
+      return init;
+    }
+    const body = JSON.parse(init.body);
+    const op = url.pathname === '/api/save' ? 'save' : body?.op;
+    if (!['tick', 'save', 'loot', 'gloot'].includes(op)) return init;
+    const target = op === 'tick' || op === 'save' ? body.rk : body;
+    if (!target || typeof target.secs !== 'number' || !Number.isFinite(target.secs)) return init;
+
+    const realSecs = gameControl?.realSeconds?.();
+    const fallbackSecs = typeof target.key === 'string' ? adjustedSecsByKey.get(target.key) : undefined;
+    const candidate = realSecs !== null && realSecs !== undefined ? realSecs : fallbackSecs;
+    if (candidate === null || candidate === undefined || !Number.isFinite(candidate)) return init;
+
+    const normalized = Math.max(0, Math.min(target.secs, candidate));
+    if (typeof target.key === 'string') {
+      adjustedSecsByKey.set(target.key, normalized);
+      if (adjustedSecsByKey.size > 12) adjustedSecsByKey.delete(adjustedSecsByKey.keys().next().value);
+    }
+    if (normalized === target.secs) return init;
+
+    target.secs = normalized;
+    return { ...init, body: JSON.stringify(body) };
+  }
+
   window.fetch = function watchedFetch(...args) {
-    const result = origFetch.apply(this, args);
+    let nextArgs = args;
     try {
-      const input = args[0];
+      const nextInit = normalizeAcceleratedRunTime(args[0], args[1]);
+      if (nextInit !== args[1]) nextArgs = [args[0], nextInit, ...args.slice(2)];
+    } catch {}
+    const result = origFetch.apply(this, nextArgs);
+    try {
+      const input = nextArgs[0];
       const url = new URL(typeof input === 'string' ? input : input?.url ?? input, document.baseURI);
       if (url.origin === location.origin) {
         const isStatus = url.pathname.endsWith('/status.json');
