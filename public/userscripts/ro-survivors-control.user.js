@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.12
+// @version      0.6.13
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -92,6 +92,7 @@
           id: ++sequence, started: new Date().toISOString(), start: now,
           // Missing the start or resuming makes wall-time comparisons incomplete.
           completeStart: op === 'run' && !body.played,
+          ...(op === 'run' && number(body.played) !== null ? { played: number(body.played) } : {}),
           stage: typeof body.stage === 'string' ? body.stage : null,
           multiplier: number(body.mult), events: [], omittedEvents: 0
         };
@@ -141,6 +142,8 @@
           event.granted = {
             gear: g.gear.length, cards: Array.isArray(g.cards) ? g.cards.length : null,
             eggs: Array.isArray(g.eggs) ? g.eggs.length : null,
+            balls: Array.isArray(g.balls) ? g.balls.length : null,
+            ballTypes: Array.isArray(g.balls) ? [...g.balls] : null,
             mail: g.mail === true,
             items: g.gear.map(item => ({
               itemId: number(item.itemId), quality: number(item.quality),
@@ -201,7 +204,9 @@
         const sent = event.sent?.gear ?? '—';
         const received = event.granted?.mail ? '郵差領取'
           : event.granted?.gear ?? (event.status === 'pending' ? '等待中' : '未確認');
+        const balls = event.granted?.balls;
         return `第 ${run.id} 局：送出 ${sent} 件／核發 ${received}` +
+          (typeof balls === 'number' && balls > 0 ? ` · 扭蛋 ${balls}` : '') +
           ` · 遊戲 ${event.gameSeconds ?? '—'} 秒／` +
           `${run.completeStart ? '實際' : '記錄期間'} ${event.atSeconds} 秒` +
           (['http-error', 'network-error', 'unreadable-response'].includes(event.status)
@@ -210,7 +215,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.12', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.13', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -2092,7 +2097,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.12</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.13</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -2985,37 +2990,60 @@
 
   let apiNetworkErrors = 0;
   const adjustedSecsByKey = new Map();
+  const playedByKey = new Map();
   const origFetch = window.fetch;
   function normalizeAcceleratedRunTime(input, init) {
     if (!init || typeof init.body !== 'string') return init;
     const url = new URL(typeof input === 'string' ? input : input?.url ?? input, document.baseURI);
-    if (url.origin !== location.origin || (url.pathname !== '/api/op' && url.pathname !== '/api/save')) {
+    if (url.origin !== location.origin || !['/api/run', '/api/op', '/api/save'].includes(url.pathname)) {
       return init;
     }
     const body = JSON.parse(init.body);
+    if (url.pathname === '/api/run') {
+      const speed = clamp(state.speed, 100);
+      if (speed <= 1 || body?.skip || typeof body?.played === 'number' || typeof body?.key !== 'string') {
+        return init;
+      }
+      const played = Math.max(0, Math.round(900 - 900 / speed));
+      if (played <= 0) return init;
+      body.played = played;
+      playedByKey.set(body.key, played);
+      if (playedByKey.size > 12) playedByKey.delete(playedByKey.keys().next().value);
+      return { ...init, body: JSON.stringify(body) };
+    }
     const op = url.pathname === '/api/save' ? 'save' : body?.op;
     if (!['tick', 'save', 'loot', 'gloot'].includes(op)) return init;
     const target = op === 'tick' || op === 'save' ? body.rk : body;
     if (!target || typeof target.secs !== 'number' || !Number.isFinite(target.secs)) return init;
+
+    const realSecs = gameControl?.realSeconds?.();
+    const playedOffset = typeof target.key === 'string' ? (playedByKey.get(target.key) ?? 0) : 0;
 
     if (op === 'loot' || op === 'gloot') {
       const bossSecs = gameControl?.bossSpawnSeconds?.();
       if (bossSecs === null || bossSecs === undefined || !Number.isFinite(bossSecs)) return init;
 
       const extraSecs = 5 + Math.floor(Math.random() * 11);
-      const normalized = Math.max(0, Math.ceil(bossSecs) + extraSecs);
+      const bossTarget = Math.max(0, Math.ceil(bossSecs) + extraSecs);
+      const maxAllowed = playedOffset > 0 && realSecs !== null && realSecs !== undefined && Number.isFinite(realSecs)
+        ? playedOffset + realSecs
+        : null;
+      const normalized = maxAllowed !== null ? Math.min(bossTarget, maxAllowed) : bossTarget;
       if (normalized === target.secs) return init;
 
       target.secs = normalized;
       return { ...init, body: JSON.stringify(body) };
     }
 
-    const realSecs = gameControl?.realSeconds?.();
     const fallbackSecs = typeof target.key === 'string' ? adjustedSecsByKey.get(target.key) : undefined;
-    const candidate = realSecs !== null && realSecs !== undefined ? realSecs : fallbackSecs;
+    const candidate = realSecs !== null && realSecs !== undefined
+      ? playedOffset + realSecs
+      : fallbackSecs;
     if (candidate === null || candidate === undefined || !Number.isFinite(candidate)) return init;
 
-    const normalized = Math.max(0, Math.min(target.secs, candidate));
+    const normalized = playedOffset > 0
+      ? Math.max(0, candidate)
+      : Math.max(0, Math.min(target.secs, candidate));
     if (typeof target.key === 'string') {
       adjustedSecsByKey.set(target.key, normalized);
       if (adjustedSecsByKey.size > 12) adjustedSecsByKey.delete(adjustedSecsByKey.keys().next().value);
