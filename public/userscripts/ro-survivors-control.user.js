@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.11
+// @version      0.6.12
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -210,7 +210,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.11', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.12', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -542,6 +542,18 @@
       }
     }
 
+    function maxBossSpawnTime(bosses) {
+      if (!Array.isArray(bosses)) return null;
+      let maxTime = null;
+      for (const boss of bosses) {
+        const t = boss?.t;
+        if (typeof t === 'number' && Number.isFinite(t) && t >= 0) {
+          maxTime = maxTime === null ? t : Math.max(maxTime, t);
+        }
+      }
+      return maxTime;
+    }
+
     function observe(game) {
       if (disposed || !game?.player || !game.stats) return;
 
@@ -559,7 +571,8 @@
           cooldowns: null,
           accelerated: false,
           realTime: initialTime,
-          lastGameTime: initialTime
+          lastGameTime: initialTime,
+          bossSpawnTime: null
         };
 
         games.set(game, record);
@@ -689,6 +702,13 @@
         }
       }
 
+      const observedBossTime = maxBossSpawnTime(game.script?.bosses);
+      if (observedBossTime !== null) {
+        record.bossSpawnTime = record.bossSpawnTime === null
+          ? observedBossTime
+          : Math.max(record.bossSpawnTime, observedBossTime);
+      }
+
       syncHealth(game, record);
     }
 
@@ -727,6 +747,16 @@
           return null;
         }
         return Math.max(0, Math.round(record.realTime));
+      },
+      bossSpawnSeconds() {
+        const record = latest && games.get(latest);
+        if (!record || !record.accelerated) return null;
+        const liveTime = maxBossSpawnTime(latest?.script?.bosses);
+        const recordedTime = record.bossSpawnTime;
+        if (liveTime === null && recordedTime === null) return null;
+        if (liveTime === null) return recordedTime;
+        if (recordedTime === null) return liveTime;
+        return Math.max(liveTime, recordedTime);
       },
       restore() {
         disposed = true;
@@ -2062,7 +2092,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.11</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.12</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -2967,6 +2997,18 @@
     if (!['tick', 'save', 'loot', 'gloot'].includes(op)) return init;
     const target = op === 'tick' || op === 'save' ? body.rk : body;
     if (!target || typeof target.secs !== 'number' || !Number.isFinite(target.secs)) return init;
+
+    if (op === 'loot' || op === 'gloot') {
+      const bossSecs = gameControl?.bossSpawnSeconds?.();
+      if (bossSecs === null || bossSecs === undefined || !Number.isFinite(bossSecs)) return init;
+
+      const extraSecs = 5 + Math.floor(Math.random() * 11);
+      const normalized = Math.max(0, Math.ceil(bossSecs) + extraSecs);
+      if (normalized === target.secs) return init;
+
+      target.secs = normalized;
+      return { ...init, body: JSON.stringify(body) };
+    }
 
     const realSecs = gameControl?.realSeconds?.();
     const fallbackSecs = typeof target.key === 'string' ? adjustedSecsByKey.get(target.key) : undefined;
