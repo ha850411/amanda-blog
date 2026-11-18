@@ -80,9 +80,12 @@ test('compares the full seeded payload with actual grants and real elapsed time'
     assert.equal(event.sent.gear, 3);
     assert.equal(event.sent.cards, 1);
     assert.equal(event.granted.gear, 1);
+    assert.deepEqual(event.granted.missingSources, [
+        { source: 'poring', sent: 3, granted: 1, missing: 2 }
+    ]);
     assert.deepEqual(event.sent.sources[0].discovery, [0, 100, 200]);
     assert.deepEqual(JSON.parse(e.calls.at(-1).args[1].body).dr, dr);
-    assert.match(e.audit.summary(), /送出 3 件／核發 1/);
+    assert.match(e.audit.summary(), /送出 3 件／核發 1（少：poring×2）/);
     assert.doesNotMatch(JSON.stringify(e.data()), /run-secret|SECRET-TOKEN|ACCOUNT-DOC/);
 });
 

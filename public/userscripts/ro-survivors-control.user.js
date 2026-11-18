@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.13
+// @version      0.6.14
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -119,6 +119,25 @@
       return { run, event, now, revision };
     }
 
+    function missingSources(sent, granted) {
+      if (!sent?.sources?.length || !Array.isArray(granted?.items)) return [];
+      const grantedBySource = new Map();
+      for (const item of granted.items) {
+        if (typeof item.source === 'string' && item.source) {
+          grantedBySource.set(item.source, (grantedBySource.get(item.source) ?? 0) + 1);
+        }
+      }
+      const missing = [];
+      for (const row of sent.sources) {
+        if (!row.gear) continue;
+        const got = grantedBySource.get(row.source) ?? 0;
+        if (row.gear > got) {
+          missing.push({ source: row.source, sent: row.gear, granted: got, missing: row.gear - got });
+        }
+      }
+      return missing;
+    }
+
     async function response(ticket, result) {
       if (!ticket || ticket.revision !== revision) return;
       const { run, event } = ticket;
@@ -150,6 +169,8 @@
               source: typeof item.src === 'string' ? item.src : null
             }))
           };
+          const missing = missingSources(event.sent, event.granted);
+          if (missing.length) event.granted.missingSources = missing;
           event.again = data.again === true;
         } else if (data.granted?.mail) {
           event.granted = { mail: true };
@@ -205,7 +226,11 @@
         const received = event.granted?.mail ? '郵差領取'
           : event.granted?.gear ?? (event.status === 'pending' ? '等待中' : '未確認');
         const balls = event.granted?.balls;
-        return `第 ${run.id} 局：送出 ${sent} 件／核發 ${received}` +
+        const missing = event.granted?.missingSources;
+        const missingText = Array.isArray(missing) && missing.length
+          ? `（少：${missing.slice(0, 3).map(m => `${m.source}×${m.missing}`).join('、')}${missing.length > 3 ? '…' : ''}）`
+          : '';
+        return `第 ${run.id} 局：送出 ${sent} 件／核發 ${received}${missingText}` +
           (typeof balls === 'number' && balls > 0 ? ` · 扭蛋 ${balls}` : '') +
           ` · 遊戲 ${event.gameSeconds ?? '—'} 秒／` +
           `${run.completeStart ? '實際' : '記錄期間'} ${event.atSeconds} 秒` +
@@ -215,7 +240,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.13', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.14', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -552,11 +577,22 @@
       let maxTime = null;
       for (const boss of bosses) {
         const t = boss?.t;
-        if (typeof t === 'number' && Number.isFinite(t) && t >= 0) {
+        // Ignore the 1e9 (Jl) placeholder assigned before a rare boss is summoned.
+        if (typeof t === 'number' && Number.isFinite(t) && t >= 0 && t < 1e8) {
           maxTime = maxTime === null ? t : Math.max(maxTime, t);
         }
       }
       return maxTime;
+    }
+
+    const VALUABLE_PICKUP_KINDS = new Set(['drop', 'ball', 'loot', 'card', 'egg', 'mystery']);
+
+    function hasPendingValuablePickups(game) {
+      if (!Array.isArray(game?.pickups)) return false;
+      for (const item of game.pickups) {
+        if (!item?.dead && VALUABLE_PICKUP_KINDS.has(item?.kind)) return true;
+      }
+      return false;
     }
 
     function observe(game) {
@@ -597,7 +633,12 @@
           };
 
           patch(game, record, 'advance', original => function(dt) {
-            const factor = clamp(state.speed, 10);
+            const requestedFactor = clamp(state.speed, 20);
+            const closing = Number.isFinite(this.closeAt) && this.closeAt >= 0;
+            // During the post-boss victory window (closeAt >= 0), run at 1x speed
+            // so the 10s loot countdown is not compressed into 1s and pending
+            // `onDrop` tick timers and flying drops/balls can settle cleanly.
+            const factor = closing ? 1 : requestedFactor;
 
             if (
               disposed ||
@@ -607,6 +648,7 @@
               dt <= 0
             ) {
               if (this.state === 'playing') {
+                if (requestedFactor > 1) record.accelerated = true;
                 const beforeTime = Number.isFinite(this.time) ? this.time : NaN;
                 const result = original.call(this, dt);
                 syncRealTime(this, beforeTime, 1);
@@ -623,6 +665,7 @@
 
             for (let i = 0; i < count; i++) {
               if (disposed || this.state !== 'playing') break;
+              if (Number.isFinite(this.closeAt) && this.closeAt >= 0) break;
 
               if (i > 0 && performance.now() - began >= 12) {
                 state.limited++;
@@ -644,22 +687,31 @@
             const bonus = this.buffValue('pickup');
             const radius = (base + bonus) * clamp(state.pickup, 100);
             const suction = clamp(state.suction, 10);
+            const closing = Number.isFinite(this.closeAt) && this.closeAt >= 0;
+            const activeSuction = closing ? Math.max(suction, 6) : suction;
 
             stats.pickupRadius = radius - bonus;
 
             try {
               if (
-                suction > 1 &&
                 dt > 0 &&
                 !this.player.dead &&
-                !this.coop?.replica
+                !this.coop?.replica &&
+                (activeSuction > 1 || closing)
               ) {
                 for (const item of this.pickups) {
-                  if (
-                    item.dead ||
-                    item.kind === 'chest' ||
-                    item.kind === 'mystery'
-                  ) continue;
+                  if (item.dead || item.kind === 'chest') continue;
+                  if (item.kind === 'mystery') {
+                    if (closing && Number.isFinite(item.fadeAt) && Number.isFinite(this.time)) {
+                      item.fadeAt = Math.min(item.fadeAt, this.time);
+                    }
+                    continue;
+                  }
+
+                  if (closing && VALUABLE_PICKUP_KINDS.has(item.kind)) {
+                    item.magnet = true;
+                    item.vacuum = true;
+                  }
 
                   const dx = this.player.x - item.x;
                   const dy = this.player.y - 20 - item.y;
@@ -679,11 +731,27 @@
 
                   const extra = Math.min(
                     distance - 18,
-                    speed * dt * (suction - 1)
+                    speed * dt * Math.max(0, activeSuction - 1)
                   );
 
-                  item.x += dx / distance * extra;
-                  item.y += dy / distance * extra;
+                  if (extra > 0) {
+                    item.x += dx / distance * extra;
+                    item.y += dy / distance * extra;
+                  }
+                }
+              }
+
+              // Hold closeAt by one step if valuable drops/balls are still mid-flight
+              // right as the victory timer expires (bounded to 5 extra game seconds).
+              if (
+                closing &&
+                Number.isFinite(this.time) &&
+                this.time + dt >= this.closeAt &&
+                hasPendingValuablePickups(this)
+              ) {
+                record.closeExtended = (record.closeExtended ?? 0) + dt;
+                if (record.closeExtended <= 5) {
+                  this.closeAt = this.time + Math.max(0.25, dt * 2);
                 }
               }
 
@@ -2097,7 +2165,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.13</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.14</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -2152,7 +2220,7 @@
           <small>讀取關卡／開始連刷會自動走向遠征隊長或節慶主持人。</small>
         </div>
         ${[
-          ['speed', '遊戲速度', 1, 10, 1, 1, '×'],
+          ['speed', '遊戲速度', 1, 20, 1, 1, '×'],
           ['animation', '選卡速度', 1, 10, 1, 1, '×'],
           ['attack', '傷害倍率', 1, 100, 1, 1, '×'],
           ['cooldown', '冷卻縮減', 0, 99, 1, 0, '%'],
@@ -2296,7 +2364,7 @@
   const $ = id => root.getElementById(id);
 
   const limits = {
-    speed: 10,
+    speed: 20,
     animation: 10,
     attack: 100,
     cooldown: 99,
@@ -2991,7 +3059,13 @@
   let apiNetworkErrors = 0;
   const adjustedSecsByKey = new Map();
   const playedByKey = new Map();
+  const runStartAtByKey = new Map();
   const origFetch = window.fetch;
+  function rememberBounded(map, key, value) {
+    if (typeof key !== 'string') return;
+    map.set(key, value);
+    if (map.size > 12) map.delete(map.keys().next().value);
+  }
   function normalizeAcceleratedRunTime(input, init) {
     if (!init || typeof init.body !== 'string') return init;
     const url = new URL(typeof input === 'string' ? input : input?.url ?? input, document.baseURI);
@@ -2999,16 +3073,22 @@
       return init;
     }
     const body = JSON.parse(init.body);
+    const now = performance.now();
     if (url.pathname === '/api/run') {
+      if (typeof body?.key === 'string') {
+        rememberBounded(runStartAtByKey, body.key, now);
+      }
       const speed = clamp(state.speed, 100);
       if (speed <= 1 || body?.skip || typeof body?.played === 'number' || typeof body?.key !== 'string') {
         return init;
       }
-      const played = Math.max(0, Math.round(900 - 900 / speed));
+      // Include the post-boss victory window (900s + 15s) so `played + wallSecs`
+      // always covers the full 910s run and final boss drops even at high speed.
+      const expectedRunSecs = 915;
+      const played = Math.max(0, Math.round(expectedRunSecs - expectedRunSecs / speed));
       if (played <= 0) return init;
       body.played = played;
-      playedByKey.set(body.key, played);
-      if (playedByKey.size > 12) playedByKey.delete(playedByKey.keys().next().value);
+      rememberBounded(playedByKey, body.key, played);
       return { ...init, body: JSON.stringify(body) };
     }
     const op = url.pathname === '/api/save' ? 'save' : body?.op;
@@ -3016,38 +3096,58 @@
     const target = op === 'tick' || op === 'save' ? body.rk : body;
     if (!target || typeof target.secs !== 'number' || !Number.isFinite(target.secs)) return init;
 
+    const key = typeof target.key === 'string' ? target.key : null;
     const realSecs = gameControl?.realSeconds?.();
-    const playedOffset = typeof target.key === 'string' ? (playedByKey.get(target.key) ?? 0) : 0;
+    const playedOffset = key ? (playedByKey.get(key) ?? 0) : 0;
+    const startAt = key ? runStartAtByKey.get(key) : undefined;
+    const wallSecs = typeof startAt === 'number' && Number.isFinite(startAt)
+      ? Math.max(0, Math.floor((now - startAt) / 1000))
+      : null;
+    const elapsedSecs = realSecs !== null && realSecs !== undefined && Number.isFinite(realSecs)
+      ? (wallSecs !== null ? Math.max(realSecs, wallSecs) : realSecs)
+      : wallSecs;
+    const lastSentSecs = key ? (adjustedSecsByKey.get(key) ?? 0) : 0;
 
     if (op === 'loot' || op === 'gloot') {
       const bossSecs = gameControl?.bossSpawnSeconds?.();
-      if (bossSecs === null || bossSecs === undefined || !Number.isFinite(bossSecs)) return init;
+      const hasBossSecs = bossSecs !== null && bossSecs !== undefined && Number.isFinite(bossSecs);
+      if (!hasBossSecs && playedOffset <= 0 && elapsedSecs === null) return init;
 
       const extraSecs = 5 + Math.floor(Math.random() * 11);
-      const bossTarget = Math.max(0, Math.ceil(bossSecs) + extraSecs);
-      const maxAllowed = playedOffset > 0 && realSecs !== null && realSecs !== undefined && Number.isFinite(realSecs)
-        ? playedOffset + realSecs
+      const bossTarget = hasBossSecs
+        ? Math.max(target.secs, Math.ceil(bossSecs) + extraSecs)
+        : target.secs;
+      const maxAllowed = playedOffset > 0 && elapsedSecs !== null
+        ? playedOffset + elapsedSecs
         : null;
-      const normalized = maxAllowed !== null ? Math.min(bossTarget, maxAllowed) : bossTarget;
+      // Never report a final settlement time earlier than a previously sent
+      // tick/save or earlier than the final boss spawn / actual game time.
+      const floorSecs = Math.max(
+        0,
+        lastSentSecs,
+        target.secs,
+        hasBossSecs ? Math.ceil(bossSecs) + 2 : 0
+      );
+      const bounded = maxAllowed !== null ? Math.min(bossTarget, maxAllowed) : bossTarget;
+      const normalized = Math.max(floorSecs, bounded);
+      rememberBounded(adjustedSecsByKey, key, normalized);
       if (normalized === target.secs) return init;
 
       target.secs = normalized;
       return { ...init, body: JSON.stringify(body) };
     }
 
-    const fallbackSecs = typeof target.key === 'string' ? adjustedSecsByKey.get(target.key) : undefined;
-    const candidate = realSecs !== null && realSecs !== undefined
-      ? playedOffset + realSecs
+    const fallbackSecs = key ? adjustedSecsByKey.get(key) : undefined;
+    const candidate = elapsedSecs !== null
+      ? playedOffset + elapsedSecs
       : fallbackSecs;
     if (candidate === null || candidate === undefined || !Number.isFinite(candidate)) return init;
 
-    const normalized = playedOffset > 0
-      ? Math.max(0, candidate)
+    const rawNormalized = playedOffset > 0
+      ? Math.max(0, Math.min(target.secs, candidate))
       : Math.max(0, Math.min(target.secs, candidate));
-    if (typeof target.key === 'string') {
-      adjustedSecsByKey.set(target.key, normalized);
-      if (adjustedSecsByKey.size > 12) adjustedSecsByKey.delete(adjustedSecsByKey.keys().next().value);
-    }
+    const normalized = Math.max(lastSentSecs, rawNormalized);
+    rememberBounded(adjustedSecsByKey, key, normalized);
     if (normalized === target.secs) return init;
 
     target.secs = normalized;
