@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.8
+// @version      0.6.9
 // @homepageURL  https://amanda-blog.com/
 // @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
 // @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
-// @description  自動走向遠征隊長／節慶主持人、單人連刷、難度、立即開卡與結算診斷（動態相容遊戲建置）。
+// @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
 // @match        https://www.ro-survivors.com/*
 // @run-at       document-idle
@@ -13,9 +13,9 @@
 // @sandbox      raw
 // @noframes
 // ==/UserScript==
-/* 請取代舊版後重新整理。預設不加成，滑桿即時套用。
+/* 請取代舊版後重新整理。預設不加成，滑桿與開關即時套用並記憶設定。
  * 尋寶率改變局內品質抽選，不保證伺服器接受修改後的結算數值。
- * 連刷預設關閉；關卡、難度、開卡模式與選首張可記憶，重新整理需重新開始。
+ * 連刷支援掛機前選角、斷線／維修每 5 秒重整重連、關卡、難度與開卡模式記憶。
  * 還原不撤銷已恢復的 HP、已造成的傷害、進度或已排程動畫。 */
 (() => {
   'use strict';
@@ -718,15 +718,15 @@
 
     return (
       delay === 820 &&
-      code.includes('s.onPick(A)') &&
-      code.includes('cancelAnimationFrame(y)')
+      /\.onPick\(/.test(code) &&
+      /cancelAnimationFrame\(/.test(code)
     ) || (
       delay === 160 &&
-      code.includes('classList.toggle("asking",$)') &&
+      /\.classList\.toggle\("asking"/.test(code) &&
       code.includes('[data-yes]')
     ) || (
       delay === 450 &&
-      code.includes('i.unlock()') &&
+      /\.unlock\(\)/.test(code) &&
       code.includes('pk-hint')
     );
   }
@@ -875,9 +875,9 @@
         const s = Function.prototype.toString.call(fn);
         classification.set(
           fn,
-          s.includes('const v=f-l') &&
           s.includes('pk-landed') &&
-          s.includes('i.slots[m]')
+          /\.slots\[/.test(s) &&
+          /const\s+\w+=\w+-\w+/.test(s)
         );
       }
       return classification.get(fn);
@@ -1172,7 +1172,9 @@
     stagesChanged,
     doc = document,
     clock = () => performance.now(),
-    navigation = null
+    navigation = null,
+    charactersChanged = null,
+    onStopState = null
   ) {
     const one = selector => doc.querySelector(selector);
     const all = selector => Array.from(doc.querySelectorAll(selector));
@@ -1197,6 +1199,7 @@
     let nextAt = 0;
     let completed = 0;
     let signature = '';
+    let charSignature = '';
     let choices = [];
     let actions = new Set();
     let deck = null;
@@ -1205,17 +1208,60 @@
     let settlementReady = null;
     let readyAt = 0;
     let departedStage = null;
+    let reloadAt = 0;
+    let reloadReason = '';
 
     function say(text) {
       message = text;
       notify({ running, reading, completed, text });
     }
 
-    function stop(text = '已停止；本局可繼續手動遊玩') {
+    function stop(text = '已停止；本局可繼續手動遊玩', clearResume = true) {
       running = reading = false;
+      reloadAt = 0;
+      reloadReason = '';
       actions.clear();
       navigation?.stop();
+      if (clearResume) onStopState?.();
       say(text);
+    }
+
+    function scheduleReload(now, reason = '連線異常／維修中') {
+      if (!running || !config.autoReconnect) return false;
+      if (!reloadAt) {
+        reloadAt = now + 5000;
+        reloadReason = reason;
+        navigation?.stop(false);
+      }
+      const left = Math.max(0, Math.ceil((reloadAt - now) / 1000));
+      if (now >= reloadAt) {
+        reloadAt = now + 5000;
+        say(`${reloadReason}，正在重新整理…`);
+        doc.defaultView?.location?.reload();
+      } else {
+        say(`${reloadReason}，${left} 秒後重新整理…`);
+      }
+      return true;
+    }
+
+    function refreshCharacters() {
+      const slotNodes = all('#slots .slot');
+      if (!slotNodes.length) return;
+      const scanned = [];
+      slotNodes.forEach((slotEl, index) => {
+        if (slotEl.classList.contains('empty')) return;
+        const name = slotEl.querySelector('.slot-name')?.textContent?.trim() || '';
+        const info = slotEl.querySelector('.slot-job')?.textContent
+          ?.replace(/\s+/g, ' ').trim() || '';
+        if (name) scanned.push({ slot: index, name, info });
+      });
+      if (!scanned.length) return;
+      const value = JSON.stringify(scanned);
+      if (value !== charSignature) {
+        charSignature = value;
+        config.characters = scanned;
+        charactersChanged?.(scanned);
+      }
     }
 
     function changePhase(value, now) {
@@ -1278,18 +1324,20 @@
       });
     }
 
-    function start(scanOnly = false) {
-      if (!checkBuild()) {
+    function start(scanOnly = false, resuming = false) {
+      const serverDown = !checkBuild() && !one('#stage') && !one('#splash');
+      if (!checkBuild() && !(resuming && config.autoReconnect && serverDown)) {
         stop('版本不符；自動連刷未啟用');
         return;
       }
 
       refreshStages();
+      refreshCharacters();
 
       if (
         !scanOnly &&
         (config.stage !== festivalStage.id && !/^\d+$/.test(config.stage) ||
-          (choices.some(stage => /^d+$/.test(stage.id)) &&
+          (choices.some(stage => /^\d+$/.test(stage.id)) &&
             !choices.some(stage => stage.id === config.stage && !stage.blocked)))
       ) {
         stop('請先讀取關卡，並選擇已解鎖的關卡');
@@ -1301,24 +1349,154 @@
       navigation?.stop();
       phase = '';
       nextAt = 0;
+      reloadAt = 0;
+      reloadReason = '';
       actions.clear();
       deck = null;
       settlementReady = null;
       departedStage = null;
 
-      if (!scanOnly) completed = 0;
+      if (!scanOnly && !resuming) completed = 0;
 
-      say(scanOnly ? '正在讀取關卡…' : '已開始連刷');
+      say(scanOnly ? '正在讀取關卡…' : resuming ? '已恢復自動連刷…' : '已開始連刷');
       tick();
     }
 
     function tick() {
       refreshStages();
+      refreshCharacters();
 
       if (!running && !reading) return;
 
       const now = clock();
+      if (reloadAt) {
+        scheduleReload(now, reloadReason);
+        return;
+      }
       if (now < nextAt) return;
+
+      if (!checkBuild() && !one('#stage') && !one('#splash')) {
+        if (!scheduleReload(now, '伺服器無回應／維護中')) {
+          stop('找不到遊戲畫面，已停止');
+        }
+        return;
+      }
+
+      if (shown('#splash')) {
+        if (reading) {
+          stop('請先進入遊戲大廳，再按「讀取關卡」');
+          return;
+        }
+        changePhase('splash', now);
+        const maintVisible = shown('#sp-maint.maintenance') ||
+          one('#splash')?.classList.contains('sp-maint-on') ||
+          doc.body.classList.contains('sp-maint-on') ||
+          one('#sp-play')?.classList.contains('maint');
+        if (maintVisible) {
+          if (!scheduleReload(now, '伺服器維修中')) {
+            stop('伺服器維修中，已停止');
+          }
+          return;
+        }
+        if (shown('#sp-login') || shown('#sp-register') || shown('#sp-recover')) {
+          stop('請先登入帳號，再開始連刷');
+          return;
+        }
+        const playBtn = one('#sp-play');
+        if (enabled(playBtn)) {
+          say('自動點擊開始遊戲…');
+          clickOnce('sp-play', playBtn, now, 1200);
+          return;
+        }
+        if (now - phaseAt > 25000) {
+          if (!scheduleReload(now, '開始畫面載入逾時／斷線')) {
+            stop('開始畫面載入逾時，已停止');
+          }
+        } else {
+          say('等待遊戲載入開始按鈕…');
+        }
+        return;
+      }
+
+      if (shown('#legal-popup')) {
+        const close = one('#legal-close');
+        if (enabled(close)) {
+          clickOnce('legal-close', close, now, 600);
+          return;
+        }
+      }
+
+      if (shown('#news-popup')) {
+        const close = one('#news-close');
+        if (enabled(close)) {
+          clickOnce('news-close', close, now, 600);
+          return;
+        }
+      }
+
+      if (shown('#charselect')) {
+        if (reading) {
+          stop('請先選擇角色進入遊戲，再按「讀取關卡」');
+          return;
+        }
+        changePhase('charselect', now);
+        const slotNodes = all('#slots .slot');
+        const filled = slotNodes.filter(el => !el.classList.contains('empty'));
+        if (!filled.length) {
+          if (now - phaseAt > 15000) {
+            if (!scheduleReload(now, '角色列表載入逾時')) {
+              stop('找不到可用角色，已停止');
+            }
+          } else {
+            say('等待角色列表載入…');
+          }
+          return;
+        }
+
+        let targetSlot = null;
+        if (config.character) {
+          targetSlot = filled.find(el =>
+            el.querySelector('.slot-name')?.textContent?.trim() === config.character
+          ) || null;
+          if (!targetSlot && /^slot:(\d+)$/.test(config.character)) {
+            const idx = Number(RegExp.$1);
+            const candidate = slotNodes[idx];
+            if (candidate && !candidate.classList.contains('empty')) {
+              targetSlot = candidate;
+            }
+          }
+          if (!targetSlot) {
+            stop(`找不到指定角色「${config.character}」，已停止`);
+            return;
+          }
+        } else {
+          targetSlot = filled.find(el => el.classList.contains('selected')) || filled[0];
+        }
+
+        if (targetSlot && !targetSlot.classList.contains('selected')) {
+          const name = targetSlot.querySelector('.slot-name')?.textContent?.trim() || '角色';
+          say(`切換掛機角色：${name}…`);
+          clickOnce('select-char:' + name, targetSlot, now, 600);
+          return;
+        }
+
+        const playCharBtn = one('#btn-play');
+        if (enabled(playCharBtn)) {
+          const name = targetSlot?.querySelector('.slot-name')?.textContent?.trim() || '角色';
+          say(`以「${name}」進入遊戲…`);
+          clickOnce('char-play', playCharBtn, now, 1500);
+          return;
+        }
+
+        if (now - phaseAt > 15000) {
+          if (!scheduleReload(now, '進入遊戲沒有回應')) {
+            stop('進入遊戲沒有回應，已停止');
+          }
+        } else {
+          say('準備進入遊戲…');
+        }
+        return;
+      }
 
       if (shown('#loading')) {
         changePhase('loading', now);
@@ -1475,6 +1653,22 @@
 
         if (informational && buttons.length === 1 && running) {
           clickOnce('ack:' + title, buttons[0], now);
+          return;
+        }
+
+        const dialogText = one('#npc-text')?.textContent?.trim() || '';
+        const reconnectBtn = buttons.find(btn =>
+          /^(Recargar|Reload|重新整理|重整)$/i.test(btn.textContent.trim())
+        );
+        if (
+          running &&
+          config.autoReconnect &&
+          (reconnectBtn ||
+            /維修|維護|斷線|連線|更新|mantenimiento|maintenance|conexión|connection|desconect|actualiz/i.test(
+              `${title} ${dialogText}`
+            ))
+        ) {
+          scheduleReload(now, title || '連線中斷／伺服器更新');
           return;
         }
 
@@ -1669,13 +1863,23 @@
 
       if (doc.body.classList.contains('in-lobby')) {
         changePhase('lobby', now);
+        if (!reading && config.character && !/^slot:\d+$/.test(config.character)) {
+          const currentName = one('#lobby-labels .lobby-name.self')?.textContent?.trim() || '';
+          const switchBtn = one('#lobby-switch');
+          if (currentName && currentName !== config.character && enabled(switchBtn)) {
+            navigation?.stop();
+            say(`目前角色「${currentName}」，切換至「${config.character}」…`);
+            clickOnce('switch-char', switchBtn, now, 1200);
+            return;
+          }
+        }
         const prompt = one('#lobby-prompt');
         const isFestival = !reading && config.stage === festivalStage.id;
         const targetKey = isFestival ? 'festival' : 'captain';
         const targetLabel = isFestival ? '節慶主持人' : '遠征隊長';
         const menuLabel = isFestival ? '節慶選單' : '遠征選單';
         const promptPattern = isFestival
-          ? /主持人|host|anfitriona|anfitriã/i
+          ? /主持人|host|anfitriona|anfitriã|案内人/i
           : /隊長|captain|capitán|capitão/i;
 
         if (
@@ -1723,7 +1927,9 @@
       changePhase('unknown', now);
 
       if (now - phaseAt > 15000) {
-        stop('找不到可操作的遊戲畫面，已停止');
+        if (!scheduleReload(now, '找不到可操作的遊戲畫面／斷線')) {
+          stop('找不到可操作的遊戲畫面，已停止');
+        }
       } else {
         say('等待遊戲畫面…');
       }
@@ -1734,6 +1940,12 @@
       stop,
       tick,
       refreshStages,
+      refreshCharacters,
+      triggerReload(reason) {
+        if (running && config.autoReconnect) {
+          scheduleReload(clock(), reason);
+        }
+      },
       get running() {
         return running || reading;
       },
@@ -1805,7 +2017,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.8</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.9</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
@@ -1817,6 +2029,11 @@
             <b>自動連刷</b>
             <button id="farmRead">讀取關卡</button>
           </div>
+          <label for="farmCharacter">掛機角色</label>
+          <select id="farmCharacter" aria-label="掛機角色">
+            <option value="">沿用目前／預設角色</option>
+          </select>
+          <label for="farmStage">連刷關卡</label>
           <select id="farmStage" aria-label="連刷關卡">
             <option value="">按「讀取關卡」自動前往遠征隊長</option>
           </select>
@@ -1844,6 +2061,9 @@
                 title="選第一張可選卡片，遇到技能替換也會確認">自動選首張
             </label>
           </div>
+          <label>
+            <input id="farmReconnect" type="checkbox" checked>斷線／維修每 5 秒重整並自動進場
+          </label>
           <small>關閉立即開卡：升級／寶箱先累積，手動開啟後才選卡。</small>
           <button id="farmToggle" style="width:100%;margin-top:7px">
             開始連刷
@@ -2097,14 +2317,18 @@
   const lobbyNavigation = createLobbyNavigator(() => loadGameModule());
 
   const farmConfigKey = 'ros-auto-farm-v1';
+  const farmRuntimeKey = 'ros-auto-farm-runtime-v1';
   const farmConfig = {
     stage: '',
+    character: '',
+    characters: [],
     difficultyMode: 'max',
     difficulty: Object.fromEntries(
       farmDifficultyFields.map(([key, , max]) => [key, max])
     ),
     immediateCards: true,
-    autoPick: true
+    autoPick: true,
+    autoReconnect: true
   };
 
   try {
@@ -2113,6 +2337,19 @@
     if (saved) {
       if (/^(\d+|louyang)$/.test(String(saved.stage))) {
         farmConfig.stage = String(saved.stage);
+      }
+      if (typeof saved.character === 'string') {
+        farmConfig.character = saved.character;
+      }
+      if (Array.isArray(saved.characters)) {
+        farmConfig.characters = saved.characters
+          .filter(c => c && typeof c.name === 'string' && c.name)
+          .slice(0, 12)
+          .map(c => ({
+            slot: Number.isInteger(c.slot) ? c.slot : 0,
+            name: c.name,
+            info: typeof c.info === 'string' ? c.info : ''
+          }));
       }
       if (Object.hasOwn(farmDifficultyModes, saved.difficultyMode)) {
         farmConfig.difficultyMode = saved.difficultyMode;
@@ -2131,6 +2368,9 @@
       if (typeof saved.autoPick === 'boolean') {
         farmConfig.autoPick = saved.autoPick;
       }
+      if (typeof saved.autoReconnect === 'boolean') {
+        farmConfig.autoReconnect = saved.autoReconnect;
+      }
     }
   } catch {}
 
@@ -2139,6 +2379,61 @@
       localStorage.setItem(farmConfigKey, JSON.stringify(farmConfig));
     } catch {}
   };
+
+  const setFarmRuntimeActive = active => {
+    try {
+      if (active) {
+        localStorage.setItem(
+          farmRuntimeKey,
+          JSON.stringify({ active: true, at: Date.now() })
+        );
+      } else {
+        localStorage.removeItem(farmRuntimeKey);
+      }
+    } catch {}
+  };
+
+  const isFarmRuntimeActive = () => {
+    try {
+      const data = JSON.parse(localStorage.getItem(farmRuntimeKey));
+      return data?.active === true;
+    } catch {
+      return false;
+    }
+  };
+
+  function renderFarmCharacters(characters = farmConfig.characters) {
+    const select = $('farmCharacter');
+    select.replaceChildren();
+
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = characters.length
+      ? '沿用目前／預設角色'
+      : '沿用目前角色（進入選角畫面會自動讀取）';
+    select.append(defaultOpt);
+
+    for (const char of characters) {
+      const option = document.createElement('option');
+      option.value = char.name;
+      option.textContent = char.info
+        ? `${char.slot + 1}. ${char.name} (${char.info})`
+        : `${char.slot + 1}. ${char.name}`;
+      select.append(option);
+    }
+
+    if (
+      farmConfig.character &&
+      !characters.some(c => c.name === farmConfig.character)
+    ) {
+      const savedOpt = document.createElement('option');
+      savedOpt.value = farmConfig.character;
+      savedOpt.textContent = `${farmConfig.character}（已記憶）`;
+      select.append(savedOpt);
+    }
+
+    select.value = farmConfig.character;
+  }
 
   function showFarmDifficulty() {
     $('farmDifficulty').value = farmConfig.difficultyMode;
@@ -2152,9 +2447,11 @@
     }
   }
 
+  renderFarmCharacters();
   showFarmDifficulty();
   $('farmImmediate').checked = farmConfig.immediateCards;
   $('farmPick').checked = farmConfig.autoPick;
+  $('farmReconnect').checked = farmConfig.autoReconnect;
 
   const farm = createAutoFarm(
     farmConfig,
@@ -2164,12 +2461,13 @@
 
       $('farmStatus').textContent = info.text;
 
-      $('farmStage').disabled =
+      $('farmCharacter').disabled =
+        $('farmStage').disabled =
         $('farmRead').disabled =
         info.running || info.reading;
 
       for (const id of [
-        'farmDifficulty', 'farmImmediate', 'farmPick',
+        'farmDifficulty', 'farmImmediate', 'farmPick', 'farmReconnect',
         ...farmDifficultyFields.map(([key]) => 'farmDiff_' + key)
       ]) {
         $(id).disabled = info.running || info.reading;
@@ -2202,8 +2500,18 @@
     },
     document,
     () => performance.now(),
-    lobbyNavigation
+    lobbyNavigation,
+    characters => {
+      renderFarmCharacters(characters);
+      saveFarm();
+    },
+    () => setFarmRuntimeActive(false)
   );
+
+  $('farmCharacter').addEventListener('change', () => {
+    farmConfig.character = $('farmCharacter').value;
+    saveFarm();
+  });
 
   $('farmStage').addEventListener('change', () => {
     farmConfig.stage = $('farmStage').value;
@@ -2234,22 +2542,38 @@
     saveFarm();
   });
 
+  $('farmReconnect').addEventListener('change', () => {
+    farmConfig.autoReconnect = $('farmReconnect').checked;
+    if (!farmConfig.autoReconnect && !farm.running) setFarmRuntimeActive(false);
+    saveFarm();
+  });
+
   $('farmRead').onclick = () => farm.start(true);
-  $('farmToggle').onclick = () =>
-    farm.running ? farm.stop() : farm.start();
+  $('farmToggle').onclick = () => {
+    if (farm.running) {
+      setFarmRuntimeActive(false);
+      farm.stop();
+    } else {
+      setFarmRuntimeActive(farmConfig.autoReconnect);
+      farm.start();
+    }
+  };
 
   farm.refreshStages();
+  farm.refreshCharacters();
 
   const farmTimer = setInterval(() => {
     try {
       farm.tick();
     } catch (error) {
+      setFarmRuntimeActive(false);
       farm.stop('連刷已停止：' + error.message);
     }
   }, 400);
 
   window.addEventListener('pagehide', () => {
-    farm.stop('頁面已關閉');
+    // Keep farmRuntimeActive so 5s reload / reconnect resumes automatically.
+    farm.stop('頁面已關閉', false);
     clearInterval(farmTimer);
   });
 
@@ -2267,8 +2591,63 @@
     $('meter').textContent = '實測速度：—';
   }
 
-  function restore(stopFarm = true) {
-    if (stopFarm) farm?.stop();
+  const panelSettingsKey = 'ros-panel-settings-v1';
+
+  function savePanelSettings() {
+    try {
+      const payload = {
+        ...Object.fromEntries(
+          Object.keys(limits).map(id => [id, settingValue(id, $(id).value)])
+        ),
+        god: $('god').checked,
+        fullHp: $('fullHp').checked,
+        lootAudit: $('lootAudit').checked,
+        collapsed: $('body').classList.contains('hidden')
+      };
+      localStorage.setItem(panelSettingsKey, JSON.stringify(payload));
+    } catch {}
+  }
+
+  function loadPanelSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(panelSettingsKey));
+      if (!saved || typeof saved !== 'object') return false;
+      let hasBoost = false;
+      for (const id of Object.keys(limits)) {
+        if (saved[id] !== undefined) {
+          const val = settingValue(id, saved[id]);
+          choose(id, val);
+          if (val !== defaults[id]) hasBoost = true;
+        }
+      }
+      if (typeof saved.god === 'boolean') {
+        $('god').checked = saved.god;
+        if (saved.god) hasBoost = true;
+      }
+      if (typeof saved.fullHp === 'boolean') {
+        $('fullHp').checked = saved.fullHp;
+        if (saved.fullHp) hasBoost = true;
+      }
+      if (typeof saved.lootAudit === 'boolean') {
+        $('lootAudit').checked = saved.lootAudit;
+        if (saved.lootAudit) lootAudit.start();
+        else lootAudit.stop();
+      }
+      if (saved.collapsed === true) {
+        $('body').classList.add('hidden');
+        keepPanelVisible();
+      }
+      return hasBoost;
+    } catch {
+      return false;
+    }
+  }
+
+  function restore(stopFarm = true, persist = true) {
+    if (stopFarm) {
+      setFarmRuntimeActive(false);
+      farm?.stop();
+    }
 
     generation++;
 
@@ -2285,6 +2664,8 @@
     gameControl?.restore();
     animation?.restore();
     gameControl = animation = null;
+
+    if (persist) savePanelSettings();
 
     resetMeter();
     $('discoveryStatus').textContent = '尋寶率：原始值';
@@ -2367,7 +2748,7 @@
       report('已套用');
     } catch (e) {
       if (request === generation) {
-        restore();
+        restore(true, false);
         report('未啟用：' + e.message);
       }
     }
@@ -2376,16 +2757,23 @@
   for (const id of Object.keys(limits)) {
     $(id).addEventListener('input', () => {
       choose(id, $(id).value);
+      savePanelSettings();
       void applySettings();
     });
   }
 
   for (const id of ['god', 'fullHp']) {
-    $(id).addEventListener('change', () => void applySettings());
+    $(id).addEventListener('change', () => {
+      savePanelSettings();
+      void applySettings();
+    });
   }
+
+  $('lootAudit').addEventListener('change', () => savePanelSettings());
 
   function togglePanel() {
     $('body').classList.toggle('hidden');
+    savePanelSettings();
     keepPanelVisible();
   }
 
@@ -2520,5 +2908,53 @@
       : '實測速度：量測中…';
   }, 500);
 
+  let apiNetworkErrors = 0;
+  const origFetch = window.fetch;
+  window.fetch = function watchedFetch(...args) {
+    const result = origFetch.apply(this, args);
+    try {
+      const input = args[0];
+      const url = new URL(typeof input === 'string' ? input : input?.url ?? input, document.baseURI);
+      if (url.origin === location.origin) {
+        const isStatus = url.pathname.endsWith('/status.json');
+        const isApi = url.pathname.startsWith('/api/');
+        if (isStatus || isApi) {
+          result.then(
+            res => {
+              if (isApi) {
+                if (res.status >= 502 && res.status <= 504) {
+                  farm.triggerReload(`伺服器回應 ${res.status}`);
+                } else if (res.ok) {
+                  apiNetworkErrors = 0;
+                }
+              }
+              if (isStatus && res.ok) {
+                res.clone().json().then(data => {
+                  if (data?.state === 'maintenance') {
+                    farm.triggerReload('伺服器維修中');
+                  }
+                }).catch(() => {});
+              }
+            },
+            () => {
+              if (isApi && ++apiNetworkErrors >= 2) {
+                farm.triggerReload('API 連線中斷');
+              }
+            }
+          ).catch(() => {});
+        }
+      }
+    } catch {}
+    return result;
+  };
+
   report('就緒 · 即時套用');
+
+  if (loadPanelSettings()) {
+    void applySettings();
+  }
+
+  if (isFarmRuntimeActive() && farmConfig.autoReconnect) {
+    farm.start(false, true);
+  }
 })();
