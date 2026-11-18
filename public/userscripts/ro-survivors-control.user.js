@@ -1,10 +1,8 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.9
-// @homepageURL  https://amanda-blog.com/
-// @updateURL    https://amanda-blog.com/userscripts/ro-survivors-control.user.js
-// @downloadURL  https://amanda-blog.com/userscripts/ro-survivors-control.user.js
+// @version      0.6.10
+// @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
 // @match        https://www.ro-survivors.com/*
@@ -212,7 +210,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.8', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.10', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -1211,8 +1209,12 @@
     let reloadAt = 0;
     let reloadReason = '';
 
+    let lastReported = null;
     function say(text) {
       message = text;
+      const next = JSON.stringify({ running, reading, completed, text });
+      if (next === lastReported) return;
+      lastReported = next;
       notify({ running, reading, completed, text });
     }
 
@@ -2017,7 +2019,7 @@
     </style>
     <section>
       <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.9</small></b>
+        <b>RO 控制台 <small style="display:inline">0.6.10</small></b>
         <span>
           <button id="popout" title="另開視窗">↗</button>
           <button id="collapse" title="收合">−</button>
