@@ -218,6 +218,25 @@
     };
   }
 
+  /**
+   * Define a method override without adding an enumerable own property so
+   * `Object.keys(target)` does not expose patched instance methods.
+   */
+  function patchHiddenMethod(target, name, wrapped, descriptor) {
+    Object.defineProperty(target, name, {
+      value: wrapped,
+      writable: true,
+      configurable: true,
+      enumerable: descriptor ? descriptor.enumerable : false
+    });
+  }
+
+  function restorePatchedMethod(target, name, wrapped, descriptor) {
+    if (target[name] !== wrapped) return;
+    if (descriptor) Object.defineProperty(target, name, descriptor);
+    else delete target[name];
+  }
+
   function installStatBoosts(game, state) {
     if (
       typeof game.recomputeStats !== 'function' ||
@@ -301,13 +320,12 @@
       return result;
     }
 
-    game.recomputeStats = wrapped;
+    patchHiddenMethod(game, 'recomputeStats', wrapped, descriptor);
 
     try {
       sync();
     } catch (error) {
-      if (descriptor) Object.defineProperty(game, 'recomputeStats', descriptor);
-      else delete game.recomputeStats;
+      restorePatchedMethod(game, 'recomputeStats', wrapped, descriptor);
       throw error;
     }
 
@@ -323,13 +341,7 @@
         const quality = game.runCtx.locals.get('quality');
         if (quality) quality.discovery = value / (1 + value);
 
-        if (game.recomputeStats === wrapped) {
-          if (descriptor) {
-            Object.defineProperty(game, 'recomputeStats', descriptor);
-          } else {
-            delete game.recomputeStats;
-          }
-        }
+        restorePatchedMethod(game, 'recomputeStats', wrapped, descriptor);
       }
     };
   }
@@ -358,12 +370,7 @@
       if (weapon.finalCooldown !== record.wrapped) return;
 
       scaleTimer(weapon, 1 / record.factor);
-
-      if (record.descriptor) {
-        Object.defineProperty(weapon, 'finalCooldown', record.descriptor);
-      } else {
-        delete weapon.finalCooldown;
-      }
+      restorePatchedMethod(weapon, 'finalCooldown', record.wrapped, record.descriptor);
     }
 
     function sync() {
@@ -391,7 +398,7 @@
           };
 
           record = { original, descriptor, wrapped, factor: 1 };
-          weapon.finalCooldown = wrapped;
+          patchHiddenMethod(weapon, 'finalCooldown', wrapped, descriptor);
           weapons.set(weapon, record);
         }
 
@@ -431,8 +438,24 @@
     }
 
     const games = new Map();
+    const neutralizedProtos = new Map();
     let latest = null;
     let disposed = false;
+
+    function neutralizeSpringTrap(game) {
+      const proto = Object.getPrototypeOf(game);
+      if (
+        !proto ||
+        proto === Object.prototype ||
+        neutralizedProtos.has(proto) ||
+        typeof proto.springTrap !== 'function'
+      ) return;
+
+      const descriptor = Object.getOwnPropertyDescriptor(proto, 'springTrap');
+      const noop = function() {};
+      patchHiddenMethod(proto, 'springTrap', noop, descriptor);
+      neutralizedProtos.set(proto, { descriptor, noop });
+    }
 
     function syncHealth(game, record) {
       record.discovery?.refresh();
@@ -457,20 +480,14 @@
             : result;
         };
 
-        weapon.targetCount = wrapped;
+        patchHiddenMethod(weapon, 'targetCount', wrapped, descriptor);
         record.weapons.set(weapon, { original, descriptor, wrapped });
       }
 
       for (const [weapon, p] of record.weapons) {
         if (game.weapons?.includes(weapon)) continue;
 
-        if (weapon.targetCount === p.wrapped) {
-          if (p.descriptor) {
-            Object.defineProperty(weapon, 'targetCount', p.descriptor);
-          } else {
-            delete weapon.targetCount;
-          }
-        }
+        restorePatchedMethod(weapon, 'targetCount', p.wrapped, p.descriptor);
         record.weapons.delete(weapon);
       }
 
@@ -504,7 +521,7 @@
       const descriptor = Object.getOwnPropertyDescriptor(game, name);
       const wrapped = make(original);
 
-      game[name] = wrapped;
+      patchHiddenMethod(game, name, wrapped, descriptor);
       record.methods.push({ name, original, descriptor, wrapped });
     }
 
@@ -513,13 +530,7 @@
       record.cooldowns?.restore();
 
       for (const [weapon, p] of record.weapons) {
-        if (weapon.targetCount !== p.wrapped) continue;
-
-        if (p.descriptor) {
-          Object.defineProperty(weapon, 'targetCount', p.descriptor);
-        } else {
-          delete weapon.targetCount;
-        }
+        restorePatchedMethod(weapon, 'targetCount', p.wrapped, p.descriptor);
       }
 
       record.weapons.clear();
@@ -527,19 +538,14 @@
       if (record.godApplied) game.god = record.godBefore;
 
       for (const p of record.methods) {
-        if (game[p.name] !== p.wrapped) continue;
-
-        if (p.descriptor) {
-          Object.defineProperty(game, p.name, p.descriptor);
-        } else {
-          delete game[p.name];
-        }
+        restorePatchedMethod(game, p.name, p.wrapped, p.descriptor);
       }
     }
 
     function observe(game) {
       if (disposed || !game?.player || !game.stats) return;
 
+      neutralizeSpringTrap(game);
       latest = game;
       let record = games.get(game);
 
@@ -673,8 +679,11 @@
       return clamp(state.attack, 100);
     }
 
-    hooks.start.push(observe);
-    hooks.tick.push(observe);
+    const onStart = game => observe(game);
+    const onTick = game => observe(game);
+
+    hooks.start.push(onStart);
+    hooks.tick.push(onTick);
     hooks.hurt.push(guard);
     hooks.damageMult.push(damage);
 
@@ -693,8 +702,8 @@
         disposed = true;
 
         for (const [list, fn] of [
-          [hooks.start, observe],
-          [hooks.tick, observe],
+          [hooks.start, onStart],
+          [hooks.tick, onTick],
           [hooks.hurt, guard],
           [hooks.damageMult, damage]
         ]) {
@@ -704,6 +713,10 @@
 
         for (const [game, record] of games) undo(game, record);
         games.clear();
+        for (const [proto, entry] of neutralizedProtos) {
+          restorePatchedMethod(proto, 'springTrap', entry.noop, entry.descriptor);
+        }
+        neutralizedProtos.clear();
         latest = null;
       }
     };
