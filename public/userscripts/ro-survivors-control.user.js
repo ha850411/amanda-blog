@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.17
+// @version      0.6.18
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -67,9 +67,21 @@
           } : {})
         });
       }
+      let maxGearIndex = null;
+      for (const row of sources) {
+        if (Array.isArray(row.gearIndices)) {
+          for (const idx of row.gearIndices) {
+            if (Number.isSafeInteger(idx) && idx > 0) {
+              maxGearIndex = maxGearIndex === null ? idx : Math.max(maxGearIndex, idx);
+            }
+          }
+        }
+      }
       return {
         gear: sources.reduce((sum, row) => sum + row.gear, 0),
-        cards: sources.reduce((sum, row) => sum + row.cards, 0), sources
+        cards: sources.reduce((sum, row) => sum + row.cards, 0),
+        ...(maxGearIndex !== null ? { maxGearIndex } : {}),
+        sources
       };
     }
 
@@ -104,7 +116,7 @@
         op, atSeconds: round((now - run.start) / 1000),
         gameSeconds: number(data.secs),
         settings: Object.fromEntries(['speed', 'discovery', 'attack', 'cooldown',
-          'targets', 'pickup', 'suction', 'animation'].map(k => [k, number(settings[k])])),
+          'targets', 'pickup', 'suction', 'animation', 'mobDropCap'].map(k => [k, number(settings[k])])),
         kills: data.kills && typeof data.kills === 'object'
           ? Object.fromEntries(Object.entries(data.kills).filter(([, v]) => count(v) !== null))
           : null,
@@ -226,11 +238,13 @@
         const received = event.granted?.mail ? '郵差領取'
           : event.granted?.gear ?? (event.status === 'pending' ? '等待中' : '未確認');
         const balls = event.granted?.balls;
+        const maxGearIndex = event.sent?.maxGearIndex;
         const missing = event.granted?.missingSources;
         const missingText = Array.isArray(missing) && missing.length
           ? `（少：${missing.slice(0, 3).map(m => `${m.source}×${m.missing}`).join('、')}${missing.length > 3 ? '…' : ''}）`
           : '';
         return `第 ${run.id} 局：送出 ${sent} 件／核發 ${received}${missingText}` +
+          (typeof maxGearIndex === 'number' && maxGearIndex > 0 ? ` · 最大序號 #${maxGearIndex}` : '') +
           (typeof balls === 'number' && balls > 0 ? ` · 扭蛋 ${balls}` : '') +
           ` · 遊戲 ${event.gameSeconds ?? '—'} 秒／` +
           `${run.completeStart ? '實際' : '記錄期間'} ${event.atSeconds} 秒` +
@@ -240,7 +254,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.17', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.18', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -586,11 +600,13 @@
     }
 
     const VALUABLE_PICKUP_KINDS = new Set(['drop', 'ball', 'loot', 'card', 'egg', 'mystery']);
-    // Under high-speed runs (~60s wall-clock), the server only validates mob
-    // drop indices within the per-species kill budget (~480 kills). Preventing
-    // overkill indices (> 460) from consuming the 10-item `mobLoot` cap keeps
-    // all 10 drop slots available for valid indices across all monster waves.
-    const SAFE_ACCELERATED_MOB_KILL_INDEX = 460;
+    // Under accelerated runs, keep per-species drop indices low and proportional
+    // to expected wall-clock duration so the 10-item `mobLoot` cap is filled by
+    // low kill indices across multiple monster waves instead of overkill indices
+    // that the server rejects when wall-clock time is short.
+    const AUTO_MOB_KILL_MIN = 80;
+    const AUTO_MOB_KILL_MAX = 450;
+    const AUTO_MOB_KILL_PER_WALL_SEC = 4;
 
     function hasPendingValuablePickups(game) {
       if (!Array.isArray(game?.pickups)) return false;
@@ -601,8 +617,16 @@
     }
 
     function safeMobKillLimit(record) {
+      const manual = Number(state.mobDropCap);
+      if (Number.isFinite(manual) && manual > 0) return Math.round(manual);
+      const speed = clamp(state.speed, 20);
       const real = Number.isFinite(record?.realTime) ? Math.max(0, record.realTime) : 0;
-      return Math.max(SAFE_ACCELERATED_MOB_KILL_INDEX, Math.round(real * 7.2));
+      const estWallSecs = Math.max(20, 900 / speed);
+      const wallBudget = Math.max(real, estWallSecs);
+      return Math.max(
+        AUTO_MOB_KILL_MIN,
+        Math.min(AUTO_MOB_KILL_MAX, Math.round(wallBudget * AUTO_MOB_KILL_PER_WALL_SEC))
+      );
     }
 
     function observe(game) {
@@ -778,11 +802,12 @@
                 (record.accelerated || clamp(state.speed, 20) > 1) &&
                 enemy?.def &&
                 !enemy.def.boss &&
-                this.killsBy instanceof Map
+                typeof this.killsBy?.get === 'function'
               ) {
                 const mobId = enemy.def.id;
                 const killIdx = this.killsBy.get(mobId) ?? 1;
                 if (killIdx > safeMobKillLimit(record)) {
+                  record.suppressedMobDrops = (record.suppressedMobDrops ?? 0) + 1;
                   return;
                 }
               }
@@ -2388,7 +2413,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span>RO 實驗控制台</span>
-          <small class="ver-badge">0.6.17</small>
+          <small class="ver-badge">0.6.18</small>
         </div>
         <span class="win-actions">
           <button id="popout" class="icon-btn" title="另開獨立視窗">↗</button>
@@ -2468,12 +2493,13 @@
               ['money', '局內金錢', 1, 100, 1, 1, '×'],
               ['discovery', '額外尋寶率', 0, 300, 10, 0, '%'],
               ['pickup', '撿取範圍', 1, 100, 1, 1, '×'],
-              ['suction', '吸取速度', 1, 10, 1, 1, '×']
+              ['suction', '吸取速度', 1, 10, 1, 1, '×'],
+              ['mobDropCap', '單怪掉裝上限', 0, 500, 25, 0, '隻']
             ].map(([id, label, min, max, step, value, unit]) => `
               <div class="slider-item">
                 <label for="${id}">
                   <span>${label}</span>
-                  <output id="${id}Value">${id === 'discovery' ? '+' : ''}${value}${unit}</output>
+                  <output id="${id}Value">${id === 'mobDropCap' && value === 0 ? '自動' : `${id === 'discovery' ? '+' : ''}${value}${unit}`}</output>
                 </label>
                 <input id="${id}" type="range" min="${min}" max="${max}"
                   step="${step}" value="${value}">
@@ -2627,7 +2653,8 @@
     money: 100,
     discovery: 300,
     pickup: 100,
-    suction: 10
+    suction: 10,
+    mobDropCap: 500
   };
 
   const defaults = {
@@ -2639,7 +2666,8 @@
     money: 1,
     discovery: 0,
     pickup: 1,
-    suction: 1
+    suction: 1,
+    mobDropCap: 0
   };
 
   const state = {
@@ -3010,7 +3038,12 @@
   });
 
   function choose(id, value) {
-    $(id).value = String(settingValue(id, value));
+    const normalized = settingValue(id, value);
+    $(id).value = String(normalized);
+    if (id === 'mobDropCap') {
+      $(id + 'Value').textContent = normalized === 0 ? '自動' : `${normalized}隻`;
+      return;
+    }
     $(id + 'Value').textContent =
       (id === 'discovery' ? '+' : '') +
       $(id).value +
@@ -3352,11 +3385,24 @@
   }
   function clampAcceleratedKills(target, elapsedSecs) {
     if (!target || typeof target.kills !== 'object' || !target.kills) return false;
-    const baseCap = Math.max(460, Math.round((Number.isFinite(elapsedSecs) ? elapsedSecs : 60) * 7.2));
+    const speed = clamp(state.speed, 20);
+    const estWallSecs = Math.max(20, 900 / speed);
+    const wallSecs = Number.isFinite(elapsedSecs) && elapsedSecs > 0
+      ? Math.max(elapsedSecs, 1)
+      : estWallSecs;
+    const manualCap = Number(state.mobDropCap);
+    const perMobCap = Number.isFinite(manualCap) && manualCap > 0
+      ? Math.round(manualCap)
+      : Math.max(80, Math.min(450, Math.round(wallSecs * 4)));
+    const totalKillBudget = Math.max(perMobCap, Math.round(wallSecs * 12));
     const dr = target.dr && typeof target.dr === 'object' ? target.dr : null;
+    const floors = new Map();
     let changed = false;
+    let totalKills = 0;
+    let minTotalKills = 0;
+
     for (const [mobId, countVal] of Object.entries(target.kills)) {
-      if (!Number.isInteger(countVal) || countVal <= baseCap) continue;
+      if (!Number.isInteger(countVal) || countVal <= 0) continue;
       let maxDropIdx = 0;
       const row = dr?.[mobId];
       if (Array.isArray(row)) {
@@ -3368,13 +3414,50 @@
           }
         }
       }
-      // Keep kills >= highest reported drop index while trimming huge overkill numbers.
-      const nextCount = Math.min(countVal, Math.max(baseCap, maxDropIdx));
+      // Keep kills >= highest reported drop index (and >= 1) while trimming overkill numbers.
+      const floorVal = Math.max(1, maxDropIdx);
+      floors.set(mobId, floorVal);
+      const nextCount = Math.min(countVal, Math.max(perMobCap, floorVal));
       if (nextCount !== countVal) {
         target.kills[mobId] = nextCount;
         changed = true;
       }
+      totalKills += nextCount;
+      minTotalKills += floorVal;
     }
+
+    if (totalKills > totalKillBudget && totalKills > minTotalKills) {
+      const targetTotal = Math.max(totalKillBudget, minTotalKills);
+      const availableSlack = totalKills - minTotalKills;
+      const keepRatio = (targetTotal - minTotalKills) / availableSlack;
+      let remainingExcess = totalKills - targetTotal;
+
+      for (const [mobId, floorVal] of floors) {
+        const current = target.kills[mobId];
+        const slack = current - floorVal;
+        if (slack <= 0 || remainingExcess <= 0) continue;
+        const nextCount = floorVal + Math.floor(slack * keepRatio);
+        const trimmed = Math.min(remainingExcess, current - nextCount);
+        if (trimmed > 0) {
+          target.kills[mobId] = current - trimmed;
+          remainingExcess -= trimmed;
+          changed = true;
+        }
+      }
+
+      if (remainingExcess > 0) {
+        for (const [mobId, floorVal] of floors) {
+          const current = target.kills[mobId];
+          const slack = current - floorVal;
+          if (slack <= 0 || remainingExcess <= 0) continue;
+          const trimmed = Math.min(remainingExcess, slack);
+          target.kills[mobId] = current - trimmed;
+          remainingExcess -= trimmed;
+          changed = true;
+        }
+      }
+    }
+
     return changed;
   }
 

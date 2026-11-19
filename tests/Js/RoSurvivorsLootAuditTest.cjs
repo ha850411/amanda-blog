@@ -79,13 +79,14 @@ test('compares the full seeded payload with actual grants and real elapsed time'
     assert.equal(event.gameSeconds, 900);
     assert.equal(event.sent.gear, 3);
     assert.equal(event.sent.cards, 1);
+    assert.equal(event.sent.maxGearIndex, 10);
     assert.equal(event.granted.gear, 1);
     assert.deepEqual(event.granted.missingSources, [
         { source: 'poring', sent: 3, granted: 1, missing: 2 }
     ]);
     assert.deepEqual(event.sent.sources[0].discovery, [0, 100, 200]);
     assert.deepEqual(JSON.parse(e.calls.at(-1).args[1].body).dr, dr);
-    assert.match(e.audit.summary(), /送出 3 件／核發 1（少：poring×2）/);
+    assert.match(e.audit.summary(), /送出 3 件／核發 1（少：poring×2） · 最大序號 #10/);
     assert.doesNotMatch(JSON.stringify(e.data()), /run-secret|SECRET-TOKEN|ACCOUNT-DOC/);
 });
 
@@ -192,4 +193,104 @@ test('reading a cloned native Response leaves the original JSON readable', async
     assert.equal((await response.json()).granted.gear.length, 1);
     await observed;
     assert.equal(audit.exportData().runs[0].events[0].granted.gear, 1);
+});
+
+test('mysteryDrop throttles accelerated mob drops by auto wall-clock cap or manual mobDropCap without blocking bosses', () => {
+    const clampBegin = source.indexOf('  const clamp = ');
+    const clampEnd = source.indexOf('  // Observe the current game', clampBegin);
+    const hookBegin = source.indexOf('  function patchHiddenMethod(');
+    const hookEnd = source.indexOf('  function classifyTimer(', hookBegin);
+    assert.ok(clampBegin >= 0 && clampEnd > clampBegin);
+    assert.ok(hookBegin >= 0 && hookEnd > hookBegin);
+
+    const installGameHook = vm.runInNewContext(
+        source.slice(clampBegin, clampEnd) + '\n' +
+        source.slice(hookBegin, hookEnd) + '\ninstallGameHook;',
+        { performance: { now: () => 0 } }
+    );
+
+    const hooks = { start: [], tick: [], hurt: [], damageMult: [] };
+    const state = {
+        speed: 20, discovery: 0, money: 1, cooldown: 0, targets: 1,
+        pickup: 1, suction: 1, god: false, fullHp: false, mobDropCap: 0, limited: 0
+    };
+    installGameHook(hooks, state, () => {});
+
+    const dropCalls = [];
+    const game = {
+        player: { dead: false, x: 0, y: 0 },
+        stats: { discovery: 0, zenyMult: 1, pickupRadius: 80, maxHp: 100 },
+        runCtx: { locals: new Map() },
+        weapons: [],
+        pickups: [],
+        killsBy: new Map(),
+        state: 'playing',
+        time: 0,
+        recomputeStats() {},
+        advance(dt) { this.time += dt; },
+        updatePickups() {},
+        buffValue() { return 0; },
+        mysteryDrop(enemy) { dropCalls.push(`${enemy.def.id}:${this.killsBy.get(enemy.def.id)}`); }
+    };
+
+    hooks.start[0](game);
+
+    // At 20x speed (est 45s wall-clock), auto cap is 45 * 4 = 180.
+    game.killsBy.set('poring', 180);
+    game.mysteryDrop({ def: { id: 'poring', boss: false } });
+    game.killsBy.set('poring', 181);
+    game.mysteryDrop({ def: { id: 'poring', boss: false } });
+
+    // Boss drops are never suppressed regardless of kill index.
+    game.killsBy.set('eddga', 500);
+    game.mysteryDrop({ def: { id: 'eddga', boss: 'mvp' } });
+
+    // Manual override lowers cap immediately to 100.
+    state.mobDropCap = 100;
+    game.killsBy.set('lunatic', 100);
+    game.mysteryDrop({ def: { id: 'lunatic', boss: false } });
+    game.killsBy.set('lunatic', 101);
+    game.mysteryDrop({ def: { id: 'lunatic', boss: false } });
+
+    assert.deepEqual(dropCalls, ['poring:180', 'eddga:500', 'lunatic:100']);
+});
+
+test('clampAcceleratedKills caps per-mob and total kills while preserving reported drop indices', () => {
+    const clampBegin = source.indexOf('  const clamp = ');
+    const clampEnd = source.indexOf('  // Observe the current game', clampBegin);
+    const fnBegin = source.indexOf('  function clampAcceleratedKills(');
+    const fnEnd = source.indexOf('  function normalizeAcceleratedRunTime(', fnBegin);
+    assert.ok(fnBegin >= 0 && fnEnd > fnBegin);
+
+    const state = { speed: 20, mobDropCap: 0 };
+    const clampAcceleratedKills = vm.runInNewContext(
+        source.slice(clampBegin, clampEnd) + '\n' +
+        source.slice(fnBegin, fnEnd) + '\nclampAcceleratedKills;',
+        { state }
+    );
+
+    const target = {
+        kills: {
+            poring: 900,
+            lunatic: 800,
+            fabre: 700,
+            pupa: 600,
+            drops: 500
+        },
+        dr: {
+            poring: [[12, 160], [], [100, 100]],
+            lunatic: [[220], [], [100]]
+        }
+    };
+
+    // At 45s wall-clock: perMobCap = 180, totalKillBudget = 540.
+    const changed = clampAcceleratedKills(target, 45);
+    assert.equal(changed, true);
+    assert.ok(target.kills.poring >= 160);
+    assert.equal(target.kills.lunatic, 220);
+    const total = Object.values(target.kills).reduce((a, b) => a + b, 0);
+    assert.ok(total <= 540, `expected total kills <= 540, got ${total}`);
+    for (const [id, count] of Object.entries(target.kills)) {
+        assert.ok(count >= 1, `expected ${id} kills >= 1, got ${count}`);
+    }
 });
