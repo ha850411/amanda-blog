@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.16
+// @version      0.6.17
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -240,7 +240,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.16', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.17', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -2388,7 +2388,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span>RO 實驗控制台</span>
-          <small class="ver-badge">0.6.16</small>
+          <small class="ver-badge">0.6.17</small>
         </div>
         <span class="win-actions">
           <button id="popout" class="icon-btn" title="另開獨立視窗">↗</button>
@@ -3472,6 +3472,20 @@
   }
 
   window.fetch = function watchedFetch(...args) {
+    const input = args[0];
+    const init = args[1];
+    const request = input instanceof Request ? input : null;
+    const url = new URL(request?.url ?? String(input), location.href);
+    const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
+
+    if (method === 'POST' && url.pathname.endsWith('/api/env')) {
+      console.info('已在本機攔截：', method, url.pathname);
+      return Promise.resolve(new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      }));
+    }
+
     let nextArgs = args;
     try {
       const nextInit = normalizeAcceleratedRunTime(args[0], args[1]);
