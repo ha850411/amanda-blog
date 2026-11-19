@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.22
+// @version      0.6.23
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -254,7 +254,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.22', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.23', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -506,32 +506,37 @@
       record.cooldowns?.refresh();
 
       for (const weapon of game.weapons || []) {
-        if (
-          record.weapons.has(weapon) ||
-          typeof weapon.targetCount !== 'function'
-        ) continue;
+        if (record.weapons.has(weapon)) continue;
 
-        const original = weapon.targetCount;
-        const descriptor = Object.getOwnPropertyDescriptor(
-          weapon,
-          'targetCount'
-        );
+        const patches = [];
+        for (const method of ['targetCount', 'targets']) {
+          if (typeof weapon[method] !== 'function') continue;
 
-        const wrapped = function(...args) {
-          const result = original.apply(this, args);
-          return args[0] === game && Number.isFinite(result)
-            ? Math.ceil(result * clamp(state.targets, 100))
-            : result;
-        };
+          const original = weapon[method];
+          const descriptor = Object.getOwnPropertyDescriptor(weapon, method);
 
-        patchHiddenMethod(weapon, 'targetCount', wrapped, descriptor);
-        record.weapons.set(weapon, { original, descriptor, wrapped });
+          const wrapped = function(...args) {
+            const result = original.apply(this, args);
+            return args[0] === game && Number.isFinite(result)
+              ? Math.ceil(result * clamp(state.targets, 100))
+              : result;
+          };
+
+          patchHiddenMethod(weapon, method, wrapped, descriptor);
+          patches.push({ method, original, descriptor, wrapped });
+        }
+
+        if (patches.length) {
+          record.weapons.set(weapon, patches);
+        }
       }
 
-      for (const [weapon, p] of record.weapons) {
+      for (const [weapon, patches] of record.weapons) {
         if (game.weapons?.includes(weapon)) continue;
 
-        restorePatchedMethod(weapon, 'targetCount', p.wrapped, p.descriptor);
+        for (const p of patches) {
+          restorePatchedMethod(weapon, p.method, p.wrapped, p.descriptor);
+        }
         record.weapons.delete(weapon);
       }
 
@@ -573,8 +578,10 @@
       record.discovery?.restore();
       record.cooldowns?.restore();
 
-      for (const [weapon, p] of record.weapons) {
-        restorePatchedMethod(weapon, 'targetCount', p.wrapped, p.descriptor);
+      for (const [weapon, patches] of record.weapons) {
+        for (const p of patches) {
+          restorePatchedMethod(weapon, p.method, p.wrapped, p.descriptor);
+        }
       }
 
       record.weapons.clear();
