@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.14
+// @version      0.6.16
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -240,7 +240,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.14', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.16', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -586,6 +586,11 @@
     }
 
     const VALUABLE_PICKUP_KINDS = new Set(['drop', 'ball', 'loot', 'card', 'egg', 'mystery']);
+    // Under high-speed runs (~60s wall-clock), the server only validates mob
+    // drop indices within the per-species kill budget (~480 kills). Preventing
+    // overkill indices (> 460) from consuming the 10-item `mobLoot` cap keeps
+    // all 10 drop slots available for valid indices across all monster waves.
+    const SAFE_ACCELERATED_MOB_KILL_INDEX = 460;
 
     function hasPendingValuablePickups(game) {
       if (!Array.isArray(game?.pickups)) return false;
@@ -593,6 +598,11 @@
         if (!item?.dead && VALUABLE_PICKUP_KINDS.has(item?.kind)) return true;
       }
       return false;
+    }
+
+    function safeMobKillLimit(record) {
+      const real = Number.isFinite(record?.realTime) ? Math.max(0, record.realTime) : 0;
+      return Math.max(SAFE_ACCELERATED_MOB_KILL_INDEX, Math.round(real * 7.2));
     }
 
     function observe(game) {
@@ -635,10 +645,10 @@
           patch(game, record, 'advance', original => function(dt) {
             const requestedFactor = clamp(state.speed, 20);
             const closing = Number.isFinite(this.closeAt) && this.closeAt >= 0;
-            // During the post-boss victory window (closeAt >= 0), run at 1x speed
-            // so the 10s loot countdown is not compressed into 1s and pending
-            // `onDrop` tick timers and flying drops/balls can settle cleanly.
-            const factor = closing ? 1 : requestedFactor;
+            // During the post-boss victory window (closeAt >= 0), cap speed at 3x
+            // (~3.3s real time for the 10s countdown) so flying drops/balls and
+            // the 3s `onDrop` tick timer settle cleanly without waiting a full 10s.
+            const factor = closing ? Math.min(requestedFactor, 3) : requestedFactor;
 
             if (
               disposed ||
@@ -665,7 +675,7 @@
 
             for (let i = 0; i < count; i++) {
               if (disposed || this.state !== 'playing') break;
-              if (Number.isFinite(this.closeAt) && this.closeAt >= 0) break;
+              if (!closing && Number.isFinite(this.closeAt) && this.closeAt >= 0) break;
 
               if (i > 0 && performance.now() - began >= 12) {
                 state.limited++;
@@ -760,6 +770,25 @@
               stats.pickupRadius = base;
             }
           });
+
+          if (typeof game.mysteryDrop === 'function') {
+            patch(game, record, 'mysteryDrop', original => function(enemy, cardId, cardMult, dropMult) {
+              if (
+                !disposed &&
+                (record.accelerated || clamp(state.speed, 20) > 1) &&
+                enemy?.def &&
+                !enemy.def.boss &&
+                this.killsBy instanceof Map
+              ) {
+                const mobId = enemy.def.id;
+                const killIdx = this.killsBy.get(mobId) ?? 1;
+                if (killIdx > safeMobKillLimit(record)) {
+                  return;
+                }
+              }
+              return original.call(this, enemy, cardId, cardMult, dropMult);
+            });
+          }
         } catch (error) {
           undo(game, record);
           games.delete(game);
@@ -1793,18 +1822,18 @@
         }
 
         const title = one('#npc-name')?.textContent?.trim() || '';
+        const dialogText = one('#npc-text')?.textContent?.trim() || '';
         const buttons = all('#npc-options button');
 
         const informational =
-          /^(未完待續[.…！!]*|待續[.…！!]*|Continuará[.…!]*|To be continued[.…!]*|Continua[.…!]*|Continua a seguir[.…!]*)$/i.test(title) ||
-          !!one('#npc-text .pending-loot');
+          /^(未完待續[.…！!]*|待續[.…！!]*|Continuará[.…!]*|To be continued[.…!]*|Continua[.…!]*|Continua a seguir[.…!]*|閒置|離開|暫離|Ausente|Away|Idle|AFK|Inactivo|Ausência)$/i.test(title) ||
+          !!one('#npc-text .pending-loot') ||
+          /5\s*(分鐘|minutos|minutes)/i.test(dialogText);
 
         if (informational && buttons.length === 1 && running) {
           clickOnce('ack:' + title, buttons[0], now);
           return;
         }
-
-        const dialogText = one('#npc-text')?.textContent?.trim() || '';
         const reconnectBtn = buttons.find(btn =>
           /^(Recargar|Reload|重新整理|重整)$/i.test(btn.textContent.trim())
         );
@@ -2118,146 +2147,372 @@
     <style>
       :host{all:initial}
       *{box-sizing:border-box}
+      ::-webkit-scrollbar{width:5px;height:5px}
+      ::-webkit-scrollbar-track{background:transparent}
+      ::-webkit-scrollbar-thumb{background:rgba(148,163,184,.28);border-radius:99px}
+      ::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.48)}
       section{
-        width:290px;max-width:calc(100vw - 24px);
-        background:#141b28;color:#edf2fc;
-        border:1px solid #45516a;border-radius:12px;
-        box-shadow:0 12px 36px #0008;
-        font:13px/1.5 system-ui,sans-serif;overflow:hidden
+        width:336px;max-width:calc(100vw - 24px);
+        background:linear-gradient(165deg,rgba(19,25,40,.94) 0%,rgba(11,15,26,.97) 100%);
+        backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+        color:#f1f5f9;
+        border:1px solid rgba(212,175,106,.32);
+        border-radius:16px;
+        box-shadow:0 20px 50px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.04) inset,0 1px 0 rgba(255,236,196,.18) inset;
+        font:12.5px/1.45 "Inter","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+        overflow:hidden;
+        transition:box-shadow .2s ease,border-color .2s ease
+      }
+      section:hover{
+        border-color:rgba(212,175,106,.48)
       }
       header{
-        padding:10px 12px;display:flex;justify-content:space-between;
-        align-items:center;background:#24314a;cursor:grab;
-        touch-action:none;user-select:none
+        padding:11px 14px;display:flex;justify-content:space-between;
+        align-items:center;
+        background:linear-gradient(90deg,rgba(38,50,78,.85) 0%,rgba(26,34,54,.85) 100%);
+        border-bottom:1px solid rgba(212,175,106,.22);
+        cursor:grab;touch-action:none;user-select:none
       }
       header.dragging{cursor:grabbing}
-      main{padding:10px 12px;max-height:78vh;overflow:auto}
-      small{display:block;color:#aebbd0;font-size:11px;margin-top:5px}
-      label{display:block;margin-top:8px}
-      output{float:right;color:#aec4ff}
-      input[type=range]{width:100%;accent-color:#8eaaff;margin:3px 0}
+      .brand{
+        display:flex;align-items:center;gap:8px;font-weight:700;
+        font-size:13.5px;letter-spacing:.3px;color:#fff7e6;
+        text-shadow:0 1px 2px rgba(0,0,0,.5)
+      }
+      .brand-dot{
+        width:8px;height:8px;border-radius:99px;
+        background:linear-gradient(135deg,#f6d365 0%,#fda085 100%);
+        box-shadow:0 0 10px rgba(246,211,101,.75)
+      }
+      .ver-badge{
+        display:inline-block;padding:1px 7px;border-radius:99px;
+        font-size:10.5px;font-weight:600;letter-spacing:.2px;
+        color:#f6d365;background:rgba(246,211,101,.12);
+        border:1px solid rgba(246,211,101,.28)
+      }
+      .win-actions{display:flex;align-items:center;gap:5px}
+      .icon-btn{
+        width:26px;height:26px;padding:0;display:inline-flex;
+        align-items:center;justify-content:center;
+        background:rgba(255,255,255,.06);
+        border:1px solid rgba(255,255,255,.12);
+        border-radius:7px;color:#cbd5e1;font-size:13px;
+        transition:all .15s ease
+      }
+      .icon-btn:hover{
+        background:rgba(246,211,101,.16);
+        border-color:rgba(246,211,101,.4);
+        color:#fff
+      }
+      main{
+        padding:12px;max-height:80vh;overflow-y:auto;
+        display:flex;flex-direction:column;gap:10px
+      }
+      .card{
+        background:rgba(22,30,49,.62);
+        border:1px solid rgba(148,163,184,.14);
+        border-radius:12px;padding:10px 11px;
+        box-shadow:0 4px 14px rgba(0,0,0,.2) inset
+      }
+      .card-head{
+        display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:8px;padding-bottom:6px;
+        border-bottom:1px solid rgba(148,163,184,.12)
+      }
+      .card-title{
+        font-weight:700;font-size:12.5px;color:#f8fafc;
+        display:flex;align-items:center;gap:6px;letter-spacing:.3px
+      }
+      .card-title::before{
+        content:"";display:inline-block;width:3px;height:12px;
+        border-radius:2px;background:linear-gradient(180deg,#f6d365,#e29547)
+      }
+      small{display:block;color:#94a3b8;font-size:11px;margin-top:4px;line-height:1.4}
+      label{display:block;margin-top:7px;font-size:12px;color:#cbd5e1}
+      output{
+        float:right;font-weight:700;font-size:11.5px;
+        color:#93c5fd;background:rgba(59,130,246,.14);
+        border:1px solid rgba(96,165,250,.24);
+        padding:0 6px;border-radius:99px;line-height:1.5
+      }
+      input[type=range]{
+        -webkit-appearance:none;appearance:none;
+        width:100%;height:5px;margin:6px 0 2px;
+        background:rgba(15,23,42,.85);
+        border:1px solid rgba(148,163,184,.18);
+        border-radius:99px;outline:none;cursor:pointer
+      }
+      input[type=range]::-webkit-slider-thumb{
+        -webkit-appearance:none;appearance:none;
+        width:15px;height:15px;border-radius:50%;
+        background:linear-gradient(135deg,#93c5fd 0%,#3b82f6 100%);
+        border:2px solid #eff6ff;
+        box-shadow:0 2px 6px rgba(0,0,0,.45);
+        cursor:pointer;transition:transform .12s ease,box-shadow .12s ease
+      }
+      input[type=range]::-webkit-slider-thumb:hover{
+        transform:scale(1.12);
+        box-shadow:0 0 10px rgba(96,165,250,.7)
+      }
+      input[type=range]:disabled{opacity:.45;cursor:default}
       button{
-        font:inherit;color:inherit;background:#2c3b57;
-        border:1px solid #506284;border-radius:6px;
-        padding:3px 7px;cursor:pointer
+        font:inherit;font-weight:600;color:#e2e8f0;
+        background:linear-gradient(180deg,#2a3956 0%,#1f2b42 100%);
+        border:1px solid rgba(148,163,184,.28);border-radius:8px;
+        padding:5px 10px;cursor:pointer;
+        transition:all .15s ease
+      }
+      button:hover:not(:disabled){
+        background:linear-gradient(180deg,#34476a 0%,#263552 100%);
+        border-color:rgba(147,197,253,.5);color:#fff
+      }
+      button:active:not(:disabled){transform:translateY(1px)}
+      button:disabled{opacity:.45;cursor:default}
+      .btn-sm{padding:3px 9px;font-size:11.5px;border-radius:7px}
+      .btn-primary{
+        width:100%;margin-top:9px;padding:8px 12px;
+        font-size:13px;font-weight:700;letter-spacing:.5px;
+        color:#0f172a;
+        background:linear-gradient(135deg,#f6d365 0%,#eab308 55%,#d97706 100%);
+        border:1px solid rgba(254,240,138,.65);
+        border-radius:9px;
+        box-shadow:0 6px 16px rgba(234,179,8,.25),0 1px 0 rgba(255,255,255,.4) inset
+      }
+      .btn-primary:hover:not(:disabled){
+        background:linear-gradient(135deg,#fde047 0%,#f59e0b 60%,#ea580c 100%);
+        border-color:#fef08a;color:#090d16;
+        box-shadow:0 8px 20px rgba(245,158,11,.35)
+      }
+      .btn-primary.running{
+        color:#fff;
+        background:linear-gradient(135deg,#ef4444 0%,#dc2626 60%,#991b1b 100%);
+        border-color:rgba(252,165,165,.55);
+        box-shadow:0 6px 16px rgba(239,68,68,.28)
+      }
+      .btn-primary.running:hover:not(:disabled){
+        background:linear-gradient(135deg,#f87171 0%,#ef4444 60%,#b91c1c 100%);
+        border-color:#fecaca;color:#fff
       }
       .row{
         display:flex;align-items:center;gap:8px;
         justify-content:space-between
       }
       .row label{margin:0}
-      .info{
-        margin-top:9px;border-top:1px solid #344159;
-        padding-top:7px;font-size:12px;color:#b9c9e7
+      .field-grid{
+        display:grid;grid-template-columns:64px 1fr;
+        align-items:center;gap:6px 8px;margin-top:4px
       }
-      .farm{
-        padding-bottom:9px;border-bottom:1px solid #344159;
-        margin-bottom:6px
-      }
+      .field-grid label{margin:0;color:#94a3b8;font-size:11.5px;font-weight:500}
       .farm select{
-        width:100%;margin:5px 0;background:#1b263a;color:#edf2fc;
-        padding:5px;border:1px solid #506284;
-        border-radius:5px;font:inherit
+        width:100%;margin:0;
+        background:rgba(15,23,42,.85);color:#f1f5f9;
+        padding:5px 8px;border:1px solid rgba(148,163,184,.24);
+        border-radius:7px;font:inherit;font-size:12px;
+        outline:none;transition:border-color .15s ease
       }
-      .farm button:disabled{opacity:.5;cursor:default}
-      .farm small{overflow-wrap:anywhere}
-      .hidden{display:none}
+      .farm select:focus{border-color:rgba(246,211,101,.6)}
+      .farm select:disabled{opacity:.5}
+      .custom-box{
+        margin-top:8px;padding:8px 10px;
+        background:rgba(15,23,42,.55);
+        border:1px solid rgba(148,163,184,.14);
+        border-radius:9px
+      }
+      .checks-grid{
+        display:grid;grid-template-columns:1fr 1fr;
+        gap:6px;margin-top:9px
+      }
+      .chip-check{
+        display:flex;align-items:center;gap:6px;margin:0;
+        padding:5px 8px;border-radius:8px;
+        background:rgba(15,23,42,.6);
+        border:1px solid rgba(148,163,184,.16);
+        font-size:11.5px;color:#cbd5e1;cursor:pointer;
+        user-select:none;transition:all .15s ease
+      }
+      .chip-check:hover{
+        border-color:rgba(147,197,253,.35);
+        background:rgba(30,41,59,.7)
+      }
+      .chip-check input[type=checkbox]{
+        accent-color:#eab308;margin:0;width:13.5px;height:13.5px;cursor:pointer
+      }
+      .chip-check.full{grid-column:1 / -1}
+      .status-banner{
+        margin-top:8px;padding:7px 10px;border-radius:8px;
+        background:rgba(15,23,42,.75);
+        border-left:3px solid #eab308;
+        color:#fde68a;font-size:11.5px;font-weight:500;
+        overflow-wrap:anywhere
+      }
+      .sliders-grid{
+        display:grid;grid-template-columns:1fr;gap:3px
+      }
+      .slider-item{
+        padding:3px 0
+      }
+      .slider-item label{
+        margin:0;display:flex;align-items:center;justify-content:space-between
+      }
+      .toggles-bar{
+        display:grid;grid-template-columns:1fr 1fr auto;
+        gap:6px;align-items:center;margin-top:8px;padding-top:8px;
+        border-top:1px solid rgba(148,163,184,.12)
+      }
+      .telemetry-grid{
+        display:grid;grid-template-columns:1fr 1fr;gap:6px
+      }
+      .stat-pill{
+        padding:6px 8px;border-radius:8px;
+        background:rgba(15,23,42,.65);
+        border:1px solid rgba(148,163,184,.12);
+        font-size:11.5px;color:#cbd5e1;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+      }
+      .stat-pill.wide{grid-column:1 / -1}
+      .audit-box{
+        margin-top:6px;padding:7px 9px;border-radius:8px;
+        background:rgba(15,23,42,.72);
+        border:1px solid rgba(96,165,250,.18);
+        color:#bfdbfe;font-size:11.5px;line-height:1.45;
+        overflow-wrap:anywhere
+      }
+      .footer-note{
+        text-align:center;color:#64748b;font-size:10.5px;
+        padding:2px 4px;line-height:1.45
+      }
+      .hidden{display:none !important}
     </style>
     <section>
-      <header id="dragHandle" title="拖曳移動">
-        <b>RO 控制台 <small style="display:inline">0.6.14</small></b>
-        <span>
-          <button id="popout" title="另開視窗">↗</button>
-          <button id="collapse" title="收合">−</button>
+      <header id="dragHandle" title="按住拖曳面板位置">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <span>RO 實驗控制台</span>
+          <small class="ver-badge">0.6.16</small>
+        </div>
+        <span class="win-actions">
+          <button id="popout" class="icon-btn" title="另開獨立視窗">↗</button>
+          <button id="collapse" class="icon-btn" title="收合／展開 (F8)">−</button>
         </span>
       </header>
       <main id="body">
-        <div class="farm">
-          <div class="row">
-            <b>自動連刷</b>
-            <button id="farmRead">讀取關卡</button>
+        <div class="card farm">
+          <div class="card-head">
+            <span class="card-title">自動連刷巡航</span>
+            <button id="farmRead" class="btn-sm">讀取關卡</button>
           </div>
-          <label for="farmCharacter">掛機角色</label>
-          <select id="farmCharacter" aria-label="掛機角色">
-            <option value="">沿用目前／預設角色</option>
-          </select>
-          <label for="farmStage">連刷關卡</label>
-          <select id="farmStage" aria-label="連刷關卡">
-            <option value="">按「讀取關卡」自動前往遠征隊長</option>
-          </select>
-          <label for="farmDifficulty">連刷難度</label>
-          <select id="farmDifficulty">
-            ${Object.entries(farmDifficultyModes).map(([value, label]) =>
-              `<option value="${value}">${label}</option>`
-            ).join('')}
-          </select>
-          <div id="farmCustom" class="hidden">
+          <div class="field-grid">
+            <label for="farmCharacter">掛機角色</label>
+            <select id="farmCharacter" aria-label="掛機角色">
+              <option value="">沿用目前／預設角色</option>
+            </select>
+            <label for="farmStage">連刷關卡</label>
+            <select id="farmStage" aria-label="連刷關卡">
+              <option value="">按「讀取關卡」自動前往遠征隊長</option>
+            </select>
+            <label for="farmDifficulty">連刷難度</label>
+            <select id="farmDifficulty">
+              ${Object.entries(farmDifficultyModes).map(([value, label]) =>
+                `<option value="${value}">${label}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div id="farmCustom" class="custom-box hidden">
             ${farmDifficultyFields.map(([key, label, max]) => `
-              <label for="farmDiff_${key}">${label}
-                <output id="farmDiff_${key}Value">${max}%</output>
-              </label>
-              <input id="farmDiff_${key}" type="range"
-                min="100" max="${max}" step="5" value="${max}">
+              <div class="slider-item">
+                <label for="farmDiff_${key}">
+                  <span>${label}</span>
+                  <output id="farmDiff_${key}Value">${max}%</output>
+                </label>
+                <input id="farmDiff_${key}" type="range"
+                  min="100" max="${max}" step="5" value="${max}">
+              </div>
             `).join('')}
           </div>
-          <div class="row">
-            <label>
-              <input id="farmImmediate" type="checkbox" checked>立即開卡
+          <div class="checks-grid">
+            <label class="chip-check" title="關閉時：升級／寶箱先累積，手動開啟後才選卡">
+              <input id="farmImmediate" type="checkbox" checked>
+              <span>立即開卡</span>
             </label>
-            <label>
-              <input id="farmPick" type="checkbox" checked
-                title="選第一張可選卡片，遇到技能替換也會確認">自動選首張
+            <label class="chip-check" title="選第一張可選卡片，遇到技能替換也會確認">
+              <input id="farmPick" type="checkbox" checked>
+              <span>自動選首張</span>
+            </label>
+            <label class="chip-check">
+              <input id="farmReconnect" type="checkbox" checked>
+              <span>斷線5秒重連</span>
+            </label>
+            <label class="chip-check">
+              <input id="farmAntiIdle" type="checkbox" checked>
+              <span>防5分閒置</span>
             </label>
           </div>
-          <label>
-            <input id="farmReconnect" type="checkbox" checked>斷線／維修每 5 秒重整並自動進場
-          </label>
-          <small>關閉立即開卡：升級／寶箱先累積，手動開啟後才選卡。</small>
-          <button id="farmToggle" style="width:100%;margin-top:7px">
+          <button id="farmToggle" class="btn-primary">
             開始連刷
           </button>
-          <small id="farmStatus">尚未開始</small>
-          <small>讀取關卡／開始連刷會自動走向遠征隊長或節慶主持人。</small>
+          <small id="farmStatus" class="status-banner">尚未開始</small>
         </div>
-        ${[
-          ['speed', '遊戲速度', 1, 20, 1, 1, '×'],
-          ['animation', '選卡速度', 1, 10, 1, 1, '×'],
-          ['attack', '傷害倍率', 1, 100, 1, 1, '×'],
-          ['cooldown', '冷卻縮減', 0, 99, 1, 0, '%'],
-          ['targets', '目標倍率', 1, 100, 1, 1, '×'],
-          ['money', '局內金錢', 1, 100, 1, 1, '×'],
-          ['discovery', '額外尋寶率', 0, 300, 10, 0, '%'],
-          ['pickup', '撿取範圍', 1, 100, 1, 1, '×'],
-          ['suction', '吸取速度', 1, 10, 1, 1, '×']
-        ].map(([id, label, min, max, step, value, unit]) => `
-          <label for="${id}">
-            ${label}
-            <output id="${id}Value">${id === 'discovery' ? '+' : ''}${value}${unit}</output>
-          </label>
-          <input id="${id}" type="range" min="${min}" max="${max}"
-            step="${step}" value="${value}">
-        `).join('')}
-        <div class="row">
-          <label><input id="god" type="checkbox">免傷</label>
-          <label><input id="fullHp" type="checkbox">滿血</label>
-          <button id="reset">還原</button>
-        </div>
-        <div class="info">
-          <div id="status">就緒</div>
-          <div id="meter">實測速度：—</div>
-          <div id="discoveryStatus">尋寶率：—</div>
-        </div>
-        <div class="info">
-          <div class="row">
-            <label><input id="lootAudit" type="checkbox" checked>結算診斷</label>
-            <button id="lootExport">匯出報告</button>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">戰鬥與掉寶強化</span>
+            <button id="reset" class="btn-sm" title="還原所有強化 (F9)">一鍵還原</button>
           </div>
-          <small id="lootStatus" aria-live="polite">等待下一局</small>
-          <small>記錄最近 12 局的送出與核發件數；重新整理前可匯出。</small>
+          <div class="sliders-grid">
+            ${[
+              ['speed', '遊戲速度', 1, 20, 1, 1, '×'],
+              ['animation', '選卡速度', 1, 10, 1, 1, '×'],
+              ['attack', '傷害倍率', 1, 100, 1, 1, '×'],
+              ['cooldown', '冷卻縮減', 0, 99, 1, 0, '%'],
+              ['targets', '目標倍率', 1, 100, 1, 1, '×'],
+              ['money', '局內金錢', 1, 100, 1, 1, '×'],
+              ['discovery', '額外尋寶率', 0, 300, 10, 0, '%'],
+              ['pickup', '撿取範圍', 1, 100, 1, 1, '×'],
+              ['suction', '吸取速度', 1, 10, 1, 1, '×']
+            ].map(([id, label, min, max, step, value, unit]) => `
+              <div class="slider-item">
+                <label for="${id}">
+                  <span>${label}</span>
+                  <output id="${id}Value">${id === 'discovery' ? '+' : ''}${value}${unit}</output>
+                </label>
+                <input id="${id}" type="range" min="${min}" max="${max}"
+                  step="${step}" value="${value}">
+              </div>
+            `).join('')}
+          </div>
+          <div class="checks-grid" style="margin-top:8px">
+            <label class="chip-check">
+              <input id="god" type="checkbox">
+              <span>免傷無敵</span>
+            </label>
+            <label class="chip-check">
+              <input id="fullHp" type="checkbox">
+              <span>鎖定滿血</span>
+            </label>
+          </div>
         </div>
-        <small>
-          尋寶率影響品質；結算由伺服器核發。<br>
-          目標倍率僅適用支援的技能。F8 收合 · F9 還原
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">即時監控與結算診斷</span>
+            <button id="lootExport" class="btn-sm">匯出報告</button>
+          </div>
+          <div class="telemetry-grid">
+            <div id="status" class="stat-pill">就緒</div>
+            <div id="meter" class="stat-pill">實測速度：—</div>
+            <div id="discoveryStatus" class="stat-pill wide">尋寶率：—</div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="chip-check" style="padding:3px 8px">
+              <input id="lootAudit" type="checkbox" checked>
+              <span>啟用結算診斷（自動鎖定合法掉寶序號）</span>
+            </label>
+          </div>
+          <small id="lootStatus" class="audit-box" aria-live="polite">等待下一局</small>
+        </div>
+
+        <small class="footer-note">
+          快捷鍵：<b>F8</b> 收合面板 · <b>F9</b> 還原預設值
         </small>
       </main>
     </section>
@@ -2476,7 +2731,8 @@
     ),
     immediateCards: true,
     autoPick: true,
-    autoReconnect: true
+    autoReconnect: true,
+    antiIdle: true
   };
 
   try {
@@ -2518,6 +2774,9 @@
       }
       if (typeof saved.autoReconnect === 'boolean') {
         farmConfig.autoReconnect = saved.autoReconnect;
+      }
+      if (typeof saved.antiIdle === 'boolean') {
+        farmConfig.antiIdle = saved.antiIdle;
       }
     }
   } catch {}
@@ -2600,25 +2859,27 @@
   $('farmImmediate').checked = farmConfig.immediateCards;
   $('farmPick').checked = farmConfig.autoPick;
   $('farmReconnect').checked = farmConfig.autoReconnect;
+  $('farmAntiIdle').checked = farmConfig.antiIdle;
 
   const farm = createAutoFarm(
     farmConfig,
     info => {
-      $('farmToggle').textContent =
-        info.running || info.reading ? '停止連刷' : '開始連刷';
+      const active = info.running || info.reading;
+      $('farmToggle').textContent = active ? '停止連刷' : '開始連刷';
+      $('farmToggle').classList.toggle('running', active);
 
       $('farmStatus').textContent = info.text;
 
       $('farmCharacter').disabled =
         $('farmStage').disabled =
         $('farmRead').disabled =
-        info.running || info.reading;
+        active;
 
       for (const id of [
         'farmDifficulty', 'farmImmediate', 'farmPick', 'farmReconnect',
         ...farmDifficultyFields.map(([key]) => 'farmDiff_' + key)
       ]) {
-        $(id).disabled = info.running || info.reading;
+        $(id).disabled = active;
       }
     },
     stages => {
@@ -2696,6 +2957,28 @@
     saveFarm();
   });
 
+  $('farmAntiIdle').addEventListener('change', () => {
+    farmConfig.antiIdle = $('farmAntiIdle').checked;
+    saveFarm();
+  });
+
+  function sendAntiIdlePulse() {
+    if (!farmConfig.antiIdle) return;
+    try {
+      const EventCtor = window.PointerEvent || window.MouseEvent || window.Event;
+      if (typeof EventCtor === 'function') {
+        window.dispatchEvent(new EventCtor('pointermove', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 0,
+          clientY: 0
+        }));
+      }
+    } catch {}
+  }
+
+  const antiIdleTimer = setInterval(sendAntiIdlePulse, 60000);
+
   $('farmRead').onclick = () => farm.start(true);
   $('farmToggle').onclick = () => {
     if (farm.running) {
@@ -2723,6 +3006,7 @@
     // Keep farmRuntimeActive so 5s reload / reconnect resumes automatically.
     farm.stop('頁面已關閉', false);
     clearInterval(farmTimer);
+    clearInterval(antiIdleTimer);
   });
 
   function choose(id, value) {
@@ -2968,7 +3252,7 @@
     const popup = window.open(
       '',
       'ros-controls-v060',
-      'popup=yes,width=330,height=720,resizable=yes,scrollbars=yes'
+      'popup=yes,width=370,height=780,resizable=yes,scrollbars=yes'
     );
 
     if (!popup) {
@@ -3066,6 +3350,34 @@
     map.set(key, value);
     if (map.size > 12) map.delete(map.keys().next().value);
   }
+  function clampAcceleratedKills(target, elapsedSecs) {
+    if (!target || typeof target.kills !== 'object' || !target.kills) return false;
+    const baseCap = Math.max(460, Math.round((Number.isFinite(elapsedSecs) ? elapsedSecs : 60) * 7.2));
+    const dr = target.dr && typeof target.dr === 'object' ? target.dr : null;
+    let changed = false;
+    for (const [mobId, countVal] of Object.entries(target.kills)) {
+      if (!Number.isInteger(countVal) || countVal <= baseCap) continue;
+      let maxDropIdx = 0;
+      const row = dr?.[mobId];
+      if (Array.isArray(row)) {
+        for (const list of [row[0], row[1]]) {
+          if (Array.isArray(list)) {
+            for (const idx of list) {
+              if (Number.isInteger(idx) && idx > maxDropIdx) maxDropIdx = idx;
+            }
+          }
+        }
+      }
+      // Keep kills >= highest reported drop index while trimming huge overkill numbers.
+      const nextCount = Math.min(countVal, Math.max(baseCap, maxDropIdx));
+      if (nextCount !== countVal) {
+        target.kills[mobId] = nextCount;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   function normalizeAcceleratedRunTime(input, init) {
     if (!init || typeof init.body !== 'string') return init;
     const url = new URL(typeof input === 'string' ? input : input?.url ?? input, document.baseURI);
@@ -3082,8 +3394,9 @@
       if (speed <= 1 || body?.skip || typeof body?.played === 'number' || typeof body?.key !== 'string') {
         return init;
       }
-      // Include the post-boss victory window (900s + 15s) so `played + wallSecs`
-      // always covers the full 910s run and final boss drops even at high speed.
+      // NOTE: The server rejects `played` on a fresh `/api/run` unless an existing
+      // server-side run is being resumed; it always starts fresh runs at wall-clock 0
+      // and caps monster/boss drop indices by real wall-clock elapsed time.
       const expectedRunSecs = 915;
       const played = Math.max(0, Math.round(expectedRunSecs - expectedRunSecs / speed));
       if (played <= 0) return init;
@@ -3107,11 +3420,15 @@
       ? (wallSecs !== null ? Math.max(realSecs, wallSecs) : realSecs)
       : wallSecs;
     const lastSentSecs = key ? (adjustedSecsByKey.get(key) ?? 0) : 0;
+    const isAccelerated = playedOffset > 0 || clamp(state.speed, 20) > 1 || realSecs !== null;
+    const killsChanged = isAccelerated ? clampAcceleratedKills(target, elapsedSecs) : false;
 
     if (op === 'loot' || op === 'gloot') {
       const bossSecs = gameControl?.bossSpawnSeconds?.();
       const hasBossSecs = bossSecs !== null && bossSecs !== undefined && Number.isFinite(bossSecs);
-      if (!hasBossSecs && playedOffset <= 0 && elapsedSecs === null) return init;
+      if (!hasBossSecs && playedOffset <= 0 && elapsedSecs === null) {
+        return killsChanged ? { ...init, body: JSON.stringify(body) } : init;
+      }
 
       const extraSecs = 5 + Math.floor(Math.random() * 11);
       const bossTarget = hasBossSecs
@@ -3120,8 +3437,6 @@
       const maxAllowed = playedOffset > 0 && elapsedSecs !== null
         ? playedOffset + elapsedSecs
         : null;
-      // Never report a final settlement time earlier than a previously sent
-      // tick/save or earlier than the final boss spawn / actual game time.
       const floorSecs = Math.max(
         0,
         lastSentSecs,
@@ -3131,24 +3446,26 @@
       const bounded = maxAllowed !== null ? Math.min(bossTarget, maxAllowed) : bossTarget;
       const normalized = Math.max(floorSecs, bounded);
       rememberBounded(adjustedSecsByKey, key, normalized);
-      if (normalized === target.secs) return init;
+      if (normalized === target.secs && !killsChanged) return init;
 
       target.secs = normalized;
       return { ...init, body: JSON.stringify(body) };
     }
 
+    // For intermediate tick/save requests, never send a `secs` higher than
+    // actual wall-clock elapsed time (`elapsedSecs`) without `playedOffset`,
+    // because the server ignores `played` on new runs and rejects intermediate
+    // ticks whose `secs` exceed real server elapsed time.
     const fallbackSecs = key ? adjustedSecsByKey.get(key) : undefined;
-    const candidate = elapsedSecs !== null
-      ? playedOffset + elapsedSecs
-      : fallbackSecs;
-    if (candidate === null || candidate === undefined || !Number.isFinite(candidate)) return init;
+    const candidate = elapsedSecs ?? fallbackSecs;
+    if (candidate === null || candidate === undefined || !Number.isFinite(candidate)) {
+      return killsChanged ? { ...init, body: JSON.stringify(body) } : init;
+    }
 
-    const rawNormalized = playedOffset > 0
-      ? Math.max(0, Math.min(target.secs, candidate))
-      : Math.max(0, Math.min(target.secs, candidate));
+    const rawNormalized = Math.max(0, Math.min(target.secs, candidate));
     const normalized = Math.max(lastSentSecs, rawNormalized);
     rememberBounded(adjustedSecsByKey, key, normalized);
-    if (normalized === target.secs) return init;
+    if (normalized === target.secs && !killsChanged) return init;
 
     target.secs = normalized;
     return { ...init, body: JSON.stringify(body) };
