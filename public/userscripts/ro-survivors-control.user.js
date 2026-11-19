@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.23
+// @version      0.6.25
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -116,7 +116,7 @@
         op, atSeconds: round((now - run.start) / 1000),
         gameSeconds: number(data.secs),
         settings: Object.fromEntries(['speed', 'discovery', 'attack', 'cooldown',
-          'targets', 'pickup', 'suction', 'animation', 'mobDropCap'].map(k => [k, number(settings[k])])),
+          'targets', 'reach', 'pickup', 'suction', 'animation', 'mobDropCap'].map(k => [k, number(settings[k])])),
         kills: data.kills && typeof data.kills === 'object'
           ? Object.fromEntries(Object.entries(data.kills).filter(([, v]) => count(v) !== null))
           : null,
@@ -254,7 +254,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.23', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.25', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -295,19 +295,27 @@
     let tracked = null;
     let baseDiscovery = 0;
     let baseMoney = 1;
+    let baseReach = 1;
+    let baseArea = 1;
     let appliedDiscovery = 0;
     let appliedMoney = 1;
+    let appliedReach = 1;
+    let appliedArea = 1;
     let extra = 0;
     let moneyFactor = 1;
+    let reachFactor = 1;
 
     function release() {
       if (tracked) {
         if (Number.isFinite(tracked.discovery)) tracked.discovery -= extra;
         if (Number.isFinite(tracked.zenyMult)) tracked.zenyMult /= moneyFactor;
+        if (Number.isFinite(tracked.reachMult)) tracked.reachMult /= reachFactor;
+        if (Number.isFinite(tracked.areaMult)) tracked.areaMult /= reachFactor;
       }
       tracked = null;
       extra = 0;
       moneyFactor = 1;
+      reachFactor = 1;
     }
 
     function sync() {
@@ -325,8 +333,12 @@
         tracked = stats;
         baseDiscovery = stats.discovery;
         baseMoney = stats.zenyMult;
+        baseReach = Number.isFinite(stats.reachMult) ? stats.reachMult : 1;
+        baseArea = Number.isFinite(stats.areaMult) ? stats.areaMult : 1;
         appliedDiscovery = baseDiscovery;
         appliedMoney = baseMoney;
+        appliedReach = baseReach;
+        appliedArea = baseArea;
       } else {
         if (stats.discovery !== appliedDiscovery) {
           baseDiscovery += stats.discovery - appliedDiscovery;
@@ -334,16 +346,27 @@
         if (stats.zenyMult !== appliedMoney) {
           baseMoney += (stats.zenyMult - appliedMoney) / moneyFactor;
         }
+        if (Number.isFinite(stats.reachMult) && stats.reachMult !== appliedReach) {
+          baseReach += (stats.reachMult - appliedReach) / reachFactor;
+        }
+        if (Number.isFinite(stats.areaMult) && stats.areaMult !== appliedArea) {
+          baseArea += (stats.areaMult - appliedArea) / reachFactor;
+        }
       }
 
       extra = Math.max(0, Math.min(300, Number(state.discovery) || 0)) / 100;
       moneyFactor = clamp(state.money, 100);
+      reachFactor = clamp(state.reach, 20);
 
       appliedDiscovery = baseDiscovery + extra;
       appliedMoney = baseMoney * moneyFactor;
+      appliedReach = baseReach * reachFactor;
+      appliedArea = baseArea * reachFactor;
 
       stats.discovery = appliedDiscovery;
       stats.zenyMult = appliedMoney;
+      if (Number.isFinite(stats.reachMult)) stats.reachMult = appliedReach;
+      if (Number.isFinite(stats.areaMult)) stats.areaMult = appliedArea;
 
       const locals = game.runCtx.locals;
       let quality = locals.get('quality');
@@ -501,9 +524,136 @@
       neutralizedProtos.set(proto, { descriptor, noop });
     }
 
+    function pickBestLevelChoice(choices) {
+      if (!Array.isArray(choices) || !choices.length) return null;
+      let best = choices[0];
+      let bestScore = -Infinity;
+      for (let i = 0; i < choices.length; i++) {
+        const c = choices[i];
+        if (!c) continue;
+        // Prefer real skills/upgrades over fallback meat ('potion'), then higher rarity,
+        // then new skills when rarity ties, preserving left-to-right order on ties.
+        const isPotion = c.id === 'potion';
+        const rarity = Number.isFinite(c.rarity) ? c.rarity : 0;
+        const isNew = c.isNew ? 1 : 0;
+        const score = (isPotion ? -1000 : 0) + rarity * 100 + isNew * 10 - i * 0.01;
+        if (score > bestScore) {
+          bestScore = score;
+          best = c;
+        }
+      }
+      return best;
+    }
+
+    function pickBestChestChoice(game, choices) {
+      if (!Array.isArray(choices) || !choices.length) return null;
+      let best = choices[0];
+      let bestScore = -Infinity;
+      for (let i = 0; i < choices.length; i++) {
+        const c = choices[i];
+        if (!c) continue;
+        // Prefer focused items and higher quality (`c.quality`), then upgrades to an
+        // existing equipped item (or empty slot) over replacing a different item.
+        const quality = Number.isFinite(c.quality) ? c.quality : 0;
+        const focused = game?.focusedItems?.has?.(c.item) ? 1 : 0;
+        const existing = game?.runItems?.slots?.get?.(c.slot);
+        const sameOrEmpty = !existing || existing.item === c.item ? 1 : 0;
+        const refine = Number.isFinite(c.refine) ? c.refine : 0;
+        const score = focused * 10000 + quality * 100 + sameOrEmpty * 10 + refine - i * 0.01;
+        if (score > bestScore) {
+          bestScore = score;
+          best = c;
+        }
+      }
+      return best;
+    }
+
+    function installBackgroundAutoPick(game, record) {
+      const events = game?.events;
+      if (!events || typeof events !== 'object' || record.eventsPatched) return;
+      record.eventsPatched = true;
+
+      const origLevelUp = events.onLevelUp;
+      const origChest = events.onChest;
+
+      if (typeof origLevelUp === 'function') {
+        events.onLevelUp = function(choices, ...rest) {
+          if (
+            !disposed &&
+            state.autoPick &&
+            typeof game.choose === 'function' &&
+            Array.isArray(choices) &&
+            choices.length > 0
+          ) {
+            const pick = pickBestLevelChoice(choices);
+            if (pick) {
+              queueMicrotask(() => {
+                try {
+                  if (disposed || game.state !== 'levelup' || game.pendingLevelUps <= 0) return;
+                  game.choose(pick);
+                } catch {}
+              });
+              return;
+            }
+          }
+          return origLevelUp.call(this, choices, ...rest);
+        };
+      }
+
+      if (typeof origChest === 'function') {
+        events.onChest = function(choices, cost, ...rest) {
+          if (
+            !disposed &&
+            state.autoPick &&
+            typeof game.chooseChest === 'function' &&
+            Array.isArray(choices) &&
+            choices.length > 0
+          ) {
+            const pick = pickBestChestChoice(game, choices);
+            if (pick) {
+              queueMicrotask(() => {
+                try {
+                  if (disposed || game.state !== 'levelup') return;
+                  game.chooseChest(pick);
+                } catch {}
+              });
+              return;
+            }
+          }
+          return origChest.call(this, choices, cost, ...rest);
+        };
+      }
+
+      record.restoreEvents = () => {
+        if (typeof origLevelUp === 'function' && events.onLevelUp !== origLevelUp) {
+          events.onLevelUp = origLevelUp;
+        }
+        if (typeof origChest === 'function' && events.onChest !== origChest) {
+          events.onChest = origChest;
+        }
+        record.eventsPatched = false;
+      };
+    }
+
     function syncHealth(game, record) {
       record.discovery?.refresh();
       record.cooldowns?.refresh();
+      installBackgroundAutoPick(game, record);
+
+      if (
+        !disposed &&
+        state.autoPick &&
+        state.immediateCards &&
+        game.banking &&
+        game.state === 'playing' &&
+        !game.bankOpen &&
+        !game.player?.dead &&
+        !game.coop?.replica &&
+        Number(game.bankCount) > 0 &&
+        typeof game.pressBank === 'function'
+      ) {
+        try { game.pressBank(); } catch {}
+      }
 
       for (const weapon of game.weapons || []) {
         if (record.weapons.has(weapon)) continue;
@@ -577,6 +727,7 @@
     function undo(game, record) {
       record.discovery?.restore();
       record.cooldowns?.restore();
+      record.restoreEvents?.();
 
       for (const [weapon, patches] of record.weapons) {
         for (const p of patches) {
@@ -1359,6 +1510,49 @@
       !element.disabled &&
       element.getAttribute('aria-disabled') !== 'true';
 
+    const parseCardRarityRank = slot => {
+      const q = slot?.style?.getPropertyValue?.('--q')?.trim()?.toLowerCase() || '';
+      const badge = slot?.querySelector?.('.pk-badge')?.textContent?.trim() || '';
+      // Color palette from low to high rarity/quality; new skills or higher quality rank higher.
+      const colorScores = {
+        '#f2f2f2': 0, '#d9d9d9': 0,
+        '#72e384': 1, '#5cd670': 1,
+        '#64b5ff': 2, '#4da6ff': 2,
+        '#c586ff': 3, '#b366ff': 3,
+        '#ffb84d': 4, '#ffa31a': 4,
+        '#ff6680': 5, '#ff4d6d': 5
+      };
+      let score = Object.hasOwn(colorScores, q) ? colorScores[q] * 10 : 0;
+      if (/神話|傳說|史詩|稀有|罕見|mític|legend|épic|rar|mythic|epic|rare|uncommon/i.test(badge)) {
+        if (/神話|mític|mythic/i.test(badge)) score = Math.max(score, 50);
+        else if (/傳說|legend/i.test(badge)) score = Math.max(score, 40);
+        else if (/史詩|épic|epic/i.test(badge)) score = Math.max(score, 30);
+        else if (/稀有|rar|rare/i.test(badge)) score = Math.max(score, 20);
+        else if (/罕見|poco común|uncommon/i.test(badge)) score = Math.max(score, 10);
+      }
+      if (slot?.querySelector?.('.pk-ribbon')) score += 5;
+      if (slot?.querySelector?.('.pk-mark')) score += 100;
+      return score;
+    };
+
+    function pickBestDomCard(docRef = doc) {
+      const yes = Array.from(docRef.querySelectorAll('#picker .pk-slot.asking [data-yes]')).find(enabled);
+      if (yes) return yes;
+      const cards = Array.from(docRef.querySelectorAll('#picker .pk-card')).filter(enabled);
+      if (!cards.length) return null;
+      let bestCard = cards[0];
+      let bestScore = -Infinity;
+      cards.forEach((card, idx) => {
+        const slot = card.closest('.pk-slot');
+        const score = parseCardRarityRank(slot) - idx * 0.01;
+        if (score > bestScore) {
+          bestScore = score;
+          bestCard = card;
+        }
+      });
+      return bestCard;
+    }
+
     let running = false;
     let reading = false;
     let phase = '';
@@ -1576,9 +1770,10 @@
           return;
         }
         const playBtn = one('#sp-play');
-        if (enabled(playBtn) && !actions.has('sp-play')) {
+        if (enabled(playBtn)) {
           say('自動點擊開始遊戲…');
-          clickOnce('sp-play', playBtn, now, 1200);
+          nextAt = now + 1500;
+          playBtn.click();
           return;
         }
         if (now - phaseAt > 25000) {
@@ -1656,7 +1851,8 @@
         if (targetSlot && !targetSlot.classList.contains('selected')) {
           const name = targetSlot.querySelector('.slot-name')?.textContent?.trim() || '角色';
           say(`切換掛機角色：${name}…`);
-          clickOnce('select-char:' + name, targetSlot, now, 600);
+          nextAt = now + 600;
+          targetSlot.click();
           return;
         }
 
@@ -1664,7 +1860,8 @@
         if (enabled(playCharBtn)) {
           const name = targetSlot?.querySelector('.slot-name')?.textContent?.trim() || '角色';
           say(`以「${name}」進入遊戲…`);
-          clickOnce('char-play', playCharBtn, now, 1500);
+          nextAt = now + 1500;
+          playCharBtn.click();
           return;
         }
 
@@ -2005,10 +2202,10 @@
           return;
         }
 
-        const first = all('#picker .pk-card').find(enabled);
+        const target = pickBestDomCard(doc);
 
-        if (deck !== first) {
-          deck = first;
+        if (deck !== target) {
+          deck = target;
           deckAt = now;
         }
 
@@ -2017,13 +2214,10 @@
           return;
         }
 
-        const yes = all('#picker .pk-slot.asking [data-yes]').find(enabled);
-        const target = yes || first;
-
         if (target) {
-          nextAt = now + 600;
+          nextAt = now + 220;
           target.click();
-          say('自動選卡：第一張可選卡片');
+          say('自動選卡：優先選擇高品質卡片');
         }
         return;
       }
@@ -2090,7 +2284,7 @@
         const bank = one('#bank-btn');
 
         if (config.immediateCards && config.autoPick && enabled(bank)) {
-          nextAt = now + 1000;
+          nextAt = now + 400;
           bank.click();
         }
 
@@ -2385,7 +2579,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span>RO 實驗控制台</span>
-          <small class="ver-badge">0.6.22</small>
+          <small class="ver-badge">0.6.25</small>
         </div>
         <span class="win-actions">
           <button id="popout" class="icon-btn" title="另開獨立視窗">↗</button>
@@ -2431,9 +2625,9 @@
               <input id="farmImmediate" type="checkbox" checked>
               <span>立即開卡</span>
             </label>
-            <label class="chip-check" title="選第一張可選卡片，遇到技能替換也會確認">
+            <label class="chip-check" title="連刷與手動遊玩皆生效：背景靜默自動選最高品質的升級／寶箱卡片，不跳出選卡畫面">
               <input id="farmPick" type="checkbox" checked>
-              <span>自動選首張</span>
+              <span>背景選高品卡</span>
             </label>
             <label class="chip-check">
               <input id="farmReconnect" type="checkbox" checked>
@@ -2462,6 +2656,7 @@
               ['attack', '傷害倍率', 1, 100, 1, 1, '×'],
               ['cooldown', '冷卻縮減', 0, 99, 1, 0, '%'],
               ['targets', '目標倍率', 1, 100, 1, 1, '×'],
+              ['reach', '攻擊距離／範圍', 1, 20, 1, 1, '×'],
               ['money', '局內金錢', 1, 100, 1, 1, '×'],
               ['discovery', '額外尋寶率', 0, 300, 10, 0, '%'],
               ['pickup', '撿取範圍', 1, 100, 1, 1, '×'],
@@ -2622,6 +2817,7 @@
     attack: 100,
     cooldown: 99,
     targets: 100,
+    reach: 20,
     money: 100,
     discovery: 300,
     pickup: 100,
@@ -2635,6 +2831,7 @@
     attack: 1,
     cooldown: 0,
     targets: 1,
+    reach: 1,
     money: 1,
     discovery: 0,
     pickup: 1,
@@ -2646,6 +2843,8 @@
     ...defaults,
     god: false,
     fullHp: false,
+    autoPick: true,
+    immediateCards: true,
     limited: 0,
     inputClockBlocked: false
   };
@@ -2860,6 +3059,8 @@
   $('farmPick').checked = farmConfig.autoPick;
   $('farmReconnect').checked = farmConfig.autoReconnect;
   $('farmAntiIdle').checked = farmConfig.antiIdle;
+  state.autoPick = farmConfig.autoPick;
+  state.immediateCards = farmConfig.immediateCards;
 
   const farm = createAutoFarm(
     farmConfig,
@@ -2876,7 +3077,7 @@
         active;
 
       for (const id of [
-        'farmDifficulty', 'farmImmediate', 'farmPick', 'farmReconnect',
+        'farmDifficulty', 'farmReconnect',
         ...farmDifficultyFields.map(([key]) => 'farmDiff_' + key)
       ]) {
         $(id).disabled = active;
@@ -2943,12 +3144,16 @@
 
   $('farmImmediate').addEventListener('change', () => {
     farmConfig.immediateCards = $('farmImmediate').checked;
+    state.immediateCards = farmConfig.immediateCards;
     saveFarm();
+    void applySettings();
   });
 
   $('farmPick').addEventListener('change', () => {
     farmConfig.autoPick = $('farmPick').checked;
+    state.autoPick = farmConfig.autoPick;
     saveFarm();
+    void applySettings();
   });
 
   $('farmReconnect').addEventListener('change', () => {
@@ -2993,14 +3198,75 @@
   farm.refreshStages();
   farm.refreshCharacters();
 
+  function standAloneAutoPickStep() {
+    if (farm.running || !farmConfig.autoPick) return;
+    const isVisible = el =>
+      !!el &&
+      el.isConnected &&
+      !el.closest('.hidden,[hidden]') &&
+      el.getClientRects().length > 0;
+    const isEnabled = el =>
+      isVisible(el) &&
+      !el.disabled &&
+      el.getAttribute('aria-disabled') !== 'true';
+
+    const picker = document.getElementById('picker');
+    if (isVisible(picker) && !picker.classList.contains('closing')) {
+      const yes = Array.from(document.querySelectorAll('#picker .pk-slot.asking [data-yes]')).find(isEnabled);
+      if (yes) {
+        yes.click();
+        return;
+      }
+      const cards = Array.from(document.querySelectorAll('#picker .pk-card')).filter(isEnabled);
+      if (cards.length) {
+        let bestCard = cards[0];
+        let bestScore = -Infinity;
+        const colorScores = {
+          '#f2f2f2': 0, '#d9d9d9': 0,
+          '#72e384': 1, '#5cd670': 1,
+          '#64b5ff': 2, '#4da6ff': 2,
+          '#c586ff': 3, '#b366ff': 3,
+          '#ffb84d': 4, '#ffa31a': 4,
+          '#ff6680': 5, '#ff4d6d': 5
+        };
+        cards.forEach((card, idx) => {
+          const slot = card.closest('.pk-slot');
+          const q = slot?.style?.getPropertyValue?.('--q')?.trim()?.toLowerCase() || '';
+          const badge = slot?.querySelector?.('.pk-badge')?.textContent?.trim() || '';
+          let score = Object.hasOwn(colorScores, q) ? colorScores[q] * 10 : 0;
+          if (/神話|mític|mythic/i.test(badge)) score = Math.max(score, 50);
+          else if (/傳說|legend/i.test(badge)) score = Math.max(score, 40);
+          else if (/史詩|épic|epic/i.test(badge)) score = Math.max(score, 30);
+          else if (/稀有|rar|rare/i.test(badge)) score = Math.max(score, 20);
+          else if (/罕見|poco común|uncommon/i.test(badge)) score = Math.max(score, 10);
+          if (slot?.querySelector?.('.pk-ribbon')) score += 5;
+          if (slot?.querySelector?.('.pk-mark')) score += 100;
+          score -= idx * 0.01;
+          if (score > bestScore) {
+            bestScore = score;
+            bestCard = card;
+          }
+        });
+        bestCard.click();
+        return;
+      }
+    }
+
+    if (farmConfig.immediateCards) {
+      const bank = document.getElementById('bank-btn');
+      if (isEnabled(bank)) bank.click();
+    }
+  }
+
   const farmTimer = setInterval(() => {
     try {
       farm.tick();
+      standAloneAutoPickStep();
     } catch (error) {
       setFarmRuntimeActive(false);
       farm.stop('連刷已停止：' + error.message);
     }
-  }, 400);
+  }, 250);
 
   window.addEventListener('pagehide', () => {
     // Keep farmRuntimeActive so 5s reload / reconnect resumes automatically.
@@ -3086,6 +3352,8 @@
     Object.assign(state, defaults, {
       god: false,
       fullHp: false,
+      autoPick: farmConfig.autoPick,
+      immediateCards: farmConfig.immediateCards,
       inputClockBlocked: false
     });
 
@@ -3113,11 +3381,14 @@
 
     desired.god = $('god').checked;
     desired.fullHp = $('fullHp').checked;
+    desired.autoPick = farmConfig.autoPick;
+    desired.immediateCards = farmConfig.immediateCards;
 
     if (
       Object.keys(limits).every(id => desired[id] === defaults[id]) &&
       !desired.god &&
-      !desired.fullHp
+      !desired.fullHp &&
+      !desired.autoPick
     ) {
       restore(false);
       return;
@@ -3138,12 +3409,15 @@
         state.attack > 1 ||
         state.cooldown > 0 ||
         state.targets > 1 ||
+        state.reach > 1 ||
         state.money > 1 ||
         state.discovery > 0 ||
         state.pickup > 1 ||
         state.suction > 1 ||
+        state.mobDropCap > 0 ||
         state.god ||
-        state.fullHp;
+        state.fullHp ||
+        state.autoPick;
 
       if (!needGame && gameControl) {
         gameControl.restore();
