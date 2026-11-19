@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.21
+// @version      0.6.22
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -254,7 +254,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.21', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.22', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -1546,7 +1546,9 @@
         return;
       }
 
-      if (shown('#splash')) {
+      // The game keeps #splash.menu visible behind the character selector.
+      if (shown('#splash:not(.menu)') && !shown('#npc-dialog') &&
+          !shown('#legal-popup') && !shown('#news-popup')) {
         if (reading) {
           stop('請先進入遊戲大廳，再按「讀取關卡」');
           return;
@@ -1567,7 +1569,7 @@
           return;
         }
         const playBtn = one('#sp-play');
-        if (enabled(playBtn)) {
+        if (enabled(playBtn) && !actions.has('sp-play')) {
           say('自動點擊開始遊戲…');
           clickOnce('sp-play', playBtn, now, 1200);
           return;
@@ -1598,7 +1600,7 @@
         }
       }
 
-      if (shown('#charselect')) {
+      if (shown('#charselect') && !shown('#npc-dialog') && !shown('#loading')) {
         if (reading) {
           stop('請先選擇角色進入遊戲，再按「讀取關卡」');
           return;
@@ -1637,6 +1639,13 @@
           targetSlot = filled.find(el => el.classList.contains('selected')) || filled[0];
         }
 
+        if (now - phaseAt > 15000) {
+          if (!scheduleReload(now, '選角或進入遊戲逾時')) {
+            stop('選角或進入遊戲逾時，已停止');
+          }
+          return;
+        }
+
         if (targetSlot && !targetSlot.classList.contains('selected')) {
           const name = targetSlot.querySelector('.slot-name')?.textContent?.trim() || '角色';
           say(`切換掛機角色：${name}…`);
@@ -1652,13 +1661,7 @@
           return;
         }
 
-        if (now - phaseAt > 15000) {
-          if (!scheduleReload(now, '進入遊戲沒有回應')) {
-            stop('進入遊戲沒有回應，已停止');
-          }
-        } else {
-          say('準備進入遊戲…');
-        }
+        say('準備進入遊戲…');
         return;
       }
 
@@ -1666,7 +1669,7 @@
         changePhase('loading', now);
 
         if (now - phaseAt > 120000) {
-          stop('載入逾時，已停止連刷');
+          if (!scheduleReload(now, '遊戲載入逾時')) stop('載入逾時，已停止連刷');
         } else {
           say('等待遊戲載入…');
         }
@@ -2018,7 +2021,7 @@
         return;
       }
 
-      const blocking = all('.overlay').find(visible);
+      const blocking = all('.overlay:not(#splash.menu)').find(visible);
 
       if (blocking || shown('#story')) {
         stop('遇到其他畫面，已停止；請手動處理後重新開始');
@@ -2375,7 +2378,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span>RO 實驗控制台</span>
-          <small class="ver-badge">0.6.21</small>
+          <small class="ver-badge">0.6.22</small>
         </div>
         <span class="win-actions">
           <button id="popout" class="icon-btn" title="另開獨立視窗">↗</button>
