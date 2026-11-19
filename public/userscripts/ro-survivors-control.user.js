@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.18
+// @version      0.6.21
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -254,7 +254,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.18', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.21', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -586,19 +586,6 @@
       }
     }
 
-    function maxBossSpawnTime(bosses) {
-      if (!Array.isArray(bosses)) return null;
-      let maxTime = null;
-      for (const boss of bosses) {
-        const t = boss?.t;
-        // Ignore the 1e9 (Jl) placeholder assigned before a rare boss is summoned.
-        if (typeof t === 'number' && Number.isFinite(t) && t >= 0 && t < 1e8) {
-          maxTime = maxTime === null ? t : Math.max(maxTime, t);
-        }
-      }
-      return maxTime;
-    }
-
     const VALUABLE_PICKUP_KINDS = new Set(['drop', 'ball', 'loot', 'card', 'egg', 'mystery']);
     // Under accelerated runs, keep per-species drop indices low and proportional
     // to expected wall-clock duration so the 10-item `mobLoot` cap is filled by
@@ -646,8 +633,7 @@
           cooldowns: null,
           accelerated: false,
           realTime: initialTime,
-          lastGameTime: initialTime,
-          bossSpawnTime: null
+          lastGameTime: initialTime
         };
 
         games.set(game, record);
@@ -829,13 +815,6 @@
         }
       }
 
-      const observedBossTime = maxBossSpawnTime(game.script?.bosses);
-      if (observedBossTime !== null) {
-        record.bossSpawnTime = record.bossSpawnTime === null
-          ? observedBossTime
-          : Math.max(record.bossSpawnTime, observedBossTime);
-      }
-
       syncHealth(game, record);
     }
 
@@ -867,23 +846,6 @@
 
         const value = record.discovery.value();
         return `尋寶率：${(value.base * 100).toFixed(0)}% → ${(value.total * 100).toFixed(0)}%`;
-      },
-      realSeconds() {
-        const record = latest && games.get(latest);
-        if (!record || !record.accelerated || !Number.isFinite(record.realTime)) {
-          return null;
-        }
-        return Math.max(0, Math.round(record.realTime));
-      },
-      bossSpawnSeconds() {
-        const record = latest && games.get(latest);
-        if (!record || !record.accelerated) return null;
-        const liveTime = maxBossSpawnTime(latest?.script?.bosses);
-        const recordedTime = record.bossSpawnTime;
-        if (liveTime === null && recordedTime === null) return null;
-        if (liveTime === null) return recordedTime;
-        if (recordedTime === null) return liveTime;
-        return Math.max(liveTime, recordedTime);
       },
       restore() {
         disposed = true;
@@ -2413,7 +2375,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span>RO 實驗控制台</span>
-          <small class="ver-badge">0.6.18</small>
+          <small class="ver-badge">0.6.21</small>
         </div>
         <span class="win-actions">
           <button id="popout" class="icon-btn" title="另開獨立視窗">↗</button>
@@ -2531,7 +2493,7 @@
           <div class="row" style="margin-top:8px">
             <label class="chip-check" style="padding:3px 8px">
               <input id="lootAudit" type="checkbox" checked>
-              <span>啟用結算診斷（自動鎖定合法掉寶序號）</span>
+              <span>記錄結算送出與核發數量</span>
             </label>
           </div>
           <small id="lootStatus" class="audit-box" aria-live="polite">等待下一局</small>
@@ -3076,22 +3038,18 @@
   function loadPanelSettings() {
     try {
       const saved = JSON.parse(localStorage.getItem(panelSettingsKey));
-      if (!saved || typeof saved !== 'object') return false;
-      let hasBoost = false;
+      if (!saved || typeof saved !== 'object') return;
       for (const id of Object.keys(limits)) {
         if (saved[id] !== undefined) {
           const val = settingValue(id, saved[id]);
           choose(id, val);
-          if (val !== defaults[id]) hasBoost = true;
         }
       }
       if (typeof saved.god === 'boolean') {
         $('god').checked = saved.god;
-        if (saved.god) hasBoost = true;
       }
       if (typeof saved.fullHp === 'boolean') {
         $('fullHp').checked = saved.fullHp;
-        if (saved.fullHp) hasBoost = true;
       }
       if (typeof saved.lootAudit === 'boolean') {
         $('lootAudit').checked = saved.lootAudit;
@@ -3102,9 +3060,8 @@
         $('body').classList.add('hidden');
         keepPanelVisible();
       }
-      return hasBoost;
     } catch {
-      return false;
+      return;
     }
   }
 
@@ -3374,209 +3331,11 @@
   }, 500);
 
   let apiNetworkErrors = 0;
-  const adjustedSecsByKey = new Map();
-  const playedByKey = new Map();
-  const runStartAtByKey = new Map();
   const origFetch = window.fetch;
-  function rememberBounded(map, key, value) {
-    if (typeof key !== 'string') return;
-    map.set(key, value);
-    if (map.size > 12) map.delete(map.keys().next().value);
-  }
-  function clampAcceleratedKills(target, elapsedSecs) {
-    if (!target || typeof target.kills !== 'object' || !target.kills) return false;
-    const speed = clamp(state.speed, 20);
-    const estWallSecs = Math.max(20, 900 / speed);
-    const wallSecs = Number.isFinite(elapsedSecs) && elapsedSecs > 0
-      ? Math.max(elapsedSecs, 1)
-      : estWallSecs;
-    const manualCap = Number(state.mobDropCap);
-    const perMobCap = Number.isFinite(manualCap) && manualCap > 0
-      ? Math.round(manualCap)
-      : Math.max(80, Math.min(450, Math.round(wallSecs * 4)));
-    const totalKillBudget = Math.max(perMobCap, Math.round(wallSecs * 12));
-    const dr = target.dr && typeof target.dr === 'object' ? target.dr : null;
-    const floors = new Map();
-    let changed = false;
-    let totalKills = 0;
-    let minTotalKills = 0;
-
-    for (const [mobId, countVal] of Object.entries(target.kills)) {
-      if (!Number.isInteger(countVal) || countVal <= 0) continue;
-      let maxDropIdx = 0;
-      const row = dr?.[mobId];
-      if (Array.isArray(row)) {
-        for (const list of [row[0], row[1]]) {
-          if (Array.isArray(list)) {
-            for (const idx of list) {
-              if (Number.isInteger(idx) && idx > maxDropIdx) maxDropIdx = idx;
-            }
-          }
-        }
-      }
-      // Keep kills >= highest reported drop index (and >= 1) while trimming overkill numbers.
-      const floorVal = Math.max(1, maxDropIdx);
-      floors.set(mobId, floorVal);
-      const nextCount = Math.min(countVal, Math.max(perMobCap, floorVal));
-      if (nextCount !== countVal) {
-        target.kills[mobId] = nextCount;
-        changed = true;
-      }
-      totalKills += nextCount;
-      minTotalKills += floorVal;
-    }
-
-    if (totalKills > totalKillBudget && totalKills > minTotalKills) {
-      const targetTotal = Math.max(totalKillBudget, minTotalKills);
-      const availableSlack = totalKills - minTotalKills;
-      const keepRatio = (targetTotal - minTotalKills) / availableSlack;
-      let remainingExcess = totalKills - targetTotal;
-
-      for (const [mobId, floorVal] of floors) {
-        const current = target.kills[mobId];
-        const slack = current - floorVal;
-        if (slack <= 0 || remainingExcess <= 0) continue;
-        const nextCount = floorVal + Math.floor(slack * keepRatio);
-        const trimmed = Math.min(remainingExcess, current - nextCount);
-        if (trimmed > 0) {
-          target.kills[mobId] = current - trimmed;
-          remainingExcess -= trimmed;
-          changed = true;
-        }
-      }
-
-      if (remainingExcess > 0) {
-        for (const [mobId, floorVal] of floors) {
-          const current = target.kills[mobId];
-          const slack = current - floorVal;
-          if (slack <= 0 || remainingExcess <= 0) continue;
-          const trimmed = Math.min(remainingExcess, slack);
-          target.kills[mobId] = current - trimmed;
-          remainingExcess -= trimmed;
-          changed = true;
-        }
-      }
-    }
-
-    return changed;
-  }
-
-  function normalizeAcceleratedRunTime(input, init) {
-    if (!init || typeof init.body !== 'string') return init;
-    const url = new URL(typeof input === 'string' ? input : input?.url ?? input, document.baseURI);
-    if (url.origin !== location.origin || !['/api/run', '/api/op', '/api/save'].includes(url.pathname)) {
-      return init;
-    }
-    const body = JSON.parse(init.body);
-    const now = performance.now();
-    if (url.pathname === '/api/run') {
-      if (typeof body?.key === 'string') {
-        rememberBounded(runStartAtByKey, body.key, now);
-      }
-      const speed = clamp(state.speed, 100);
-      if (speed <= 1 || body?.skip || typeof body?.played === 'number' || typeof body?.key !== 'string') {
-        return init;
-      }
-      // NOTE: The server rejects `played` on a fresh `/api/run` unless an existing
-      // server-side run is being resumed; it always starts fresh runs at wall-clock 0
-      // and caps monster/boss drop indices by real wall-clock elapsed time.
-      const expectedRunSecs = 915;
-      const played = Math.max(0, Math.round(expectedRunSecs - expectedRunSecs / speed));
-      if (played <= 0) return init;
-      body.played = played;
-      rememberBounded(playedByKey, body.key, played);
-      return { ...init, body: JSON.stringify(body) };
-    }
-    const op = url.pathname === '/api/save' ? 'save' : body?.op;
-    if (!['tick', 'save', 'loot', 'gloot'].includes(op)) return init;
-    const target = op === 'tick' || op === 'save' ? body.rk : body;
-    if (!target || typeof target.secs !== 'number' || !Number.isFinite(target.secs)) return init;
-
-    const key = typeof target.key === 'string' ? target.key : null;
-    const realSecs = gameControl?.realSeconds?.();
-    const playedOffset = key ? (playedByKey.get(key) ?? 0) : 0;
-    const startAt = key ? runStartAtByKey.get(key) : undefined;
-    const wallSecs = typeof startAt === 'number' && Number.isFinite(startAt)
-      ? Math.max(0, Math.floor((now - startAt) / 1000))
-      : null;
-    const elapsedSecs = realSecs !== null && realSecs !== undefined && Number.isFinite(realSecs)
-      ? (wallSecs !== null ? Math.max(realSecs, wallSecs) : realSecs)
-      : wallSecs;
-    const lastSentSecs = key ? (adjustedSecsByKey.get(key) ?? 0) : 0;
-    const isAccelerated = playedOffset > 0 || clamp(state.speed, 20) > 1 || realSecs !== null;
-    const killsChanged = isAccelerated ? clampAcceleratedKills(target, elapsedSecs) : false;
-
-    if (op === 'loot' || op === 'gloot') {
-      const bossSecs = gameControl?.bossSpawnSeconds?.();
-      const hasBossSecs = bossSecs !== null && bossSecs !== undefined && Number.isFinite(bossSecs);
-      if (!hasBossSecs && playedOffset <= 0 && elapsedSecs === null) {
-        return killsChanged ? { ...init, body: JSON.stringify(body) } : init;
-      }
-
-      const extraSecs = 5 + Math.floor(Math.random() * 11);
-      const bossTarget = hasBossSecs
-        ? Math.max(target.secs, Math.ceil(bossSecs) + extraSecs)
-        : target.secs;
-      const maxAllowed = playedOffset > 0 && elapsedSecs !== null
-        ? playedOffset + elapsedSecs
-        : null;
-      const floorSecs = Math.max(
-        0,
-        lastSentSecs,
-        target.secs,
-        hasBossSecs ? Math.ceil(bossSecs) + 2 : 0
-      );
-      const bounded = maxAllowed !== null ? Math.min(bossTarget, maxAllowed) : bossTarget;
-      const normalized = Math.max(floorSecs, bounded);
-      rememberBounded(adjustedSecsByKey, key, normalized);
-      if (normalized === target.secs && !killsChanged) return init;
-
-      target.secs = normalized;
-      return { ...init, body: JSON.stringify(body) };
-    }
-
-    // For intermediate tick/save requests, never send a `secs` higher than
-    // actual wall-clock elapsed time (`elapsedSecs`) without `playedOffset`,
-    // because the server ignores `played` on new runs and rejects intermediate
-    // ticks whose `secs` exceed real server elapsed time.
-    const fallbackSecs = key ? adjustedSecsByKey.get(key) : undefined;
-    const candidate = elapsedSecs ?? fallbackSecs;
-    if (candidate === null || candidate === undefined || !Number.isFinite(candidate)) {
-      return killsChanged ? { ...init, body: JSON.stringify(body) } : init;
-    }
-
-    const rawNormalized = Math.max(0, Math.min(target.secs, candidate));
-    const normalized = Math.max(lastSentSecs, rawNormalized);
-    rememberBounded(adjustedSecsByKey, key, normalized);
-    if (normalized === target.secs && !killsChanged) return init;
-
-    target.secs = normalized;
-    return { ...init, body: JSON.stringify(body) };
-  }
-
   window.fetch = function watchedFetch(...args) {
-    const input = args[0];
-    const init = args[1];
-    const request = input instanceof Request ? input : null;
-    const url = new URL(request?.url ?? String(input), location.href);
-    const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
-
-    if (method === 'POST' && url.pathname.endsWith('/api/env')) {
-      console.info('已在本機攔截：', method, url.pathname);
-      return Promise.resolve(new Response('{}', {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
-      }));
-    }
-
-    let nextArgs = args;
+    const result = origFetch.apply(this, args);
     try {
-      const nextInit = normalizeAcceleratedRunTime(args[0], args[1]);
-      if (nextInit !== args[1]) nextArgs = [args[0], nextInit, ...args.slice(2)];
-    } catch {}
-    const result = origFetch.apply(this, nextArgs);
-    try {
-      const input = nextArgs[0];
+      const input = args[0];
       const url = new URL(typeof input === 'string' ? input : input?.url ?? input, document.baseURI);
       if (url.origin === location.origin) {
         const isStatus = url.pathname.endsWith('/status.json');
@@ -3613,9 +3372,8 @@
 
   report('就緒 · 即時套用');
 
-  if (loadPanelSettings()) {
-    void applySettings();
-  }
+  loadPanelSettings();
+  void applySettings();
 
   if (isFarmRuntimeActive() && farmConfig.autoReconnect) {
     farm.start(false, true);
