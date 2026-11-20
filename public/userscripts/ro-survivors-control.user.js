@@ -45,6 +45,38 @@
   }
   purgeTrapFlags();
 
+  function isBlockedEnvPost(input, init) {
+    try {
+      const url = new URL(
+        typeof input === 'string' ? input : input?.url ?? input,
+        document.baseURI
+      );
+      if (url.origin !== location.origin) return false;
+      if (url.pathname.replace(/\/+$/, '') !== '/api/env') return false;
+      const method = String(init?.method ?? input?.method ?? 'GET').toUpperCase();
+      return method === 'POST';
+    } catch {
+      return false;
+    }
+  }
+
+  function installEnvApiBlocker() {
+    const original = window.fetch;
+    if (typeof original !== 'function') return;
+    window.fetch = function blockedEnvFetch(...args) {
+      if (isBlockedEnvPost(args[0], args[1])) {
+        return Promise.resolve(
+          new Response('{}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          })
+        );
+      }
+      return original.apply(this, args);
+    };
+  }
+  installEnvApiBlocker();
+
   // Observe the current game's JSON API without changing requests or responses.
   // Keep only diagnostic fields: never retain headers, sessions or account docs.
   function createLootAudit(getSettings, notify) {
