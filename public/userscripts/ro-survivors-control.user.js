@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.25
+// @version      0.6.27
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -37,6 +37,13 @@
     Number.isFinite(Number(v))
       ? Math.max(1, Math.min(max, Number(v)))
       : 1;
+
+  function purgeTrapFlags() {
+    try {
+      localStorage.removeItem('ro_gfx_cal');
+    } catch {}
+  }
+  purgeTrapFlags();
 
   // Observe the current game's JSON API without changing requests or responses.
   // Keep only diagnostic fields: never retain headers, sessions or account docs.
@@ -254,7 +261,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.25', exported: new Date().toISOString(),
+          version: 1, scriptVersion: '0.6.27', exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -293,26 +300,31 @@
     const descriptor = Object.getOwnPropertyDescriptor(game, 'recomputeStats');
 
     let tracked = null;
+    let baseDamageMult = 1;
     let baseDiscovery = 0;
     let baseMoney = 1;
     let baseReach = 1;
     let baseArea = 1;
+    let appliedDamageMult = 1;
     let appliedDiscovery = 0;
     let appliedMoney = 1;
     let appliedReach = 1;
     let appliedArea = 1;
+    let attackFactor = 1;
     let extra = 0;
     let moneyFactor = 1;
     let reachFactor = 1;
 
     function release() {
       if (tracked) {
+        if (Number.isFinite(tracked.damageMult)) tracked.damageMult /= attackFactor;
         if (Number.isFinite(tracked.discovery)) tracked.discovery -= extra;
         if (Number.isFinite(tracked.zenyMult)) tracked.zenyMult /= moneyFactor;
         if (Number.isFinite(tracked.reachMult)) tracked.reachMult /= reachFactor;
         if (Number.isFinite(tracked.areaMult)) tracked.areaMult /= reachFactor;
       }
       tracked = null;
+      attackFactor = 1;
       extra = 0;
       moneyFactor = 1;
       reachFactor = 1;
@@ -331,15 +343,20 @@
       if (tracked !== stats) {
         release();
         tracked = stats;
+        baseDamageMult = Number.isFinite(stats.damageMult) ? stats.damageMult : 1;
         baseDiscovery = stats.discovery;
         baseMoney = stats.zenyMult;
         baseReach = Number.isFinite(stats.reachMult) ? stats.reachMult : 1;
         baseArea = Number.isFinite(stats.areaMult) ? stats.areaMult : 1;
+        appliedDamageMult = baseDamageMult;
         appliedDiscovery = baseDiscovery;
         appliedMoney = baseMoney;
         appliedReach = baseReach;
         appliedArea = baseArea;
       } else {
+        if (Number.isFinite(stats.damageMult) && stats.damageMult !== appliedDamageMult) {
+          baseDamageMult += (stats.damageMult - appliedDamageMult) / attackFactor;
+        }
         if (stats.discovery !== appliedDiscovery) {
           baseDiscovery += stats.discovery - appliedDiscovery;
         }
@@ -354,15 +371,18 @@
         }
       }
 
+      attackFactor = clamp(state.attack, 100);
       extra = Math.max(0, Math.min(300, Number(state.discovery) || 0)) / 100;
       moneyFactor = clamp(state.money, 100);
       reachFactor = clamp(state.reach, 20);
 
+      appliedDamageMult = baseDamageMult * attackFactor;
       appliedDiscovery = baseDiscovery + extra;
       appliedMoney = baseMoney * moneyFactor;
       appliedReach = baseReach * reachFactor;
       appliedArea = baseArea * reachFactor;
 
+      if (Number.isFinite(stats.damageMult)) stats.damageMult = appliedDamageMult;
       stats.discovery = appliedDiscovery;
       stats.zenyMult = appliedMoney;
       if (Number.isFinite(stats.reachMult)) stats.reachMult = appliedReach;
@@ -444,6 +464,15 @@
       const current = game.weapons || [];
       const next = factor();
 
+      if (
+        current.length === weapons.size &&
+        next === lastFactor &&
+        current.every(w => weapons.has(w))
+      ) {
+        return;
+      }
+      lastFactor = next;
+
       for (const weapon of current) {
         if (typeof weapon.finalCooldown !== 'function') continue;
 
@@ -483,6 +512,7 @@
       }
     }
 
+    let lastFactor = NaN;
     sync();
 
     return {
@@ -510,6 +540,9 @@
     let disposed = false;
 
     function neutralizeSpringTrap(game) {
+      purgeTrapFlags();
+      if (Number.isFinite(game.trapAt) && game.trapAt >= 0) game.trapAt = -1;
+      if (Number.isFinite(game.trapShotAt) && game.trapShotAt >= 0) game.trapShotAt = -1;
       const proto = Object.getPrototypeOf(game);
       if (
         !proto ||
@@ -635,27 +668,17 @@
       };
     }
 
-    function syncHealth(game, record) {
-      record.discovery?.refresh();
-      record.cooldowns?.refresh();
-      installBackgroundAutoPick(game, record);
-
+    function syncWeapons(game, record) {
+      const current = game.weapons || [];
       if (
-        !disposed &&
-        state.autoPick &&
-        state.immediateCards &&
-        game.banking &&
-        game.state === 'playing' &&
-        !game.bankOpen &&
-        !game.player?.dead &&
-        !game.coop?.replica &&
-        Number(game.bankCount) > 0 &&
-        typeof game.pressBank === 'function'
+        current.length === record.lastWeaponCount &&
+        current.every(w => record.weapons.has(w))
       ) {
-        try { game.pressBank(); } catch {}
+        return;
       }
+      record.lastWeaponCount = current.length;
 
-      for (const weapon of game.weapons || []) {
+      for (const weapon of current) {
         if (record.weapons.has(weapon)) continue;
 
         const patches = [];
@@ -682,13 +705,49 @@
       }
 
       for (const [weapon, patches] of record.weapons) {
-        if (game.weapons?.includes(weapon)) continue;
+        if (current.includes(weapon)) continue;
 
         for (const p of patches) {
           restorePatchedMethod(weapon, p.method, p.wrapped, p.descriptor);
         }
         record.weapons.delete(weapon);
       }
+    }
+
+    function syncHealth(game, record, full = false) {
+      if (full) {
+        record.discovery?.refresh();
+      }
+      record.cooldowns?.refresh();
+      if (!record.eventsPatched) {
+        installBackgroundAutoPick(game, record);
+      }
+
+      if (
+        !disposed &&
+        state.autoPick &&
+        state.immediateCards &&
+        game.state === 'playing' &&
+        !game.bankOpen &&
+        !game.player?.dead &&
+        !game.coop?.replica
+      ) {
+        if (
+          game.banking &&
+          Number(game.bankCount) > 0 &&
+          typeof game.pressBank === 'function'
+        ) {
+          try { game.pressBank(); } catch {}
+        } else if (
+          Number(game.pendingLevelUps) > 0 &&
+          !game.levelUpQueued &&
+          typeof game.openLevelUp === 'function'
+        ) {
+          try { game.openLevelUp(); } catch {}
+        }
+      }
+
+      syncWeapons(game, record);
 
       if (state.god) {
         if (!record.godApplied) {
@@ -775,18 +834,19 @@
     }
 
     function observe(game) {
-      if (disposed || !game?.player || !game.stats) return;
+      if (disposed || !game?.player || !game.stats) return null;
 
-      neutralizeSpringTrap(game);
       latest = game;
       let record = games.get(game);
 
       if (!record) {
+        neutralizeSpringTrap(game);
         const initialTime = Number.isFinite(game.time) ? Math.max(0, game.time) : 0;
         record = {
           godApplied: false,
           methods: [],
           weapons: new Map(),
+          lastWeaponCount: -1,
           discovery: null,
           cooldowns: null,
           accelerated: false,
@@ -818,6 +878,10 @@
             // the 3s `onDrop` tick timer settle cleanly without waiting a full 10s.
             const factor = closing ? Math.min(requestedFactor, 3) : requestedFactor;
 
+            if (!disposed) {
+              syncHealth(this, record, false);
+            }
+
             if (
               disposed ||
               factor === 1 ||
@@ -837,7 +901,12 @@
 
             record.accelerated = true;
             const beforeTime = Number.isFinite(this.time) ? this.time : NaN;
-            const count = Math.ceil(factor);
+            // Game native advance(dt) caps each call at 5 steps (5 * 0.025s = 0.125s).
+            // Batch into chunks of up to 0.1s per call to reduce call overhead while
+            // respecting the 8ms frame budget so rendering stays smooth.
+            const totalDt = dt * factor;
+            const count = Math.max(1, Math.ceil(totalDt / 0.1));
+            const stepDt = totalDt / count;
             const began = performance.now();
             let result;
 
@@ -845,12 +914,12 @@
               if (disposed || this.state !== 'playing') break;
               if (!closing && Number.isFinite(this.closeAt) && this.closeAt >= 0) break;
 
-              if (i > 0 && performance.now() - began >= 12) {
+              if (i > 0 && performance.now() - began >= 8) {
                 state.limited++;
                 break;
               }
 
-              result = original.call(this, dt * factor / count);
+              result = original.call(this, stepDt);
             }
 
             syncRealTime(this, beforeTime, factor);
@@ -893,13 +962,15 @@
 
                   const dx = this.player.x - item.x;
                   const dy = this.player.y - 20 - item.y;
-                  const distance = Math.hypot(dx, dy);
+                  const distSq = dx * dx + dy * dy;
                   const reach = radius * (item.kind === 'drop' ? 3.5 : 1);
 
                   if (
-                    !(distance > 18) ||
-                    (!item.magnet && distance >= reach)
+                    !(distSq > 324) ||
+                    (!item.magnet && distSq >= reach * reach)
                   ) continue;
+
+                  const distance = Math.sqrt(distSq);
 
                   const speed = item.vacuum
                     ? 1100
@@ -973,30 +1044,63 @@
         }
       }
 
-      syncHealth(game, record);
+      syncHealth(game, record, true);
+      return record;
     }
 
-    function guard(game, damage) {
+    const hookedSlots = [];
+
+    function wrapExistingSlot(list, index, wrapperFactory) {
+      if (!Array.isArray(list) || typeof list[index] !== 'function') return false;
+      const original = list[index];
+      const wrapped = wrapperFactory(original);
+      list[index] = wrapped;
+      hookedSlots.push({ list, index, original, wrapped });
+      return true;
+    }
+
+    const wrappedStart = wrapExistingSlot(hooks.start, 0, orig => function(game, ...rest) {
       observe(game);
-      return state.god ? 0 : damage;
-    }
+      return orig.call(this, game, ...rest);
+    });
 
-    function damage(game) {
+    const wrappedHurt = wrapExistingSlot(hooks.hurt, 0, orig => function(game, damage, ...rest) {
       if (!games.has(game)) observe(game);
-      return clamp(state.attack, 100);
+      if (state.god) return 0;
+      return orig.call(this, game, damage, ...rest);
+    });
+
+    const wrappedDamage = wrapExistingSlot(hooks.damageMult, 0, orig => function(game, ...rest) {
+      if (!games.has(game)) observe(game);
+      return orig.call(this, game, ...rest);
+    });
+
+    const pushedHooks = [];
+    if (!wrappedStart) {
+      const onStart = game => observe(game);
+      hooks.start.push(onStart);
+      pushedHooks.push([hooks.start, onStart]);
     }
-
-    const onStart = game => observe(game);
-    const onTick = game => observe(game);
-
-    hooks.start.push(onStart);
-    hooks.tick.push(onTick);
-    hooks.hurt.push(guard);
-    hooks.damageMult.push(damage);
+    if (!wrappedHurt) {
+      const guard = (game, damage) => {
+        if (!games.has(game)) observe(game);
+        return state.god ? 0 : damage;
+      };
+      hooks.hurt.push(guard);
+      pushedHooks.push([hooks.hurt, guard]);
+    }
+    if (!wrappedDamage) {
+      const damage = game => {
+        if (!games.has(game)) observe(game);
+        return 1;
+      };
+      hooks.damageMult.push(damage);
+      pushedHooks.push([hooks.damageMult, damage]);
+    }
 
     return {
       refresh() {
-        for (const [game, record] of games) syncHealth(game, record);
+        for (const [game, record] of games) syncHealth(game, record, true);
       },
       status() {
         const record = latest && games.get(latest);
@@ -1008,15 +1112,16 @@
       restore() {
         disposed = true;
 
-        for (const [list, fn] of [
-          [hooks.start, onStart],
-          [hooks.tick, onTick],
-          [hooks.hurt, guard],
-          [hooks.damageMult, damage]
-        ]) {
+        for (const { list, index, original, wrapped } of hookedSlots) {
+          if (list[index] === wrapped) list[index] = original;
+        }
+        hookedSlots.length = 0;
+
+        for (const [list, fn] of pushedHooks) {
           const at = list.indexOf(fn);
           if (at >= 0) list.splice(at, 1);
         }
+        pushedHooks.length = 0;
 
         for (const [game, record] of games) undo(game, record);
         games.clear();
@@ -1027,6 +1132,42 @@
         latest = null;
       }
     };
+  }
+
+  function isDecoyPickerElement(el) {
+    if (!el || typeof el.closest !== 'function') return true;
+    const slot = el.closest('.pk-slot') || el;
+    if (
+      slot.getAttribute('aria-hidden') === 'true' ||
+      el.getAttribute('aria-hidden') === 'true' ||
+      slot.closest('[aria-hidden="true"]') ||
+      slot.style?.pointerEvents === 'none' ||
+      slot.style?.clipPath ||
+      el.tabIndex === -1
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function invokeCardHandler(node) {
+    if (!node || isDecoyPickerElement(node)) return false;
+    if (typeof node.onclick === 'function') {
+      node.onclick({
+        isTrusted: false,
+        detail: 0,
+        pointerType: '',
+        clientX: 0,
+        clientY: 0,
+        target: node,
+        currentTarget: node,
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {}
+      });
+      return true;
+    }
+    return false;
   }
 
   function classifyTimer(fn, delay) {
@@ -1070,7 +1211,8 @@
         return;
       }
 
-      const current = Array.from(picker.querySelectorAll('.pk-card'));
+      const current = Array.from(picker.querySelectorAll('.pk-card'))
+        .filter(node => !isDecoyPickerElement(node));
 
       if (
         current.length !== cards.length ||
@@ -1083,7 +1225,8 @@
 
       for (const node of [
         ...cards,
-        ...picker.querySelectorAll('[data-yes]')
+        ...Array.from(picker.querySelectorAll('[data-yes]'))
+          .filter(n => !isDecoyPickerElement(n))
       ]) {
         const old = records.get(node);
         if (old && node.onclick === old.wrapped) continue;
@@ -1152,7 +1295,8 @@
       if (/^[1-9]$/.test(event.key)) {
         node = cards[Number(event.key) - 1];
       } else if (event.key === 'Enter') {
-        node = picker.querySelector('.pk-slot.asking [data-yes]');
+        node = Array.from(picker.querySelectorAll('.pk-slot.asking [data-yes]'))
+          .find(n => !isDecoyPickerElement(n));
       }
 
       if (!node) return;
@@ -1160,7 +1304,7 @@
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      if (!event.repeat) node.click();
+      if (!event.repeat) invokeCardHandler(node);
     }
 
     window.addEventListener('keydown', keyboard, true);
@@ -1180,26 +1324,11 @@
     const raf = window.requestAnimationFrame;
     const cancel = window.cancelAnimationFrame;
 
-    const tracks = new WeakMap();
-    const classification = new WeakMap();
     const animations = new Map();
 
     let disposed = false;
     let pending = 0;
     let inputClock = null;
-
-    function isReveal(fn) {
-      if (!classification.has(fn)) {
-        const s = Function.prototype.toString.call(fn);
-        classification.set(
-          fn,
-          s.includes('pk-landed') &&
-          /\.slots\[/.test(s) &&
-          /const\s+\w+=\w+-\w+/.test(s)
-        );
-      }
-      return classification.get(fn);
-    }
 
     function scaledTimeout(fn, delay, ...args) {
       const ms = !disposed && classifyTimer(fn, Number(delay))
@@ -1207,27 +1336,6 @@
         : delay;
 
       return timeout.call(window, fn, ms, ...args);
-    }
-
-    function scaledFrame(fn) {
-      if (disposed || typeof fn !== 'function' || !isReveal(fn)) {
-        return raf.call(window, fn);
-      }
-
-      let track = tracks.get(fn);
-
-      if (!track) {
-        const now = performance.now();
-        track = { real: now, virtual: now };
-        tracks.set(fn, track);
-      }
-
-      return raf.call(window, stamp => {
-        track.virtual += Math.max(0, stamp - track.real) *
-          (disposed ? 1 : clamp(state.animation, 10));
-        track.real = stamp;
-        fn(track.virtual);
-      });
     }
 
     function applyCSS() {
@@ -1275,7 +1383,6 @@
     }
 
     window.setTimeout = scaledTimeout;
-    window.requestAnimationFrame = scaledFrame;
     applyCSS();
 
     return {
@@ -1289,9 +1396,6 @@
 
         if (window.setTimeout === scaledTimeout) {
           window.setTimeout = timeout;
-        }
-        if (window.requestAnimationFrame === scaledFrame) {
-          window.requestAnimationFrame = raf;
         }
 
         for (const [animation, rate] of animations) {
@@ -1376,25 +1480,39 @@
         }
         const original = prototype.render;
         const descriptor = Object.getOwnPropertyDescriptor(prototype, 'render');
+        const sheetCache = {};
+        let lastScanAt = -Infinity;
+        let cachedNpcs = null;
+        let cachedWorld = null;
         let active = true;
         function wrapped(layer, ...args) {
           const result = original.call(this, layer, ...args);
           try {
             if (active && inLobby() && this.map?.name === 'prontera_plaza' && !this.gone) {
+              const now = clock();
               const player = { x: this.target?.x, y: this.target?.z };
-              const npcs = {};
-              for (const [key, { sprite }] of Object.entries(lobbyNpcs)) {
-                const sheet = sheets.sheetInfo(sprite);
-                const actor = sheet && layer?.children?.find(view =>
-                  view.children?.some(child => child.sheet === sheet));
-                if (usable(actor)) npcs[key] = { x: actor.x, y: actor.y };
+              if (this !== cachedWorld || !cachedNpcs || now - lastScanAt >= 400) {
+                lastScanAt = now;
+                cachedWorld = this;
+                const npcs = {};
+                const children = layer?.children;
+                if (Array.isArray(children)) {
+                  for (const [key, { sprite }] of Object.entries(lobbyNpcs)) {
+                    const sheet = sheetCache[sprite] ??= sheets.sheetInfo(sprite);
+                    if (!sheet) continue;
+                    const actor = children.find(view =>
+                      view.children?.some(child => child.sheet === sheet));
+                    if (usable(actor)) npcs[key] = { x: actor.x, y: actor.y };
+                  }
+                }
+                if (Object.keys(npcs).length) cachedNpcs = npcs;
               }
-              if (usable(player) && Object.keys(npcs).length) {
+              if (usable(player) && cachedNpcs) {
                 scene = {
-                  world: this, player, npcs,
-                  captain: npcs.captain || null,
-                  festival: npcs.festival || null,
-                  at: clock()
+                  world: this, player, npcs: cachedNpcs,
+                  captain: cachedNpcs.captain || null,
+                  festival: cachedNpcs.festival || null,
+                  at: now
                 };
               }
             }
@@ -1536,9 +1654,10 @@
     };
 
     function pickBestDomCard(docRef = doc) {
-      const yes = Array.from(docRef.querySelectorAll('#picker .pk-slot.asking [data-yes]')).find(enabled);
+      const valid = el => enabled(el) && !isDecoyPickerElement(el);
+      const yes = Array.from(docRef.querySelectorAll('#picker .pk-slot.asking [data-yes]')).find(valid);
       if (yes) return yes;
-      const cards = Array.from(docRef.querySelectorAll('#picker .pk-card')).filter(enabled);
+      const cards = Array.from(docRef.querySelectorAll('#picker .pk-card')).filter(valid);
       if (!cards.length) return null;
       let bestCard = cards[0];
       let bestScore = -Infinity;
@@ -1728,8 +1847,8 @@
     }
 
     function tick() {
-      refreshStages();
-      refreshCharacters();
+      if (shown('#stages')) refreshStages();
+      if (shown('#charselect')) refreshCharacters();
 
       if (!running && !reading) return;
 
@@ -2019,8 +2138,42 @@
         const dialogText = one('#npc-text')?.textContent?.trim() || '';
         const buttons = all('#npc-options button');
 
+        const isUnfinishedRun =
+          /^(未完成的一局|Partida a medias|Unfinished run|Partida inacabada|中断したラン)$/i.test(title) ||
+          /離開了一局|要從那裡繼續嗎|Dejaste una partida|Quieres seguir desde ahí|You left a run|Do you want to continue from there|deixou uma partida|ランを中断しています/i.test(dialogText);
+
+        if (isUnfinishedRun && running) {
+          const continueBtn =
+            buttons.find(btn =>
+              /^(繼續|Continuar|Resume|再開)$/i.test(btn.textContent.trim())
+            ) ||
+            (buttons.length === 2 ? one('#npc-options button.primary') : null) ||
+            (buttons.length === 1 ? buttons[0] : null);
+
+          if (enabled(continueBtn)) {
+            say(buttons.length === 1 ? '上一局已結算，確認並返回…' : '發現未完成的一局，自動繼續戰鬥…');
+            clickOnce('unfinished:' + buttons.length, continueBtn, now, 1200);
+            return;
+          }
+        }
+
+        const isSaveRunRetry =
+          /^(儲存遊戲|Guardar partida|Save run|Salvar partida|ランを保存)$/i.test(title);
+
+        if (isSaveRunRetry && running) {
+          const retryBtn =
+            buttons.find(btn =>
+              /^(重試|Reintentar|Retry|Tentar de novo|再試行)$/i.test(btn.textContent.trim())
+            ) || one('#npc-options button.primary');
+          if (enabled(retryBtn)) {
+            say('重試儲存上一局戰利品…');
+            clickOnce('save-retry', retryBtn, now, 1500);
+            return;
+          }
+        }
+
         const informational =
-          /^(未完待續[.…！!]*|待續[.…！!]*|Continuará[.…!]*|To be continued[.…!]*|Continua[.…!]*|Continua a seguir[.…!]*|閒置|離開|暫離|Ausente|Away|Idle|AFK|Inactivo|Ausência)$/i.test(title) ||
+          /^(未完待續[.…！!]*|待續[.…！!]*|Continuará[.…!]*|To be continued[.…!]*|Continua[.…!]*|Continua a seguir[.…!]*|閒置|離開|暫離|Ausente|Away|Idle|AFK|Inactivo|Ausência|已捨棄本局|Partida descartada|Run discarded|ランを破棄しました|你的上一局|Tu última partida|Your last run|Sua última partida|前回のラン)$/i.test(title) ||
           !!one('#npc-text .pending-loot') ||
           /5\s*(分鐘|minutos|minutes)/i.test(dialogText);
 
@@ -2216,7 +2369,7 @@
 
         if (target) {
           nextAt = now + 220;
-          target.click();
+          invokeCardHandler(target);
           say('自動選卡：優先選擇高品質卡片');
         }
         return;
@@ -2281,13 +2434,6 @@
         changePhase('playing', now);
         deck = null;
 
-        const bank = one('#bank-btn');
-
-        if (config.immediateCards && config.autoPick && enabled(bank)) {
-          nextAt = now + 400;
-          bank.click();
-        }
-
         say('戰鬥中 · 已結算 ' + completed + ' 局');
         return;
       }
@@ -2344,15 +2490,15 @@
       ::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.48)}
       section{
         width:336px;max-width:calc(100vw - 24px);
-        background:linear-gradient(165deg,rgba(19,25,40,.94) 0%,rgba(11,15,26,.97) 100%);
-        backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+        background:linear-gradient(165deg,rgba(19,25,40,.97) 0%,rgba(11,15,26,.99) 100%);
         color:#f1f5f9;
         border:1px solid rgba(212,175,106,.32);
         border-radius:16px;
-        box-shadow:0 20px 50px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.04) inset,0 1px 0 rgba(255,236,196,.18) inset;
+        box-shadow:0 16px 36px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04) inset,0 1px 0 rgba(255,236,196,.18) inset;
         font:12.5px/1.45 "Inter","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
         overflow:hidden;
-        transition:box-shadow .2s ease,border-color .2s ease
+        contain:layout style paint;
+        transition:border-color .2s ease
       }
       section:hover{
         border-color:rgba(212,175,106,.48)
@@ -2579,7 +2725,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span>RO 實驗控制台</span>
-          <small class="ver-badge">0.6.25</small>
+          <small class="ver-badge">0.6.27</small>
         </div>
         <span class="win-actions">
           <button id="popout" class="icon-btn" title="另開獨立視窗">↗</button>
@@ -2885,6 +3031,7 @@
 
   const MAIN_SCRIPT_RE = /^\/build\/main-[A-Za-z0-9_-]+\.js$/;
   const SOUL_LINKER_RE = /(["'])(\.\/soul_linker-[A-Za-z0-9_-]+\.js)\1/;
+  let cachedSoulLinkerUrl = null;
   const isGameHooks = v =>
     !!v && typeof v === 'object' &&
     ['start', 'tick', 'hurt', 'damageMult'].every(k => Array.isArray(v[k]));
@@ -2900,7 +3047,39 @@
     });
   }
 
+  function findPreloadedSoulLinker() {
+    if (cachedSoulLinkerUrl) return cachedSoulLinkerUrl;
+    for (const link of document.querySelectorAll('link[href*="soul_linker-"]')) {
+      try {
+        const url = new URL(link.href, document.baseURI);
+        if (url.origin === location.origin && /^\/build\/soul_linker-[A-Za-z0-9_-]+\.js$/.test(url.pathname)) {
+          cachedSoulLinkerUrl = url.href;
+          return cachedSoulLinkerUrl;
+        }
+      } catch {}
+    }
+    try {
+      const entries = performance.getEntriesByType?.('resource') || [];
+      for (const entry of entries) {
+        const url = new URL(entry.name, document.baseURI);
+        if (url.origin === location.origin && /^\/build\/soul_linker-[A-Za-z0-9_-]+\.js$/.test(url.pathname)) {
+          cachedSoulLinkerUrl = url.href;
+          return cachedSoulLinkerUrl;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
   function loadGameModule(main = findMainScript()) {
+    const preloaded = findPreloadedSoulLinker();
+    if (preloaded) {
+      modulePromise ??= import(preloaded).catch(error => {
+        modulePromise = null;
+        throw error;
+      });
+      return modulePromise;
+    }
     if (!main) return Promise.reject(Error('找不到遊戲主腳本（/build/main-*.js）'));
     modulePromise ??= fetch(main.src, { credentials: 'same-origin' })
       .then(res => {
@@ -2910,7 +3089,8 @@
       .then(text => {
         const match = text.match(SOUL_LINKER_RE);
         if (!match) throw Error('版本不符；找不到 soul_linker 模組');
-        return import(new URL(match[2], main.src).href);
+        cachedSoulLinkerUrl = new URL(match[2], main.src).href;
+        return import(cachedSoulLinkerUrl);
       })
       .catch(error => { modulePromise = null; throw error; });
     return modulePromise;
@@ -3168,7 +3348,7 @@
   });
 
   function sendAntiIdlePulse() {
-    if (!farmConfig.antiIdle) return;
+    if (!farmConfig.antiIdle || !document.body?.classList?.contains('in-lobby')) return;
     try {
       const EventCtor = window.PointerEvent || window.MouseEvent || window.Event;
       if (typeof EventCtor === 'function') {
@@ -3200,21 +3380,26 @@
 
   function standAloneAutoPickStep() {
     if (farm.running || !farmConfig.autoPick) return;
-    const isVisible = el =>
+    const isOpen = el =>
       !!el &&
       el.isConnected &&
+      !el.classList.contains('hidden') &&
+      !el.hidden;
+    const isVisible = el =>
+      isOpen(el) &&
       !el.closest('.hidden,[hidden]') &&
       el.getClientRects().length > 0;
     const isEnabled = el =>
       isVisible(el) &&
+      !isDecoyPickerElement(el) &&
       !el.disabled &&
       el.getAttribute('aria-disabled') !== 'true';
 
     const picker = document.getElementById('picker');
-    if (isVisible(picker) && !picker.classList.contains('closing')) {
+    if (isOpen(picker) && !picker.classList.contains('closing')) {
       const yes = Array.from(document.querySelectorAll('#picker .pk-slot.asking [data-yes]')).find(isEnabled);
       if (yes) {
-        yes.click();
+        invokeCardHandler(yes);
         return;
       }
       const cards = Array.from(document.querySelectorAll('#picker .pk-card')).filter(isEnabled);
@@ -3247,14 +3432,9 @@
             bestCard = card;
           }
         });
-        bestCard.click();
+        invokeCardHandler(bestCard);
         return;
       }
-    }
-
-    if (farmConfig.immediateCards) {
-      const bank = document.getElementById('bank-btn');
-      if (isEnabled(bank)) bank.click();
     }
   }
 
@@ -3361,9 +3541,10 @@
 
     $('god').checked = $('fullHp').checked = false;
 
-    gameControl?.restore();
+    purgeTrapFlags();
+    gameControl?.refresh();
     animation?.restore();
-    gameControl = animation = null;
+    animation = null;
 
     if (persist) savePanelSettings();
 
@@ -3374,6 +3555,7 @@
 
   async function applySettings() {
     const request = ++generation;
+    purgeTrapFlags();
 
     const desired = Object.fromEntries(
       Object.keys(limits).map(id => [id, settingValue(id, $(id).value)])
@@ -3383,16 +3565,6 @@
     desired.fullHp = $('fullHp').checked;
     desired.autoPick = farmConfig.autoPick;
     desired.immediateCards = farmConfig.immediateCards;
-
-    if (
-      Object.keys(limits).every(id => desired[id] === defaults[id]) &&
-      !desired.god &&
-      !desired.fullHp &&
-      !desired.autoPick
-    ) {
-      restore(false);
-      return;
-    }
 
     try {
       const main = findMainScript();
@@ -3404,27 +3576,7 @@
 
       if (speedChanged) resetMeter();
 
-      const needGame =
-        state.speed > 1 ||
-        state.attack > 1 ||
-        state.cooldown > 0 ||
-        state.targets > 1 ||
-        state.reach > 1 ||
-        state.money > 1 ||
-        state.discovery > 0 ||
-        state.pickup > 1 ||
-        state.suction > 1 ||
-        state.mobDropCap > 0 ||
-        state.god ||
-        state.fullHp ||
-        state.autoPick;
-
-      if (!needGame && gameControl) {
-        gameControl.restore();
-        gameControl = null;
-      } else {
-        gameControl?.refresh();
-      }
+      gameControl?.refresh();
 
       if (state.animation > 1) {
         if (!animation) animation = installAnimationHook(state);
@@ -3434,7 +3586,7 @@
         animation = null;
       }
 
-      if (needGame && !gameControl) {
+      if (!gameControl) {
         report('連接中…');
 
         const module = await loadGameModule(main);
