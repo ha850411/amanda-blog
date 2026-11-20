@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname,
     '../../public/userscripts/ro-survivors-control.user.js'), 'utf8');
-const begin = source.indexOf('  function createLootAudit(');
+const begin = source.indexOf('  const SCRIPT_VERSION =');
 const end = source.indexOf('  function installStatBoosts(', begin);
 assert.ok(begin >= 0 && end > begin);
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
@@ -158,6 +158,9 @@ test('bounded history, duplicate installation and restore leave later wrappers i
     assert.equal(runs.at(-1).events.length, 120);
     assert.equal(runs.at(-1).omittedEvents, 6);
     e.audit.stop();
+    assert.equal(e.audit.summary(), '診斷已關閉');
+    assert.equal(e.data().scriptVersion, source.match(/^\/\/ @version\s+(\S+)/m)[1]);
+    assert.equal(e.data().runs.length, 12);
     assert.equal(e.window.fetch, e.original);
     e.audit.start();
     const observer = e.window.fetch;

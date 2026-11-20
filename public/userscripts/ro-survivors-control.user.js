@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RO Survivors 實驗控制面板
 // @namespace    local.ro-survivors.controls
-// @version      0.6.28
+// @version      0.6.29
 // @description:en Local test build; automatic remote updates intentionally disabled.
 // @description  自動走向遠征隊長／節慶主持人、選角進場、斷線維修每5秒重整重連、記憶設定與結算診斷（動態相容遊戲建置）。
 // @match        https://ro-survivors.com/*
@@ -76,6 +76,8 @@
     };
   }
   installEnvApiBlocker();
+
+  const SCRIPT_VERSION = '0.6.29';
 
   // Observe the current game's JSON API without changing requests or responses.
   // Keep only diagnostic fields: never retain headers, sessions or account docs.
@@ -269,8 +271,9 @@
         update();
       },
       summary() {
+        if (!restoreFetch) return '診斷已關閉';
         const run = [...runs.values()].at(-1);
-        if (!run) return restoreFetch ? '診斷已開啟，等待下一局' : '診斷已關閉';
+        if (!run) return '診斷已開啟，等待下一局';
         const event = run.events.findLast(e => e.op === 'loot' || e.op === 'gloot')
           ?? run.events.at(-1);
         const sent = event.sent?.gear ?? '—';
@@ -293,7 +296,7 @@
       },
       exportData() {
         return JSON.parse(JSON.stringify({
-          version: 1, scriptVersion: '0.6.27', exported: new Date().toISOString(),
+          version: 1, scriptVersion: SCRIPT_VERSION, exported: new Date().toISOString(),
           note: 'Only observed traffic. Missing starts, resumed runs, mail and group loot require separate confirmation.',
           runs: [...runs.values()].map(({ start, ...run }) => run)
         }));
@@ -2206,8 +2209,7 @@
 
         const informational =
           /^(未完待續[.…！!]*|待續[.…！!]*|Continuará[.…!]*|To be continued[.…!]*|Continua[.…!]*|Continua a seguir[.…!]*|閒置|離開|暫離|Ausente|Away|Idle|AFK|Inactivo|Ausência|已捨棄本局|Partida descartada|Run discarded|ランを破棄しました|你的上一局|Tu última partida|Your last run|Sua última partida|前回のラン)$/i.test(title) ||
-          !!one('#npc-text .pending-loot') ||
-          /5\s*(分鐘|minutos|minutes)/i.test(dialogText);
+          !!one('#npc-text .pending-loot');
 
         if (informational && buttons.length === 1 && running) {
           clickOnce('ack:' + title, buttons[0], now);
@@ -2757,7 +2759,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <span>RO 實驗控制台</span>
-          <small class="ver-badge">0.6.27</small>
+          <small class="ver-badge">${SCRIPT_VERSION}</small>
         </div>
         <span class="win-actions">
           <button id="popout" class="icon-btn" title="另開獨立視窗">↗</button>
@@ -3757,34 +3759,31 @@
   $('popout').onclick = openPanelWindow;
   window.addEventListener('pagehide', () => returnPanel());
 
-  setInterval(() => {
-    if (state.inputClockBlocked) {
-      $('status').textContent = '瀏覽器不允許縮短點選鎖定';
-    }
-
-    $('discoveryStatus').textContent =
-      gameControl ? gameControl.status() : '尋寶率：原始值';
-
-    const text = document.getElementById('timer')?.textContent?.trim();
-    const match = text?.match(/^(\d+):(\d{2})$/);
-
+  function updateSpeedMeter() {
+    const timer = document.getElementById('timer');
+    const match = timer?.textContent.trim().match(/^(\d+):([0-5]\d)$/);
     const blocked = ['picker', 'pause', 'gameover'].some(id => {
       const e = document.getElementById(id);
-      return e && !e.classList.contains('hidden');
+      return e && !e.closest('.hidden,[hidden]');
     });
 
-    if (!match || blocked || document.hidden) {
+    if (blocked || document.hidden || !match || timer.closest('.hidden,[hidden]')) {
       samples = [];
-      $('meter').textContent = '實測速度：暫停／選卡中';
+      $('meter').textContent = blocked || document.hidden
+        ? '實測速度：已暫停' : '實測速度：等待計時器';
       return;
     }
 
     const now = performance.now();
-    const game = Number(match[1]) * 60 + Number(match[2]);
+    // During the last 30 seconds the MVP timer also carries the loot class.
+    const mode = timer.classList.contains('mvp') ? 'mvp'
+      : timer.classList.contains('loot') ? 'loot' : 'elapsed';
+    const seconds = Number(match[1]) * 60 + Number(match[2]);
+    const game = mode === 'elapsed' ? seconds : -seconds;
+    const last = samples.at(-1);
+    if (last && (mode !== last.mode || game < last.game)) samples = [];
 
-    if (samples.length && game < samples.at(-1).game) samples = [];
-
-    samples.push({ now, game });
+    samples.push({ now, game, mode });
 
     while (samples.length > 1 && now - samples[0].now > 11000) {
       samples.shift();
@@ -3796,6 +3795,16 @@
     $('meter').textContent = elapsed >= 5
       ? `實測速度：${((game - first.game) / elapsed).toFixed(2)}×${state.limited ? ' · 效能限制' : ''}`
       : '實測速度：量測中…';
+  }
+
+  document.addEventListener('visibilitychange', () => { samples = []; });
+  setInterval(() => {
+    if (state.inputClockBlocked) {
+      $('status').textContent = '瀏覽器不允許縮短點選鎖定';
+    }
+    $('discoveryStatus').textContent =
+      gameControl ? gameControl.status() : '尋寶率：原始值';
+    updateSpeedMeter();
   }, 500);
 
   let apiNetworkErrors = 0;

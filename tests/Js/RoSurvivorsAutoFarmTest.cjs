@@ -13,6 +13,7 @@ const createAutoFarm = vm.runInNewContext(
 );
 
 function environment({ screen = 'settlement', label = '單人大廳', dismiss = true,
+    dialogTitle = '選擇大廳', dialogText = '',
     soloDisabled = false, chooser = true, extraButton = false,
     captainNear = true, festivalNear = false, stagesLoaded = true,
     stage = '0', navigation = null } = {}) {
@@ -42,10 +43,11 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
         querySelector(selector) {
             if (selector === '#gameover') return screen === 'settlement' ? node() : null;
             if (selector === '#btn-restart') return restart;
-            if (selector === '#npc-dialog') return ['chooser', 'difficulty', 'festival-diff'].includes(screen) ? node() : null;
+            if (selector === '#npc-dialog') return ['chooser', 'difficulty', 'festival-diff', 'dialog'].includes(screen) ? node() : null;
             if (selector === '#npc-text .lb-pick') return screen === 'chooser' && chooser ? node() : null;
             if (selector === '#npc-text .diff') return ['difficulty', 'festival-diff'].includes(screen) ? node() : null;
-            if (selector === '#npc-name') return { textContent: '選擇大廳' };
+            if (selector === '#npc-name') return { textContent: dialogTitle };
+            if (selector === '#npc-text') return { textContent: dialogText };
             if (selector === '#lobby-prompt') return festivalNear ? festivalHost : captainNear ? captain : null;
             if (selector === '#stages') return screen === 'stages' ? node() : null;
             if (selector === '#festival') return screen === 'festival' ? node() : null;
@@ -61,7 +63,7 @@ function environment({ screen = 'settlement', label = '單人大廳', dismiss = 
             if (selector === '#npc-options button') return extraButton ? [solo, publicLobby] : [solo];
             if (selector === '#npc-text .diff input[data-key]') return screen === 'festival-diff' ? [] : sliders;
             if (selector === '#npc-text [data-lb]') return [publicLobby];
-            if (selector === '.overlay') return screen === 'unknown' ? [node()] : [];
+            if (selector === '.overlay:not(#splash.menu)') return screen === 'unknown' ? [node()] : [];
             return [];
         }
     };
@@ -231,6 +233,15 @@ test('unknown overlays continue to stop automation', () => {
     env.farm.start();
     assert.equal(env.farm.running, false);
     assert.equal(env.soloClicks, 0);
+});
+
+test('a duration in an unknown dialog does not authorize its only action', () => {
+    const env = environment({ screen: 'dialog', label: '刪除',
+        dialogTitle: '刪除角色', dialogText: '剩餘 15 分鐘' });
+    env.farm.start();
+    assert.equal(env.soloClicks, 0);
+    assert.equal(env.farm.running, false);
+    assert.match(env.farm.status, /需要手動處理視窗/);
 });
 
 test('includes festival stage in stage list without requiring reading captain stages first', () => {
